@@ -20,7 +20,7 @@ export function initDatabase() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'therapist', 'manager')),
+      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'staff')),
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -63,14 +63,26 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS CLIENTS (
       client_id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      surname TEXT,
+      gender TEXT,
       phone TEXT UNIQUE NOT NULL,
       email TEXT,
+      address_line1 TEXT,
+      address_line2 TEXT,
+      pincode TEXT,
+      city TEXT,
+      state TEXT,
+      reg_no TEXT,
       notes TEXT,
       first_visit_date TEXT,
       last_visit_date TEXT,
       total_visits INTEGER NOT NULL DEFAULT 0,
       total_spend REAL NOT NULL DEFAULT 0.0,
       status TEXT NOT NULL DEFAULT 'active',
+      membership_tier TEXT,
+      membership_status TEXT DEFAULT 'active',
+      membership_started_at TEXT,
+      membership_expires_at TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -104,6 +116,12 @@ export function initDatabase() {
     );
   `);
 
+  // Safe migrations for membership columns
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_status TEXT DEFAULT 'active';`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_started_at TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_expires_at TEXT;`); } catch(e) {}
+
   seedData();
 }
 
@@ -120,8 +138,6 @@ function seedData() {
     const salt = bcrypt.genSaltSync(10);
     insertUser.run('Maison Admin', 'admin@maisonbeyou.com', bcrypt.hashSync('admin123', salt), 'admin');
     insertUser.run('Reception Desk', 'reception@maisonbeyou.com', bcrypt.hashSync('reception123', salt), 'reception');
-    insertUser.run('Dr. Ananya Sharma', 'therapist@maisonbeyou.com', bcrypt.hashSync('therapist123', salt), 'therapist');
-    insertUser.run('Studio Manager', 'manager@maisonbeyou.com', bcrypt.hashSync('manager123', salt), 'manager');
   }
 
   // Check if staff exist
@@ -367,6 +383,39 @@ function seedData() {
 
     const vTodayNeha = insertVisit.run(nehaId, today, 4800, 'fixed', 0, 0, 4800, 4800, 0, 'UPI', 'Paid', 2, 'First time 24K Gold Facial').lastInsertRowid;
     insertVisitService.run(vTodayNeha, 13, '24K Gold Radiance Facial', 4800, 1);
+  }
+
+  // Runtime Migration: Ensure columns exist in existing database tables
+  const clientCols = [
+    ['surname', 'TEXT'],
+    ['gender', 'TEXT'],
+    ['address_line1', 'TEXT'],
+    ['address_line2', 'TEXT'],
+    ['pincode', 'TEXT'],
+    ['city', 'TEXT'],
+    ['state', 'TEXT'],
+    ['reg_no', 'TEXT'],
+    ['marital_status', 'TEXT'],
+    ['dob', 'TEXT'],
+    ['anniversary_date', 'TEXT']
+  ];
+  for (const [colName, colType] of clientCols) {
+    try {
+      db.prepare(`ALTER TABLE CLIENTS ADD COLUMN ${colName} ${colType}`).run();
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Backfill reg_no for existing clients if missing
+  try {
+    const clientsMissingReg = db.prepare("SELECT client_id FROM CLIENTS WHERE reg_no IS NULL OR reg_no = ''").all();
+    const updateReg = db.prepare("UPDATE CLIENTS SET reg_no = ? WHERE client_id = ?");
+    for (const c of clientsMissingReg) {
+      updateReg.run(`MB-REG-${String(c.client_id).padStart(5, '0')}`, c.client_id);
+    }
+  } catch (e) {
+    // Ignore
   }
 }
 

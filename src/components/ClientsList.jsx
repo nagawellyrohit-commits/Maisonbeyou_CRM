@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserCheck, Plus, Eye, ArrowRight } from 'lucide-react';
+import { Search, UserCheck, Plus, Eye, ArrowRight, LayoutDashboard } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
-export default function ClientsList({ onOpenClient, onStartVisit }) {
+export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashboard }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -33,14 +33,48 @@ export default function ClientsList({ onOpenClient, onStartVisit }) {
           </p>
         </div>
 
-        <button
-          onClick={() => onStartVisit('new')}
-          className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px' }}
-        >
-          <Plus size={16} />
-          + Register New Client
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+          <button
+            onClick={() => onStartVisit('new')}
+            className="btn-primary"
+            style={{ padding: '10px 20px', fontSize: '14px' }}
+          >
+            <Plus size={16} />
+            Register New Client
+          </button>
+
+          {onBackToDashboard && (
+            <button
+              onClick={onBackToDashboard}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '13px',
+                fontWeight: '600',
+                color: '#B88B4A',
+                background: '#FAF6EE',
+                border: '1px solid rgba(218, 196, 147, 0.45)',
+                cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#F5ECE0';
+                e.currentTarget.style.borderColor = '#B88B4A';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.45)';
+              }}
+            >
+              <LayoutDashboard size={15} />
+              Dashboard
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Search Input */}
@@ -93,14 +127,21 @@ export default function ClientsList({ onOpenClient, onStartVisit }) {
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     <td style={{ padding: '14px 20px', fontWeight: '600', color: '#1C1917' }}>
-                      <span
-                        onClick={() => onOpenClient(c.client_id)}
-                        style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s' }}
-                        onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
-                        onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
-                      >
-                        {c.name}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span
+                          onClick={() => onOpenClient(c.client_id)}
+                          style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s' }}
+                          onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
+                          onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
+                        >
+                          {[c.name, c.surname].filter(Boolean).join(' ')}
+                        </span>
+                        {c.reg_no && (
+                          <span style={{ fontSize: '11px', color: '#B88B4A', fontWeight: '600', marginTop: '2px' }}>
+                            {c.reg_no}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '14px 16px', color: '#B88B4A', fontWeight: '500' }}>
                       {formatPhone(c.phone)}

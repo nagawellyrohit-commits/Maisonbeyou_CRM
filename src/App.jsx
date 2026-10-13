@@ -20,6 +20,7 @@ export default function App() {
   const [preSelectedVisitClient, setPreSelectedVisitClient] = useState(null);
   const [initialVisitType, setInitialVisitType] = useState(null);
   const [receiptVisitId, setReceiptVisitId] = useState(null);
+  const [activeVisitClient, setActiveVisitClient] = useState(null);
 
 
   // Check auth validity on load
@@ -44,6 +45,17 @@ export default function App() {
     return () => window.removeEventListener('auth_change', handleAuthChange);
   }, []);
 
+  const isAdmin = currentUser?.role === 'admin';
+
+  // Guard: if non-admin attempts to view protected tabs, redirect to dashboard
+  useEffect(() => {
+    if (currentUser && currentUser.role !== 'admin') {
+      if (activeTab !== 'dashboard' && activeTab !== 'new-visit') {
+        setActiveTab('dashboard');
+      }
+    }
+  }, [currentUser, activeTab]);
+
   // Handlers
   const handleStartVisit = (type = null, client = null) => {
     setInitialVisitType(type);
@@ -52,6 +64,7 @@ export default function App() {
   };
 
   const handleOpenClient = (clientId) => {
+    if (!isAdmin) return;
     setSelectedClientId(clientId);
     setActiveTab('client-profile');
   };
@@ -76,22 +89,33 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={(tab) => {
-          if (tab === 'new-visit') {
+          if (!isAdmin && tab !== 'dashboard' && tab !== 'new-visit') {
+            return;
+          }
+          if (tab === 'new-visit' || tab === 'dashboard') {
             setPreSelectedVisitClient(null);
             setInitialVisitType(null);
+            if (tab === 'dashboard') setActiveVisitClient(null);
           }
           setActiveTab(tab);
         }}
         currentUser={currentUser}
         setCurrentUser={setCurrentUser}
+        activeVisitClient={activeVisitClient}
       />
 
       <main className="app-container" style={{ flex: 1, width: '100%' }}>
         {activeTab === 'dashboard' && (
           <Dashboard
+            currentUser={currentUser}
             onStartVisit={handleStartVisit}
             onOpenClient={handleOpenClient}
             onOpenReceipt={handleOpenReceipt}
+            onBackToDashboard={() => {
+              setActiveVisitClient(null);
+              setActiveTab('dashboard');
+            }}
+            onNavigateTab={(tab) => setActiveTab(tab)}
           />
         )}
 
@@ -100,19 +124,27 @@ export default function App() {
             key={preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}
             preSelectedClient={preSelectedVisitClient}
             initialType={initialVisitType}
-            onCancel={() => setActiveTab('dashboard')}
-            onComplete={handleVisitComplete}
+            onClientChange={(client) => setActiveVisitClient(client)}
+            onCancel={() => {
+              setActiveVisitClient(null);
+              setActiveTab('dashboard');
+            }}
+            onComplete={(visitId) => {
+              setActiveVisitClient(null);
+              handleVisitComplete(visitId);
+            }}
           />
         )}
 
-        {activeTab === 'clients' && (
+        {isAdmin && activeTab === 'clients' && (
           <ClientsList
             onOpenClient={handleOpenClient}
             onStartVisit={handleStartVisit}
+            onBackToDashboard={() => setActiveTab('dashboard')}
           />
         )}
 
-        {activeTab === 'client-profile' && selectedClientId && (
+        {isAdmin && activeTab === 'client-profile' && selectedClientId && (
           <ClientProfile
             clientId={selectedClientId}
             onBack={() => setActiveTab('clients')}
@@ -121,15 +153,15 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'services' && (
+        {isAdmin && activeTab === 'services' && (
           <ServiceManagement />
         )}
 
-        {activeTab === 'staff' && (
+        {isAdmin && activeTab === 'staff' && (
           <StaffManagement />
         )}
 
-        {activeTab === 'reports' && (
+        {isAdmin && activeTab === 'reports' && (
           <ReportsView />
         )}
       </main>

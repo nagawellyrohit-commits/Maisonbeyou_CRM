@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Sparkles, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
 import { setStoredToken, setStoredUser } from '../utils/api';
+import logoImg from '../assets/logo.png';
+import brandLogoImg from '../assets/brand-logo.png';
 
 export default function Login({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
@@ -82,35 +84,25 @@ export default function Login({ onLoginSuccess }) {
         position: 'relative'
       }}>
         {/* Luxury crest */}
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <img 
-            src="/logo.png" 
+            src={brandLogoImg} 
             alt="Maison BeYou Logo" 
             style={{
-              width: '84px',
-              height: '84px',
+              height: '56px',
+              width: 'auto',
               objectFit: 'contain',
-              marginBottom: '16px',
-              filter: 'drop-shadow(0 4px 14px rgba(184, 139, 74, 0.25))'
+              marginBottom: '10px'
             }}
           />
-          <h1 style={{
-            fontFamily: 'var(--font-serif)',
-            fontSize: '26px',
-            letterSpacing: '0.04em',
-            color: '#1C1917',
-            marginBottom: '6px'
-          }}>
-            MAISON BEYOU
-          </h1>
           <p style={{
-            fontSize: '12px',
+            fontSize: '11px',
             textTransform: 'uppercase',
-            letterSpacing: '0.2em',
+            letterSpacing: '0.18em',
             color: '#B88B4A',
             fontWeight: '600'
           }}>
-            Women's Aesthetic Studio CRM
+            Aesthetic Studio & CRM
           </p>
         </div>
 
@@ -216,69 +208,51 @@ export default function Login({ onLoginSuccess }) {
             Quick Demo Staff Access
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('reception@maisonbeyou.com', 'reception123')}
-              style={{
-                padding: '8px 10px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '12px',
-                textAlign: 'left'
-              }}
-            >
-              <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>Reception</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Daily Desk Flow</div>
-            </button>
-
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <button
               type="button"
               onClick={() => handleDemoLogin('admin@maisonbeyou.com', 'admin123')}
               style={{
-                padding: '8px 10px',
+                padding: '12px 14px',
                 background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '12px',
-                textAlign: 'left'
+                border: '1.5px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '13px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
               }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = '#B88B4A'}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
             >
-              <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>Admin</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Full System Access</div>
+              <div style={{ fontWeight: '700', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#B88B4A', display: 'inline-block' }} />
+                Main Admin
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Full System & Edit Access</div>
             </button>
 
             <button
               type="button"
-              onClick={() => handleDemoLogin('therapist@maisonbeyou.com', 'therapist123')}
+              onClick={() => handleDemoLogin('reception@maisonbeyou.com', 'reception123')}
               style={{
-                padding: '8px 10px',
+                padding: '12px 14px',
                 background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '12px',
-                textAlign: 'left'
+                border: '1.5px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '13px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
               }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = '#B88B4A'}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border-color)'}
             >
-              <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>Therapist</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Assigned Services</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('manager@maisonbeyou.com', 'manager123')}
-              style={{
-                padding: '8px 10px',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '12px',
-                textAlign: 'left'
-              }}
-            >
-              <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>Manager</div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Reports & Analytics</div>
+              <div style={{ fontWeight: '700', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3B82F6', display: 'inline-block' }} />
+                Staff (Reception)
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Dashboard & Client Intake</div>
             </button>
           </div>
         </div>

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, Phone, Calendar, Clock, Sparkles, Plus, 
-  Receipt, Edit2, Check, User, DollarSign, ShieldAlert, FileText 
+  Receipt, Edit2, Check, User, DollarSign, ShieldAlert, FileText,
+  Mail, MapPin, MessageCircle
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
@@ -107,16 +108,130 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
               letterSpacing: '0.16em',
               color: '#B88B4A',
               fontWeight: '700',
-              marginBottom: '4px'
+              marginBottom: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
             }}>
-              Client Dossier
+              <span>Client Dossier</span>
+              {client.reg_no && (
+                <span style={{
+                  padding: '2px 8px',
+                  borderRadius: '9999px',
+                  background: 'var(--primary-subtle)',
+                  border: '1px solid var(--primary-border)',
+                  color: '#B88B4A',
+                  fontSize: '11px',
+                  fontWeight: '700'
+                }}>
+                  {client.reg_no}
+                </span>
+              )}
             </div>
             <h1 style={{ fontSize: '32px', color: '#1C1917', lineHeight: 1.1 }}>
-              {client.name.toUpperCase()}
+              {[client.name, client.surname].filter(Boolean).join(' ').toUpperCase()}
             </h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', fontSize: '16px', fontWeight: '600', color: '#B88B4A' }}>
-              <Phone size={16} />
-              <span>{formatPhone(client.phone)}</span>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '14px', marginTop: '8px', fontSize: '14px', color: 'var(--text-muted)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '600', color: '#B88B4A' }}>
+                <Phone size={15} />
+                <span>{formatPhone(client.phone)}</span>
+              </div>
+              {client.email && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Mail size={15} />
+                  <span>{client.email}</span>
+                </div>
+              )}
+              {client.gender && (
+                <span className="badge badge-neutral">
+                  {client.gender}
+                </span>
+              )}
+              {client.marital_status && (
+                <span className="badge badge-neutral" style={{ background: '#FAF6EE', border: '1px solid #DAC493', color: '#B88B4A', fontWeight: '600' }}>
+                  {client.marital_status}
+                </span>
+              )}
+              {client.dob && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px' }}>
+                  <Calendar size={13} color="#B88B4A" />
+                  <span>DOB: {formatDate(client.dob)}</span>
+                </div>
+              )}
+              {client.marital_status === 'Married' && client.anniversary_date && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px' }}>
+                  <Calendar size={13} color="#B88B4A" />
+                  <span>Anniversary: {formatDate(client.anniversary_date)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Address */}
+            {[client.address_line1, client.address_line2, client.city, client.state, client.pincode].filter(Boolean).length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                <MapPin size={14} color="#B88B4A" />
+                <span>
+                  {[client.address_line1, client.address_line2, client.city, client.state, client.pincode].filter(Boolean).join(', ')}
+                </span>
+              </div>
+            )}
+
+            {/* Direct Communication Hub (Image 2) */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const phone = (client.phone || '').replace(/\D/g, '');
+                  const fullPhone = phone.startsWith('91') ? phone : `91${phone}`;
+                  const name = [client.name, client.surname].filter(Boolean).join(' ');
+                  const regNo = client.reg_no || `MB-REG-${String(client.client_id).padStart(5, '0')}`;
+                  const msg = `Dear ${name},\n\nThank you for being a valued client at Maison BeYou Aesthetic & Beauty Studio!\n\n✨ Your Registration No: *${regNo}*\n\nWe look forward to welcoming you for your next bespoke luxury treatment.\n\nWarm regards,\nMaison BeYou Concierge`;
+                  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: '#25D366',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                <MessageCircle size={14} />
+                WhatsApp Thank You
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const name = [client.name, client.surname].filter(Boolean).join(' ');
+                  const regNo = client.reg_no || `MB-REG-${String(client.client_id).padStart(5, '0')}`;
+                  const subject = `Welcome to Maison BeYou | Registration No: ${regNo}`;
+                  const body = `Dear ${name},\n\nThank you for choosing Maison BeYou Aesthetic Studio!\n\nYour Registration Number is: ${regNo}\n\nWarm regards,\nMaison BeYou Concierge Team`;
+                  window.location.href = `mailto:${client.email || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                }}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: '#FAF6EE',
+                  color: '#B88B4A',
+                  border: '1px solid #DAC493',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                <Mail size={14} />
+                Email Mailer
+              </button>
             </div>
           </div>
 

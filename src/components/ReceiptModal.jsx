@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { X, Printer, Sparkles, CheckCircle2, Phone, Calendar } from 'lucide-react';
+import { X, Printer, Sparkles, CheckCircle2, Phone, Calendar, MessageCircle, Mail } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
+import logoImg from '../assets/logo.png';
 
 export default function ReceiptModal({ visitId, onClose }) {
   const [visit, setVisit] = useState(null);
@@ -103,7 +104,7 @@ export default function ReceiptModal({ visitId, onClose }) {
             {/* Studio Header */}
             <div style={{ textAlign: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '20px', marginBottom: '20px' }}>
               <img 
-                src="/logo.png" 
+                src={logoImg} 
                 alt="Maison BeYou" 
                 style={{ width: '52px', height: '52px', objectFit: 'contain', margin: '0 auto 8px auto', display: 'block' }} 
               />
@@ -122,8 +123,15 @@ export default function ReceiptModal({ visitId, onClose }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '20px' }}>
               <div>
                 <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>Billed To</div>
-                <div style={{ fontWeight: '700', fontSize: '15px', color: '#1C1917' }}>{visit.client_name}</div>
+                <div style={{ fontWeight: '700', fontSize: '15px', color: '#1C1917' }}>
+                  {visit.client_name} {visit.client_surname || ''}
+                </div>
                 <div style={{ color: '#B88B4A', fontWeight: '500' }}>{formatPhone(visit.client_phone)}</div>
+                {visit.client_reg_no && (
+                  <div style={{ fontSize: '11px', color: '#166534', fontWeight: '700', marginTop: '2px' }}>
+                    Reg No: {visit.client_reg_no}
+                  </div>
+                )}
               </div>
 
               <div style={{ textAlign: 'right' }}>
@@ -197,6 +205,73 @@ export default function ReceiptModal({ visitId, onClose }) {
               <p style={{ marginTop: '2px', fontSize: '11px', color: 'var(--text-light)' }}>
                 Reception Desk • Operational CRM Records
               </p>
+            </div>
+
+            {/* Communication Actions (Screen only) */}
+            <div className="no-print" style={{
+              marginTop: '16px',
+              display: 'flex',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const phone = visit.client_phone?.replace(/\D/g, '') || '';
+                  const fullPhone = phone.startsWith('91') ? phone : `91${phone}`;
+                  const name = [visit.client_name, visit.client_surname].filter(Boolean).join(' ');
+                  const regNo = visit.client_reg_no || '';
+                  const msg = `Dear ${name},\n\nThank you for visiting Maison BeYou Aesthetic Studio!\n\n✨ Registration No: *${regNo}*\nInvoice: *INV-MBY-${String(visit.visit_id).padStart(5, '0')}*\nTotal Paid: *${formatCurrency(visit.amount_paid)}*\n\nWe look forward to curating your next aesthetic privilege.`;
+                  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+                }}
+                style={{
+                  flex: 1,
+                  padding: '9px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: '#25D366',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                <MessageCircle size={15} />
+                WhatsApp Thank You
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const email = visit.client_email || '';
+                  const name = [visit.client_name, visit.client_surname].filter(Boolean).join(' ');
+                  const regNo = visit.client_reg_no || '';
+                  const subject = `Thank you for visiting Maison BeYou | Invoice INV-MBY-${String(visit.visit_id).padStart(5, '0')}`;
+                  const body = `Dear ${name},\n\nThank you for your visit to Maison BeYou Aesthetic & Beauty Studio!\n\nRegistration No: ${regNo}\nInvoice Number: INV-MBY-${String(visit.visit_id).padStart(5, '0')}\nTotal: ${formatCurrency(visit.total_amount)}\nAmount Paid: ${formatCurrency(visit.amount_paid)}\n\nWarm regards,\nMaison BeYou Concierge`;
+                  window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                }}
+                style={{
+                  flex: 1,
+                  padding: '9px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: '#FAF6EE',
+                  color: '#B88B4A',
+                  border: '1px solid #DAC493',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  cursor: 'pointer'
+                }}
+              >
+                <Mail size={15} />
+                Email Mailer
+              </button>
             </div>
           </div>
         )}

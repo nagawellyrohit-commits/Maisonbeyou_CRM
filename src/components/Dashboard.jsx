@@ -1,17 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle, 
-  Search, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2 
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
+  Search, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
+  Menu, ChevronDown, Scissors, Award, BarChart3
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
-export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt }) {
+export default function Dashboard({ currentUser, onStartVisit, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab }) {
+  const isAdmin = currentUser?.role === 'admin';
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const adminMenuRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ summary: {}, visits: [] });
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (adminMenuRef.current && !adminMenuRef.current.contains(event.target)) {
+        setShowAdminMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const fetchDashboardData = async () => {
     try {
@@ -27,8 +41,8 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
   };
 
   useEffect(() => {
-    fetchDashboardData();
-  }, []);
+      fetchDashboardData();
+    }, []);
 
   // Live client search
   useEffect(() => {
@@ -62,7 +76,7 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
-      
+
       {/* Top Banner / Hero with Search & Quick Action */}
       <div style={{
         background: '#FFFFFF',
@@ -112,7 +126,7 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search client by mobile (e.g. 98765...) or name"
+              placeholder="Search client by mobile (e.g. 98201...) or name"
               style={{
                 border: 'none',
                 background: 'transparent',
@@ -153,7 +167,11 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
                   <div
                     key={c.client_id}
                     onClick={() => {
-                      onOpenClient(c.client_id);
+                      if (isAdmin) {
+                        onOpenClient(c.client_id);
+                      } else {
+                        onStartVisit('regular', c);
+                      }
                       setSearchQuery('');
                     }}
                     style={{
@@ -209,16 +227,170 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
           )}
         </div>
 
-        {/* Primary Action Button */}
-        <div>
+        {/* Primary Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <button
             onClick={() => onStartVisit()}
             className="btn-primary"
-            style={{ padding: '14px 24px', fontSize: '15px' }}
+            style={{ padding: '13px 22px', fontSize: '14px' }}
           >
             <Plus size={18} />
-            + Record New Visit
+            Record New Visit
           </button>
+
+          {isAdmin ? (
+            <div ref={adminMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setShowAdminMenu(prev => !prev)}
+                title="Admin Management Menu"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '11px 20px',
+                  borderRadius: '9999px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#44403C',
+                  background: showAdminMenu ? '#F5ECE0' : '#FAF6EE',
+                  border: `1px solid ${showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)'}`,
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#F5ECE0';
+                  e.currentTarget.style.borderColor = '#B88B4A';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = showAdminMenu ? '#F5ECE0' : '#FAF6EE';
+                  e.currentTarget.style.borderColor = showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)';
+                }}
+              >
+                <Menu size={16} color="#B88B4A" />
+                <span>Menu</span>
+                <ChevronDown
+                  size={14}
+                  color="#B88B4A"
+                  style={{
+                    transform: showAdminMenu ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s ease'
+                  }}
+                />
+              </button>
+
+              {/* Admin Menu Dropdown */}
+              {showAdminMenu && (
+                <div style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 8px)',
+                  width: '230px',
+                  background: '#FFFFFF',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-lg)',
+                  border: '1px solid var(--border-color)',
+                  padding: '8px',
+                  zIndex: 100,
+                  animation: 'fadeIn 0.15s ease-out'
+                }}>
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: '#B88B4A',
+                    padding: '6px 10px 8px 10px',
+                    borderBottom: '1px solid var(--border-color)',
+                    marginBottom: '6px'
+                  }}>
+                    Admin Modules
+                  </div>
+
+                  {[
+                    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+                    { id: 'clients', label: 'Clients', icon: Users },
+                    { id: 'services', label: 'Services', icon: Scissors },
+                    { id: 'staff', label: 'Staff', icon: Award },
+                    { id: 'reports', label: 'Reports', icon: BarChart3 }
+                  ].map(item => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false);
+                          if (item.id === 'dashboard') {
+                            setSearchQuery('');
+                            fetchDashboardData();
+                            if (onBackToDashboard) onBackToDashboard();
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                          } else {
+                            if (onNavigateTab) onNavigateTab(item.id);
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '9px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '13.5px',
+                          fontWeight: item.id === 'dashboard' ? '600' : '500',
+                          color: item.id === 'dashboard' ? '#B88B4A' : 'var(--text-main)',
+                          background: item.id === 'dashboard' ? 'var(--primary-subtle)' : 'transparent',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          cursor: 'pointer',
+                          transition: 'background 0.1s ease',
+                          border: 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (item.id !== 'dashboard') e.currentTarget.style.background = 'var(--bg-card-subtle)';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (item.id !== 'dashboard') e.currentTarget.style.background = 'transparent';
+                        }}
+                      >
+                        <Icon size={16} color={item.id === 'dashboard' ? '#B88B4A' : 'var(--text-muted)'} />
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                fetchDashboardData();
+                if (onBackToDashboard) onBackToDashboard();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '11px 20px',
+                borderRadius: '9999px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#B88B4A',
+                background: '#FAF6EE',
+                border: '1px solid rgba(218, 196, 147, 0.45)',
+                cursor: 'pointer',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <LayoutDashboard size={17} color="#B88B4A" />
+              Refresh
+            </button>
+          )}
         </div>
       </div>
 
@@ -436,14 +608,20 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
                     >
                       {/* Client Name */}
                       <td style={{ padding: '14px 20px' }}>
-                        <div
-                          onClick={() => onOpenClient(v.client_id)}
-                          style={{ fontWeight: '600', color: '#1C1917', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s' }}
-                          onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
-                          onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
-                        >
-                          {v.client_name}
-                        </div>
+                        {isAdmin ? (
+                          <div
+                            onClick={() => onOpenClient(v.client_id)}
+                            style={{ fontWeight: '600', color: '#1C1917', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s' }}
+                            onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
+                            onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
+                          >
+                            {v.client_name}
+                          </div>
+                        ) : (
+                          <div style={{ fontWeight: '600', color: '#1C1917' }}>
+                            {v.client_name}
+                          </div>
+                        )}
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                           {formatPhone(v.client_phone)}
                         </div>
@@ -530,25 +708,27 @@ export default function Dashboard({ onStartVisit, onOpenClient, onOpenReceipt })
                             Bill
                           </button>
 
-                          <button
-                            onClick={() => onOpenClient(v.client_id)}
-                            title="Open Client Profile"
-                            style={{
-                              padding: '6px 10px',
-                              borderRadius: 'var(--radius-sm)',
-                              background: 'var(--primary-subtle)',
-                              border: '1px solid var(--primary-border)',
-                              fontSize: '12px',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontWeight: '600',
-                              color: '#B88B4A'
-                            }}
-                          >
-                            <Eye size={14} />
-                            Profile
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => onOpenClient(v.client_id)}
+                              title="Open Client Profile"
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: 'var(--radius-sm)',
+                                background: 'var(--primary-subtle)',
+                                border: '1px solid var(--primary-border)',
+                                fontSize: '12px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontWeight: '600',
+                                color: '#B88B4A'
+                              }}
+                            >
+                              <Eye size={14} />
+                              Profile
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
