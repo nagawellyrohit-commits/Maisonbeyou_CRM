@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ArrowLeft, Phone, Calendar, Clock, Sparkles, Plus, 
-  Receipt, Edit2, Check, User, DollarSign, ShieldAlert, FileText,
+  ArrowLeft, Phone, Calendar, Clock, Sparkles, 
+  Receipt, Check, User, DollarSign, ShieldAlert, FileText,
   Mail, MapPin, MessageCircle
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
-export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenReceipt }) {
+export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('services'); // 'services' | 'payments'
-  const [isEditingNotes, setIsEditingNotes] = useState(false);
-  const [notes, setNotes] = useState('');
-  const [savingNotes, setSavingNotes] = useState(false);
 
   useEffect(() => {
     async function loadClient() {
@@ -21,7 +18,6 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
         setLoading(true);
         const res = await apiRequest(`/clients/${clientId}`);
         setData(res);
-        setNotes(res.client?.notes || '');
       } catch (err) {
         setError(err.message);
       } finally {
@@ -30,25 +26,6 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
     }
     loadClient();
   }, [clientId]);
-
-  const handleSaveNotes = async () => {
-    try {
-      setSavingNotes(true);
-      await apiRequest(`/clients/${clientId}`, {
-        method: 'PUT',
-        body: JSON.stringify({ notes })
-      });
-      setIsEditingNotes(false);
-      setData(prev => ({
-        ...prev,
-        client: { ...prev.client, notes }
-      }));
-    } catch (err) {
-      alert('Failed to save notes: ' + err.message);
-    } finally {
-      setSavingNotes(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -72,25 +49,16 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
   const { client, all_service_history = [], visit_history = [] } = data;
 
   return (
-    <div className="animate-fade-in" style={{ maxWidth: '1100px', margin: '20px auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-fade-in" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
       {/* Top navigation */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
         <button
           onClick={onBack}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-muted)' }}
         >
           <ArrowLeft size={16} />
           Back
-        </button>
-
-        <button
-          onClick={() => onStartVisit('regular', client)}
-          className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px' }}
-        >
-          <Plus size={16} />
-          + Start New Visit for {client.name}
         </button>
       </div>
 
@@ -238,7 +206,7 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
           {/* Stats Bar */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))',
             gap: '16px',
             background: '#FFFFFF',
             padding: '16px 24px',
@@ -284,60 +252,7 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
           </div>
         </div>
 
-        {/* Client Notes / Aesthetic Preferences */}
-        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '700', color: 'var(--text-muted)' }}>
-              Client Notes & Treatment Preferences
-            </span>
-            {!isEditingNotes ? (
-              <button
-                onClick={() => setIsEditingNotes(true)}
-                style={{ fontSize: '12px', color: '#B88B4A', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                <Edit2 size={13} /> Edit Notes
-              </button>
-            ) : (
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={() => setIsEditingNotes(false)}
-                  style={{ fontSize: '12px', color: 'var(--text-muted)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveNotes}
-                  disabled={savingNotes}
-                  style={{ fontSize: '12px', color: '#166534', fontWeight: '700' }}
-                >
-                  {savingNotes ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            )}
-          </div>
 
-          {isEditingNotes ? (
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Add skin sensitivity notes, tea preferences, favorite therapists..."
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-color)',
-                outline: 'none',
-                background: '#FFFFFF',
-                fontSize: '13px'
-              }}
-            />
-          ) : (
-            <div style={{ fontSize: '14px', color: client.notes ? 'var(--text-main)' : 'var(--text-light)', fontStyle: client.notes ? 'normal' : 'italic' }}>
-              {client.notes || 'No treatment preferences or allergy notes recorded yet.'}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Tabs: Service History vs Payment History */}
@@ -377,13 +292,13 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
 
         {/* Tab 1: Service History Table (Section 19 Requirement) */}
         {activeTab === 'services' && (
-          <div>
+          <div className="horizontal-scroller" style={{ overflowX: 'auto' }}>
             {all_service_history.length === 0 ? (
               <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 No service history found.
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <table style={{ width: '100%', minWidth: '600px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase' }}>
                     <th style={{ padding: '14px 20px', fontWeight: '600' }}>Date</th>
@@ -417,13 +332,13 @@ export default function ClientProfile({ clientId, onBack, onStartVisit, onOpenRe
 
         {/* Tab 2: Visit & Payment History Table (Section 19 Requirement) */}
         {activeTab === 'payments' && (
-          <div>
+          <div className="horizontal-scroller" style={{ overflowX: 'auto' }}>
             {visit_history.length === 0 ? (
               <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 No visit records found.
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <table style={{ width: '100%', minWidth: '800px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase' }}>
                     <th style={{ padding: '14px 20px', fontWeight: '600' }}>Visit Date</th>

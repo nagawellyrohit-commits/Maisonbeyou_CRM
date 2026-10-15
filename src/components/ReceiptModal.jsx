@@ -99,7 +99,7 @@ export default function ReceiptModal({ visitId, onClose }) {
             Invoice not found.
           </div>
         ) : (
-          <div style={{ padding: '32px', overflowY: 'auto' }}>
+          <div style={{ padding: '24px 20px', overflowY: 'auto' }}>
             
             {/* Studio Header */}
             <div style={{ textAlign: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '20px', marginBottom: '20px' }}>
@@ -138,6 +138,11 @@ export default function ReceiptModal({ visitId, onClose }) {
                 <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>Invoice No</div>
                 <div style={{ fontWeight: '700', color: '#1C1917' }}>INV-MBY-{String(visit.visit_id).padStart(5, '0')}</div>
                 <div style={{ color: 'var(--text-muted)' }}>{formatDate(visit.visit_date)}</div>
+                {visit.service_time && (
+                  <div style={{ fontSize: '11px', color: '#B88B4A', fontWeight: '700', marginTop: '2px' }}>
+                    Scheduled Time: {visit.service_time}
+                  </div>
+                )}
               </div>
             </div>
 

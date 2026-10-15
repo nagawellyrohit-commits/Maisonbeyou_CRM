@@ -13,10 +13,15 @@ import { getStoredToken, getStoredUser, apiRequest } from './utils/api';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState(getStoredUser());
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => {
+    const user = getStoredUser();
+    return user?.role === 'visitor' ? 'new-visit' : 'dashboard';
+  });
+  const [wizardResetKey, setWizardResetKey] = useState(0);
   
   // Navigation contextual state
   const [selectedClientId, setSelectedClientId] = useState(null);
+  const [clientProfileSource, setClientProfileSource] = useState('dashboard');
   const [preSelectedVisitClient, setPreSelectedVisitClient] = useState(null);
   const [initialVisitType, setInitialVisitType] = useState(null);
   const [receiptVisitId, setReceiptVisitId] = useState(null);
@@ -30,6 +35,12 @@ export default function App() {
       apiRequest('/auth/me')
         .then(res => {
           setCurrentUser(res.user);
+          if (res.user?.role === 'visitor') {
+            setActiveTab('new-visit');
+          } else {
+            setActiveTab('dashboard');
+            setActiveVisitClient(null);
+          }
         })
         .catch(() => {
           setCurrentUser(null);
@@ -39,7 +50,14 @@ export default function App() {
     }
 
     const handleAuthChange = () => {
-      setCurrentUser(getStoredUser());
+      const u = getStoredUser();
+      setCurrentUser(u);
+      if (u?.role === 'visitor') {
+        setActiveTab('new-visit');
+      } else {
+        setActiveTab('dashboard');
+        setActiveVisitClient(null);
+      }
     };
     window.addEventListener('auth_change', handleAuthChange);
     return () => window.removeEventListener('auth_change', handleAuthChange);
@@ -47,25 +65,28 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin';
 
-  // Guard: if non-admin attempts to view protected tabs, redirect to dashboard
+  // Guard: Role-based tab permissions
   useEffect(() => {
-    if (currentUser && currentUser.role !== 'admin') {
-      if (activeTab !== 'dashboard' && activeTab !== 'new-visit') {
-        setActiveTab('dashboard');
+    if (currentUser) {
+      if (currentUser.role === 'visitor') {
+        if (activeTab !== 'new-visit') {
+          setActiveTab('new-visit');
+        }
+      } else {
+        // Reception and Admin must never see visitor wizard ('new-visit')
+        if (activeTab === 'new-visit') {
+          setActiveTab('dashboard');
+        } else if (!isAdmin && activeTab !== 'dashboard' && activeTab !== 'client-profile' && activeTab !== 'clients') {
+          setActiveTab('dashboard');
+        }
       }
     }
-  }, [currentUser, activeTab]);
+  }, [currentUser, activeTab, isAdmin]);
 
   // Handlers
-  const handleStartVisit = (type = null, client = null) => {
-    setInitialVisitType(type);
-    setPreSelectedVisitClient(client);
-    setActiveTab('new-visit');
-  };
-
-  const handleOpenClient = (clientId) => {
-    if (!isAdmin) return;
+  const handleOpenClient = (clientId, source = 'dashboard') => {
     setSelectedClientId(clientId);
+    setClientProfileSource(source);
     setActiveTab('client-profile');
   };
 
@@ -81,7 +102,22 @@ export default function App() {
   };
 
   if (!currentUser) {
-    return <Login onLoginSuccess={(user) => setCurrentUser(user)} />;
+    return (
+      <Login
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          setActiveVisitClient(null);
+          setPreSelectedVisitClient(null);
+          setInitialVisitType(null);
+          if (user?.role === 'visitor') {
+            setActiveTab('new-visit');
+            setWizardResetKey(k => k + 1);
+          } else {
+            setActiveTab('dashboard');
+          }
+        }}
+      />
+    );
   }
 
   return (
@@ -89,26 +125,56 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={(tab) => {
-          if (!isAdmin && tab !== 'dashboard' && tab !== 'new-visit') {
-            return;
-          }
-          if (tab === 'new-visit' || tab === 'dashboard') {
+          if (currentUser?.role === 'visitor') {
             setPreSelectedVisitClient(null);
             setInitialVisitType(null);
-            if (tab === 'dashboard') setActiveVisitClient(null);
+            setActiveVisitClient(null);
+            setWizardResetKey(k => k + 1);
+            setActiveTab('new-visit');
+            return;
+          }
+          if (tab === 'new-visit') {
+            return;
+          }
+          if (!isAdmin && tab !== 'dashboard' && tab !== 'client-profile' && tab !== 'clients') {
+            return;
+          }
+          if (tab === 'dashboard') {
+            setPreSelectedVisitClient(null);
+            setInitialVisitType(null);
+            setActiveVisitClient(null);
           }
           setActiveTab(tab);
         }}
         currentUser={currentUser}
         setCurrentUser={setCurrentUser}
         activeVisitClient={activeVisitClient}
+        onResetVisit={() => {
+          setActiveVisitClient(null);
+          setPreSelectedVisitClient(null);
+          setInitialVisitType(null);
+          setWizardResetKey(k => k + 1);
+          if (currentUser?.role !== 'visitor') {
+            setActiveTab('dashboard');
+          } else {
+            setActiveTab('new-visit');
+          }
+        }}
       />
 
-      <main className="app-container" style={{ flex: 1, width: '100%' }}>
+      <main
+        className="app-container"
+        style={{
+          flex: 1,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          ...(activeTab === 'new-visit' ? { paddingBottom: '24px' } : {})
+        }}
+      >
         {activeTab === 'dashboard' && (
           <Dashboard
             currentUser={currentUser}
-            onStartVisit={handleStartVisit}
             onOpenClient={handleOpenClient}
             onOpenReceipt={handleOpenReceipt}
             onBackToDashboard={() => {
@@ -121,34 +187,48 @@ export default function App() {
 
         {activeTab === 'new-visit' && (
           <NewVisitWizard
-            key={preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}
+            key={`${wizardResetKey}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
             preSelectedClient={preSelectedVisitClient}
             initialType={initialVisitType}
+            currentUser={currentUser}
             onClientChange={(client) => setActiveVisitClient(client)}
             onCancel={() => {
               setActiveVisitClient(null);
-              setActiveTab('dashboard');
+              setPreSelectedVisitClient(null);
+              setInitialVisitType(null);
+              if (currentUser?.role === 'visitor') {
+                setWizardResetKey(k => k + 1);
+              } else {
+                setActiveTab('dashboard');
+              }
             }}
             onComplete={(visitId) => {
               setActiveVisitClient(null);
-              handleVisitComplete(visitId);
+              setPreSelectedVisitClient(null);
+              setInitialVisitType(null);
+              if (currentUser?.role === 'visitor') {
+                if (visitId) {
+                  setReceiptVisitId(visitId);
+                }
+                setWizardResetKey(k => k + 1);
+              } else {
+                handleVisitComplete(visitId);
+              }
             }}
           />
         )}
 
-        {isAdmin && activeTab === 'clients' && (
+        {(isAdmin || currentUser?.role === 'reception') && activeTab === 'clients' && (
           <ClientsList
-            onOpenClient={handleOpenClient}
-            onStartVisit={handleStartVisit}
+            onOpenClient={(id) => handleOpenClient(id, 'clients')}
             onBackToDashboard={() => setActiveTab('dashboard')}
           />
         )}
 
-        {isAdmin && activeTab === 'client-profile' && selectedClientId && (
+        {(isAdmin || currentUser?.role === 'reception') && activeTab === 'client-profile' && selectedClientId && (
           <ClientProfile
             clientId={selectedClientId}
-            onBack={() => setActiveTab('clients')}
-            onStartVisit={handleStartVisit}
+            onBack={() => setActiveTab(clientProfileSource === 'clients' ? 'clients' : 'dashboard')}
             onOpenReceipt={handleOpenReceipt}
           />
         )}

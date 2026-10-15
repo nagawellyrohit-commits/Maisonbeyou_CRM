@@ -299,8 +299,8 @@ export default function ServiceManagement() {
               </div>
 
               {/* Sub-services table */}
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+              <div className="horizontal-scroller" style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', minWidth: '680px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
                   <thead>
                     <tr style={{ background: '#FFFFFF', borderBottom: '1px solid var(--border-light)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>
                       <th style={{ padding: '12px 24px', fontWeight: '600' }}>Sub-Service Name</th>
@@ -338,7 +338,7 @@ export default function ServiceManagement() {
                             </span>
                           </td>
                           <td style={{ padding: '14px 24px', textAlign: 'right' }}>
-                            <div style={{ display: 'inline-flex', gap: '8px' }}>
+                            <div style={{ display: 'inline-flex', gap: '8px', whiteSpace: 'nowrap' }}>
                               <button
                                 onClick={() => handleToggleServActive(s)}
                                 style={{

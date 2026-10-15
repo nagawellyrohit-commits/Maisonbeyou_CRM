@@ -4,15 +4,20 @@ import { getStoredUser, setStoredToken, setStoredUser } from '../utils/api';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
-export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient }) {
+export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit }) {
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [showDashboardConfirm, setShowDashboardConfirm] = useState(false);
+  const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
   const switchMenuRef = useRef(null);
+  const clientMenuRef = useRef(null);
 
   useEffect(() => {
     function handleClickOutside(event) {
       if (switchMenuRef.current && !switchMenuRef.current.contains(event.target)) {
         setShowSwitchMenu(false);
+      }
+      if (clientMenuRef.current && !clientMenuRef.current.contains(event.target)) {
+        setIsClientMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
@@ -38,6 +43,12 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
         setStoredUser(data.user);
         setCurrentUser(data.user);
         setShowSwitchMenu(false);
+        if (onResetVisit) onResetVisit();
+        if (data.user?.role === 'visitor') {
+          setActiveTab('new-visit');
+        } else {
+          setActiveTab('dashboard');
+        }
       }
     } catch (e) {
       console.error(e);
@@ -46,7 +57,8 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
 
   const roleLabels = {
     admin: 'Administrator',
-    reception: 'Staff (Reception Desk)',
+    reception: 'Reception Desk',
+    visitor: 'Visitor Desk',
     staff: 'Staff Member'
   };
 
@@ -75,83 +87,401 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
       zIndex: 50,
       boxShadow: 'var(--shadow-sm)'
     }}>
-      <div style={{
-        maxWidth: '1420px',
-        margin: '0 auto',
-        padding: '0 24px',
-        height: '72px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
+      <div className="header-container">
         {/* Brand identity */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
           <div 
             onClick={() => {
-              if (activeTab !== 'dashboard') {
+              if (currentUser?.role === 'visitor') {
+                if (activeVisitClient) {
+                  setShowDashboardConfirm(true);
+                } else {
+                  setActiveTab('new-visit');
+                }
+              } else if (activeTab !== 'dashboard') {
                 setShowDashboardConfirm(true);
               } else {
                 setActiveTab('dashboard');
               }
             }}
             style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-            title="Maison BeYou Dashboard"
+            title={currentUser?.role === 'visitor' ? "Visitor Reception Flow" : "Maison BeYou Dashboard"}
           >
             <img 
               src={brandLogoImg} 
               alt="Maison BeYou" 
-              style={{
-                height: '48px',
-                width: 'auto',
-                objectFit: 'contain',
-                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.06))'
-              }}
+              className="navbar-brand-logo"
             />
           </div>
         </div>
 
         {/* Right side info & user controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          {/* If on Dashboard: Show normal user profile badge with role switcher */}
-          {activeTab === 'dashboard' ? (
-            <div ref={switchMenuRef} style={{ position: 'relative' }}>
-              <div 
-                onClick={() => setShowSwitchMenu(!showSwitchMenu)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+          {/* Priority 1: When a Client is Active in the Visit Flow (visitor desk only)
+              Display the Client Profile Pill (Image 2) in place of Visitor Desk (Image 3) */}
+          {currentUser?.role === 'visitor' && activeVisitClient && activeVisitClient.name ? (
+            <div ref={clientMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setIsClientMenuOpen(prev => !prev)}
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  padding: '6px 14px',
-                  borderRadius: 'var(--radius-md)',
+                  gap: '8px',
+                  background: 'linear-gradient(135deg, #1C1917 0%, #292524 100%)',
+                  border: '1.5px solid #B88B4A',
+                  padding: '5px 12px 5px 6px',
+                  borderRadius: '9999px',
                   cursor: 'pointer',
-                  background: showSwitchMenu ? 'var(--bg-surface)' : 'transparent',
-                  border: '1px solid var(--border-color)',
-                  transition: 'all 0.15s ease'
+                  boxShadow: '0 3px 12px rgba(184, 139, 74, 0.25)',
+                  transition: 'all 0.2s ease',
+                  color: '#FAF7F2',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box'
                 }}
+                title="Click to view client profile, membership details, or log out"
               >
+                {/* Avatar Icon / Initials */}
                 <div style={{
                   width: '32px',
                   height: '32px',
                   borderRadius: '50%',
-                  background: 'var(--primary-subtle)',
-                  color: 'var(--primary-hover)',
+                  background: activeVisitClient.isMember
+                    ? 'linear-gradient(135deg, #B88B4A 0%, #D4AF37 100%)'
+                    : 'linear-gradient(135deg, #44403C 0%, #292524 100%)',
+                  color: activeVisitClient.isMember ? '#1C1917' : '#FAF7F2',
+                  fontWeight: '800',
+                  fontSize: '12px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontWeight: '700',
-                  fontSize: '13px'
+                  border: '1px solid #B88B4A',
+                  letterSpacing: '0.04em',
+                  flexShrink: 0
                 }}>
-                  {currentUser?.name?.charAt(0) || 'U'}
+                  {getClientInitials(activeVisitClient.name)}
                 </div>
-                <div style={{ textAlign: 'left', lineHeight: 1.2 }}>
-                  <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-main)' }}>
-                    {currentUser?.name || 'Staff User'}
+
+                {/* Name & Tier Info */}
+                <div style={{ textAlign: 'left', lineHeight: 1.25, minWidth: 0, maxWidth: '140px', overflow: 'hidden' }}>
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#FAF7F2', display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeVisitClient.name}</span>
+                    {activeVisitClient.isMember && <span style={{ fontSize: '12px' }}>💎</span>}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#B88B4A', fontWeight: '500' }}>
+                  <div style={{ fontSize: '11px', color: activeVisitClient.isMember ? '#DAC493' : '#A8A29E', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeVisitClient.isMember ? activeVisitClient.membershipTier : 'Non-Member'}</span>
+                    <span>•</span>
+                    <span style={{ fontFamily: 'monospace', color: activeVisitClient.isMember ? '#F5EADB' : '#E7E5E4' }}>{activeVisitClient.formattedId || activeVisitClient.client_id || 'MB-001'}</span>
+                  </div>
+                </div>
+
+                {/* Chevron Indicator */}
+                <ChevronDown
+                  size={14}
+                  style={{
+                    color: '#DAC493',
+                    marginLeft: '2px',
+                    transform: isClientMenuOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 0.2s ease'
+                  }}
+                />
+              </button>
+
+              {/* Client Profile Dropdown Menu */}
+              {isClientMenuOpen && (
+                <div
+                  className="animate-fade-in"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 'calc(100% + 10px)',
+                    width: '340px',
+                    maxWidth: 'calc(100vw - 32px)',
+                    background: '#FFFFFF',
+                    borderRadius: '16px',
+                    border: '1.5px solid #DAC493',
+                    boxShadow: '0 16px 40px rgba(0, 0, 0, 0.18)',
+                    padding: '18px 20px',
+                    zIndex: 1000,
+                    color: '#1C1917',
+                    textAlign: 'left'
+                  }}
+                >
+                  {/* 1. Client Dossier & Contact Header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+                    <div style={{
+                      width: '44px',
+                      height: '44px',
+                      borderRadius: '50%',
+                      background: activeVisitClient.isMember
+                        ? 'linear-gradient(135deg, #B88B4A 0%, #D4AF37 100%)'
+                        : 'linear-gradient(135deg, #292524 0%, #1C1917 100%)',
+                      color: activeVisitClient.isMember ? '#1C1917' : '#FAF7F2',
+                      fontWeight: '800',
+                      fontSize: '15px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '1.5px solid #B88B4A',
+                      boxShadow: '0 2px 8px rgba(184, 139, 74, 0.25)',
+                      flexShrink: 0
+                    }}>
+                      {getClientInitials(activeVisitClient.name)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {activeVisitClient.name} {activeVisitClient.surname || ''}
+                        </div>
+                        {activeVisitClient.formattedId && (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontFamily: 'monospace',
+                            fontWeight: '800',
+                            letterSpacing: '0.04em',
+                            color: activeVisitClient.isMember ? '#9F7335' : '#57534E',
+                            background: activeVisitClient.isMember ? 'rgba(184, 139, 74, 0.14)' : '#F5F5F4',
+                            border: `1px solid ${activeVisitClient.isMember ? 'rgba(184, 139, 74, 0.4)' : '#E7E5E4'}`,
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            flexShrink: 0
+                          }}>
+                            {activeVisitClient.formattedId}
+                          </span>
+                        )}
+                      </div>
+                      {activeVisitClient.phone && (
+                        <div style={{ fontSize: '12px', color: '#B88B4A', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
+                          <Phone size={11} />
+                          <span>{formatClientPhone(activeVisitClient.phone)}</span>
+                        </div>
+                      )}
+                      {activeVisitClient.email && (
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '1px' }}>
+                          <Mail size={10} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeVisitClient.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    background: '#FAF7F2',
+                    borderRadius: 'var(--radius-sm)',
+                    marginBottom: '16px',
+                    fontSize: '11.5px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Client Type:</span>
+                      <strong style={{ color: '#1C1917' }}>
+                        {activeVisitClient.type === 'regular' ? 'Regular Client' : 'New Guest Profile'}
+                      </strong>
+                    </div>
+                    <div style={{ height: '1px', background: 'var(--border-color)', opacity: 0.7 }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>
+                        {activeVisitClient.badgeLabel || (activeVisitClient.isMember ? 'Membership ID' : 'Client ID')}:
+                      </span>
+                      <span style={{
+                        fontFamily: 'monospace',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        letterSpacing: '0.05em',
+                        color: activeVisitClient.isMember ? '#9F7335' : '#1C1917',
+                        background: activeVisitClient.isMember ? '#FAF3E3' : '#FFFFFF',
+                        border: `1px solid ${activeVisitClient.isMember ? '#DAC493' : '#E5E7EB'}`,
+                        padding: '2px 8px',
+                        borderRadius: '5px'
+                      }}>
+                        {activeVisitClient.formattedId || activeVisitClient.client_id || 'MB-001'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* DIVIDER */}
+                  <div style={{ height: '1px', background: 'var(--border-color)', marginBottom: '14px' }} />
+
+                  {/* OPTION 1: Current Membership Status */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800', marginBottom: '6px' }}>
+                      1. Membership Status
+                    </div>
+                    {activeVisitClient.isMember ? (
+                      <div style={{
+                        background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+                        border: `1.5px solid ${activeVisitClient.expiryInfo?.isExpired ? '#FCA5A5' : (activeVisitClient.expiryInfo?.isExpiringSoon ? '#F59E0B' : '#DAC493')}`,
+                        borderRadius: 'var(--radius-md)',
+                        padding: '12px 14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: '800', color: '#1C1917', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>💎</span>
+                            <span>{activeVisitClient.membershipTier}</span>
+                          </span>
+                          <span style={{
+                            fontSize: '10px',
+                            background: activeVisitClient.expiryInfo?.isExpired ? '#DC2626' : (activeVisitClient.expiryInfo?.isExpiringSoon ? '#D97706' : '#B88B4A'),
+                            color: '#FFFFFF',
+                            padding: '2px 8px',
+                            borderRadius: '9999px',
+                            fontWeight: '800'
+                          }}>
+                            {activeVisitClient.expiryInfo?.isExpired ? 'EXPIRED' : (activeVisitClient.expiryInfo?.isExpiringSoon ? `EXPIRES IN ${activeVisitClient.expiryInfo.daysRemaining}D` : 'ACTIVE VIP')}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '4px 0' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>Membership ID:</span>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            letterSpacing: '0.04em',
+                            color: '#9F7335',
+                            background: 'rgba(255, 255, 255, 0.9)',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid #DAC493'
+                          }}>
+                            {activeVisitClient.formattedId}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                          {activeVisitClient.planInfo?.priceFormatted ? `${activeVisitClient.planInfo.priceFormatted} Package • ` : ''}
+                          Exclusive VIP Privileges Active
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        background: '#FAF7F2',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-md)',
+                        padding: '12px 14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '13.5px', fontWeight: '700', color: '#1C1917', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>⚪</span>
+                            <span>Non-Member</span>
+                          </span>
+                          <span style={{ fontSize: '10px', background: '#E5E7EB', color: '#4B5563', padding: '2px 8px', borderRadius: '9999px', fontWeight: '700' }}>
+                            NO ACTIVE PLAN
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: '4px 0' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>Client ID:</span>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            letterSpacing: '0.04em',
+                            color: '#1C1917',
+                            background: '#FFFFFF',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-color)'
+                          }}>
+                            {activeVisitClient.formattedId || activeVisitClient.client_id || 'MB-001'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                          Client is visiting as a non-member.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* OPTION 2: Log Out Client */}
+                  <div>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#DC2626', fontWeight: '800', marginBottom: '6px' }}>
+                      2. Client Session
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsClientMenuOpen(false);
+                        setShowDashboardConfirm(true);
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        background: '#FEF2F2',
+                        border: '1.5px solid #FCA5A5',
+                        color: '#991B1B',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        textAlign: 'left'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#FEE2E2';
+                        e.currentTarget.style.borderColor = '#EF4444';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#FEF2F2';
+                        e.currentTarget.style.borderColor = '#FCA5A5';
+                      }}
+                    >
+                      <div style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '50%',
+                        background: '#DC2626',
+                        color: '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        <LogOut size={14} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: '800', color: '#991B1B' }}>
+                          Log Out Client Session
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#B91C1C' }}>
+                          Clear session & return to Visitor Desk
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (activeTab === 'dashboard' || currentUser?.role === 'visitor') ? (
+            /* Visitor Desk or Dashboard User Profile pill (Image 3) */
+            <div ref={switchMenuRef} style={{ position: 'relative' }}>
+              <div 
+                onClick={() => setShowSwitchMenu(!showSwitchMenu)}
+                className="navbar-user-pill"
+                style={{
+                  background: showSwitchMenu ? 'var(--bg-surface)' : 'transparent',
+                }}
+              >
+                <div 
+                  className="navbar-user-avatar"
+                  style={{
+                    background: currentUser?.role === 'visitor' ? '#ECFDF5' : (currentUser?.role === 'reception' ? '#EFF6FF' : 'var(--primary-subtle)'),
+                    color: currentUser?.role === 'visitor' ? '#059669' : (currentUser?.role === 'reception' ? '#1D4ED8' : 'var(--primary-hover)'),
+                  }}
+                >
+                  {currentUser?.name?.charAt(0) || (currentUser?.role === 'reception' ? 'R' : 'V')}
+                </div>
+                <div className="navbar-user-info">
+                  <div className="navbar-user-name">
+                    {currentUser?.name || (currentUser?.role === 'reception' ? 'Reception Desk' : 'Staff User')}
+                  </div>
+                  <div className="navbar-user-role">
                     {roleLabels[currentUser?.role] || currentUser?.role}
                   </div>
                 </div>
-                <ChevronDown size={14} color="var(--text-muted)" />
+                <ChevronDown size={14} color="var(--text-muted)" className="navbar-user-chevron" />
               </div>
 
               {/* Quick Switch Role Dropdown */}
@@ -161,6 +491,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   right: 0,
                   top: 'calc(100% + 8px)',
                   width: '260px',
+                  maxWidth: 'calc(100vw - 32px)',
                   background: '#FFFFFF',
                   borderRadius: 'var(--radius-md)',
                   boxShadow: 'var(--shadow-lg)',
@@ -206,6 +537,24 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   >
                     <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Reception Desk</span>
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard & Client Intake</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleQuickSwitch('visitor@maisonbeyou.com', 'visitor123')}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '13px',
+                      background: currentUser?.role === 'visitor' ? 'var(--primary-subtle)' : 'transparent',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Visitor Desk</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Direct Client Intake Flow</span>
                   </button>
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
@@ -552,7 +901,11 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     type="button"
                     onClick={() => {
                       setShowDashboardConfirm(false);
-                      setActiveTab('dashboard');
+                      if (onResetVisit) {
+                        onResetVisit();
+                      } else {
+                        setActiveTab(currentUser?.role === 'visitor' ? 'new-visit' : 'dashboard');
+                      }
                     }}
                     style={{
                       padding: '12px 16px',
@@ -625,7 +978,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     type="button"
                     onClick={() => {
                       setShowDashboardConfirm(false);
-                      setActiveTab('dashboard');
+                      setActiveTab(currentUser?.role === 'visitor' ? 'new-visit' : 'dashboard');
                     }}
                     style={{
                       padding: '12px 18px',
@@ -640,7 +993,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       transition: 'all 0.15s ease'
                     }}
                   >
-                    Yes (Return to Dashboard)
+                    {currentUser?.role === 'visitor' ? 'Yes (Start Over)' : 'Yes (Return to Dashboard)'}
                   </button>
                 </div>
               </>

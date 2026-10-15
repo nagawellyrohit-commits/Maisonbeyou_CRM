@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserCheck, Plus, Eye, ArrowRight, LayoutDashboard } from 'lucide-react';
+import { Search, UserCheck, Eye, ArrowRight } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
-export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashboard }) {
+export default function ClientsList({ onOpenClient, onBackToDashboard }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -33,48 +33,6 @@ export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashbo
           </p>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-          <button
-            onClick={() => onStartVisit('new')}
-            className="btn-primary"
-            style={{ padding: '10px 20px', fontSize: '14px' }}
-          >
-            <Plus size={16} />
-            Register New Client
-          </button>
-
-          {onBackToDashboard && (
-            <button
-              onClick={onBackToDashboard}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '13px',
-                fontWeight: '600',
-                color: '#B88B4A',
-                background: '#FAF6EE',
-                border: '1px solid rgba(218, 196, 147, 0.45)',
-                cursor: 'pointer',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#F5ECE0';
-                e.currentTarget.style.borderColor = '#B88B4A';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.45)';
-              }}
-            >
-              <LayoutDashboard size={15} />
-              Dashboard
-            </button>
-          )}
-        </div>
       </div>
 
       {/* Search Input */}
@@ -106,8 +64,8 @@ export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashbo
             No clients found matching "{query}".
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+          <div className="horizontal-scroller" style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', minWidth: '760px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase' }}>
                   <th style={{ padding: '14px 20px', fontWeight: '600' }}>Client Name</th>
@@ -158,11 +116,11 @@ export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashbo
                       {formatDate(c.last_visit_date)}
                     </td>
                     <td style={{ padding: '14px 20px', textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '8px' }}>
+                      <div style={{ display: 'inline-flex', gap: '8px', whiteSpace: 'nowrap' }}>
                         <button
                           onClick={() => onOpenClient(c.client_id)}
                           style={{
-                            padding: '6px 12px',
+                            padding: '6px 14px',
                             background: 'var(--bg-surface)',
                             border: '1px solid var(--border-color)',
                             borderRadius: 'var(--radius-sm)',
@@ -170,26 +128,12 @@ export default function ClientsList({ onOpenClient, onStartVisit, onBackToDashbo
                             fontWeight: '600',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '4px'
+                            gap: '4px',
+                            cursor: 'pointer'
                           }}
                         >
                           <Eye size={14} color="#B88B4A" />
                           View Dossier
-                        </button>
-
-                        <button
-                          onClick={() => onStartVisit('regular', c)}
-                          style={{
-                            padding: '6px 12px',
-                            background: 'var(--primary-subtle)',
-                            border: '1px solid var(--primary-border)',
-                            color: '#B88B4A',
-                            borderRadius: 'var(--radius-sm)',
-                            fontSize: '12px',
-                            fontWeight: '700'
-                          }}
-                        >
-                          + New Visit
                         </button>
                       </div>
                     </td>

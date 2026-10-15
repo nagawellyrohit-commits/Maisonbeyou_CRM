@@ -20,7 +20,7 @@ export function initDatabase() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'staff')),
+      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff')),
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -98,8 +98,9 @@ export function initDatabase() {
       total_amount REAL NOT NULL,
       amount_paid REAL NOT NULL,
       balance REAL NOT NULL,
-      payment_method TEXT NOT NULL CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Other')),
+      payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
       payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending')),
+      upi_ref TEXT,
       created_by INTEGER REFERENCES USERS(user_id),
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -116,28 +117,169 @@ export function initDatabase() {
     );
   `);
 
-  // Safe migrations for membership columns
+  // Safe migrations for membership and upi_ref columns
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_status TEXT DEFAULT 'active';`); } catch(e) {}
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_started_at TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_expires_at TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_balance REAL DEFAULT 10000.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_benefit_status TEXT DEFAULT 'Available';`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN last_benefit_used TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN last_benefit_date TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN last_membership_amount_used REAL DEFAULT 0.0;`); } catch(e) {}
+
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_cost REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN last_membership_benefit_used TEXT;`); } catch(e) {}
+
+  // Synchronize initial membership_balance with tier cost minus total credits used till date
+  try {
+    db.exec(`
+      UPDATE CLIENTS 
+      SET membership_cost = CASE
+        WHEN LOWER(membership_tier) LIKE '%lumiere%' THEN 50000.0
+        WHEN LOWER(membership_tier) LIKE '%infini%' THEN 25000.0
+        WHEN LOWER(membership_tier) LIKE '%eternal%' THEN 15000.0
+        WHEN LOWER(membership_tier) LIKE '%eclat%' THEN 6000.0
+        ELSE 0.0
+      END
+      WHERE membership_tier IS NOT NULL 
+        AND membership_tier != '' 
+        AND LOWER(membership_tier) != 'non-member';
+
+      UPDATE CLIENTS
+      SET last_membership_benefit_used = last_benefit_used
+      WHERE last_benefit_used IS NOT NULL AND (last_membership_benefit_used IS NULL OR last_membership_benefit_used = '');
+
+      UPDATE CLIENTS 
+      SET membership_balance = CASE
+        WHEN LOWER(membership_tier) LIKE '%lumiere%' THEN 50000.0
+        WHEN LOWER(membership_tier) LIKE '%infini%' THEN 25000.0
+        WHEN LOWER(membership_tier) LIKE '%eternal%' THEN 15000.0
+        WHEN LOWER(membership_tier) LIKE '%eclat%' THEN 6000.0
+        ELSE 0.0
+      END - COALESCE((SELECT SUM(membership_amount_used) FROM VISITS WHERE VISITS.client_id = CLIENTS.client_id), 0.0)
+      WHERE membership_tier IS NOT NULL 
+        AND membership_tier != '' 
+        AND LOWER(membership_tier) != 'non-member';
+    `);
+  } catch(e) {}
+
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN upi_ref TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN service_time TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN tax_amount REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_price REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_amount_used REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_benefit_used TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN benefit_used_date TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN benefit_status TEXT DEFAULT 'Available';`); } catch(e) {}
+
+  // Safe migration to support 'visitor' in USERS role constraint if needed
+  try {
+    const userSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='USERS'").get()?.sql || '';
+    if (userSql && !userSql.includes('visitor')) {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE USERS_new (
+          user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff')),
+          active INTEGER NOT NULL DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        INSERT INTO USERS_new (user_id, name, email, password_hash, role, active, created_at, updated_at)
+        SELECT user_id, name, email, password_hash, role, active, created_at, updated_at FROM USERS;
+        DROP TABLE USERS;
+        ALTER TABLE USERS_new RENAME TO USERS;
+        PRAGMA foreign_keys = ON;
+      `);
+    }
+  } catch (e) {
+    console.error('Users migration notice:', e.message);
+  }
+
+  // Safe migration to support 'Membership' in VISITS payment_method constraint
+  try {
+    const visitSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='VISITS'").get()?.sql || '';
+    if (visitSql && !visitSql.includes("'Membership'")) {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE VISITS_new (
+          visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+          visit_date TEXT NOT NULL,
+          subtotal REAL NOT NULL,
+          discount_type TEXT NOT NULL DEFAULT 'fixed' CHECK(discount_type IN ('fixed', 'percentage')),
+          discount_value REAL NOT NULL DEFAULT 0.0,
+          discount_amount REAL NOT NULL DEFAULT 0.0,
+          total_amount REAL NOT NULL,
+          amount_paid REAL NOT NULL,
+          balance REAL NOT NULL,
+          payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
+          payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending')),
+          upi_ref TEXT,
+          created_by INTEGER REFERENCES USERS(user_id),
+          notes TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          service_time TEXT,
+          tax_amount REAL DEFAULT 0.0,
+          membership_price REAL DEFAULT 0.0,
+          membership_tier TEXT,
+          membership_amount_used REAL DEFAULT 0.0,
+          membership_benefit_used TEXT,
+          benefit_used_date TEXT,
+          benefit_status TEXT DEFAULT 'Available'
+        );
+        INSERT INTO VISITS_new (
+          visit_id, client_id, visit_date, subtotal, discount_type, discount_value,
+          discount_amount, total_amount, amount_paid, balance, payment_method,
+          payment_status, upi_ref, created_by, notes, created_at, service_time,
+          tax_amount, membership_price, membership_tier, membership_amount_used,
+          membership_benefit_used, benefit_used_date, benefit_status
+        )
+        SELECT 
+          visit_id, client_id, visit_date, subtotal, discount_type, discount_value,
+          discount_amount, total_amount, amount_paid, balance, payment_method,
+          payment_status, upi_ref, created_by, notes, created_at, service_time,
+          tax_amount, membership_price, membership_tier, membership_amount_used,
+          membership_benefit_used, benefit_used_date, benefit_status
+        FROM VISITS;
+        DROP TABLE VISITS;
+        ALTER TABLE VISITS_new RENAME TO VISITS;
+        PRAGMA foreign_keys = ON;
+      `);
+      console.log('VISITS table migrated to support Membership payment_method.');
+    }
+  } catch (e) {
+    console.error('VISITS migration notice:', e.message);
+  }
 
   seedData();
 }
 
 function seedData() {
+  const insertUser = db.prepare(`
+    INSERT INTO USERS (name, email, password_hash, role, active)
+    VALUES (?, ?, ?, ?, 1)
+  `);
+  const salt = bcrypt.genSaltSync(10);
+
   // Check if users exist
   const userCount = db.prepare('SELECT COUNT(*) as count FROM USERS').get().count;
   if (userCount === 0) {
     console.log('Seeding initial users...');
-    const insertUser = db.prepare(`
-      INSERT INTO USERS (name, email, password_hash, role, active)
-      VALUES (?, ?, ?, ?, 1)
-    `);
-
-    const salt = bcrypt.genSaltSync(10);
     insertUser.run('Maison Admin', 'admin@maisonbeyou.com', bcrypt.hashSync('admin123', salt), 'admin');
     insertUser.run('Reception Desk', 'reception@maisonbeyou.com', bcrypt.hashSync('reception123', salt), 'reception');
+  }
+
+  // Ensure visitor user exists
+  const visitorUser = db.prepare('SELECT * FROM USERS WHERE email = ?').get('visitor@maisonbeyou.com');
+  if (!visitorUser) {
+    console.log('Seeding visitor user...');
+    insertUser.run('Visitor Desk', 'visitor@maisonbeyou.com', bcrypt.hashSync('visitor123', salt), 'visitor');
   }
 
   // Check if staff exist

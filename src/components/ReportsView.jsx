@@ -42,10 +42,9 @@ export default function ReportsView() {
     );
   }
 
-  const { revenue, clients, top_services = [], categories = [], staff_performance = [] } = data;
+  const { revenue, clients, top_services = [], categories = [] } = data;
 
   const maxServiceCount = Math.max(...top_services.map(s => s.times_performed), 1);
-  const maxStaffRevenue = Math.max(...staff_performance.map(s => s.revenue_generated), 1);
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
@@ -59,7 +58,7 @@ export default function ReportsView() {
           EXECUTIVE REPORTING & ANALYTICS
         </h1>
         <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          Phase 1 business intelligence for revenue, clients, service distribution, and staff productivity.
+          Phase 1 business intelligence for revenue, clients, and service distribution.
         </p>
       </div>
 
@@ -70,7 +69,7 @@ export default function ReportsView() {
           REVENUE BREAKDOWN
         </h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '16px' }}>
           <div className="card" style={{ padding: '20px 22px' }}>
             <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
               Today's Revenue
@@ -128,7 +127,7 @@ export default function ReportsView() {
           CLIENT RETENTION & ACQUISITION
         </h2>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px' }}>
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
               Total Registered Clients
@@ -166,7 +165,7 @@ export default function ReportsView() {
       </div>
 
       {/* Services Breakdown (Most performed & Revenue by category) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: '20px' }}>
         
         {/* Most Performed Services */}
         <div className="card" style={{ padding: '24px' }}>
@@ -242,47 +241,6 @@ export default function ReportsView() {
         </div>
       </div>
 
-      {/* Staff Productivity & Revenue Handled */}
-      <div className="card" style={{ padding: '24px' }}>
-        <h3 style={{ fontSize: '16px', color: 'var(--text-main)', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
-          PRACTITIONER & STAFF PERFORMANCE
-        </h3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-          {staff_performance.map((sp, idx) => (
-            <div
-              key={idx}
-              style={{
-                padding: '16px 20px',
-                borderRadius: 'var(--radius-md)',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-color)'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <div style={{ fontWeight: '700', fontSize: '15px', color: '#1C1917' }}>
-                    {sp.staff_name}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#B88B4A', fontWeight: '500' }}>
-                    {sp.role}
-                  </div>
-                </div>
-                <span className="badge badge-gold">
-                  {sp.services_count} services
-                </span>
-              </div>
-
-              <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Revenue Handled:</span>
-                <span style={{ fontSize: '16px', fontWeight: '700', color: '#166534' }}>
-                  {formatCurrency(sp.revenue_generated)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

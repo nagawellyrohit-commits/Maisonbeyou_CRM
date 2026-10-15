@@ -105,7 +105,7 @@ export default function StaffManagement() {
           Loading staff directory...
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '20px' }}>
           {staff.map(s => (
             <div
               key={s.staff_id}

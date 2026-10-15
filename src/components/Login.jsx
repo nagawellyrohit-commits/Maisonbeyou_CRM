@@ -91,19 +91,9 @@ export default function Login({ onLoginSuccess }) {
             style={{
               height: '56px',
               width: 'auto',
-              objectFit: 'contain',
-              marginBottom: '10px'
+              objectFit: 'contain'
             }}
           />
-          <p style={{
-            fontSize: '11px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.18em',
-            color: '#B88B4A',
-            fontWeight: '600'
-          }}>
-            Aesthetic Studio & CRM
-          </p>
         </div>
 
         {error && (
@@ -126,12 +116,12 @@ export default function Login({ onLoginSuccess }) {
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '6px' }}>
-              Staff Email / Login ID
+              Login ID
             </label>
             <div style={{ position: 'relative' }}>
               <Mail size={17} color="var(--text-light)" style={{ position: 'absolute', left: '14px', top: '13px' }} />
               <input
-                type="email"
+                type="text"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="e.g. reception@maisonbeyou.com"
@@ -182,7 +172,7 @@ export default function Login({ onLoginSuccess }) {
           >
             {loading ? 'Authenticating...' : (
               <>
-                Sign In to Studio CRM
+                Sign In to Studio
                 <ArrowRight size={17} />
               </>
             )}
@@ -250,9 +240,45 @@ export default function Login({ onLoginSuccess }) {
             >
               <div style={{ fontWeight: '700', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3B82F6', display: 'inline-block' }} />
-                Staff (Reception)
+                Reception Desk
               </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Dashboard & Client Intake</div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Reception Dashboard & Queue</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDemoLogin('visitor@maisonbeyou.com', 'visitor123')}
+              style={{
+                gridColumn: '1 / -1',
+                padding: '12px 14px',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '13px',
+                textAlign: 'left',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#B88B4A';
+                e.currentTarget.style.background = '#F5ECE0';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#DAC493';
+                e.currentTarget.style.background = '#FAF6EE';
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: '700', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
+                  Visitor Desk
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>Direct Visit Reception & Booking Flow</div>
+              </div>
+              <ArrowRight size={15} color="#B88B4A" />
             </button>
           </div>
         </div>
