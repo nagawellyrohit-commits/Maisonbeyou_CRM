@@ -108,7 +108,7 @@ export default function ReceiptModal({ visitId, onClose }) {
                 alt="Maison BeYou" 
                 style={{ width: '52px', height: '52px', objectFit: 'contain', margin: '0 auto 8px auto', display: 'block' }} 
               />
-              <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '24px', letterSpacing: '0.04em', color: '#1C1917', marginBottom: '2px' }}>
+              <h1 style={{ fontFamily: 'var(--font-sans)', fontSize: '24px', letterSpacing: '0.04em', color: '#1C1917', marginBottom: '2px', fontWeight: '700' }}>
                 MAISON BEYOU
               </h1>
               <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.18em', color: '#B88B4A', fontWeight: '700' }}>
@@ -159,7 +159,49 @@ export default function ReceiptModal({ visitId, onClose }) {
                 {visit.services?.map((s, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ padding: '10px 0', fontWeight: '600', color: '#1C1917' }}>
-                      {s.service_name_snapshot}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span>{s.service_name_snapshot}</span>
+                        {Boolean(s.session_number) && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            color: '#B88B4A',
+                            background: 'rgba(184, 139, 74, 0.1)',
+                            border: '1px solid rgba(184, 139, 74, 0.3)',
+                            borderRadius: '4px',
+                            padding: '1px 6px'
+                          }}>
+                            Session {s.session_number} of {s.course_total_sessions || s.total_sessions}
+                          </span>
+                        )}
+                        {Boolean(s.next_due_date) && (
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: '600',
+                            color: '#166534',
+                            background: '#ECFDF5',
+                            border: '1px solid #A7F3D0',
+                            borderRadius: '4px',
+                            padding: '1px 6px'
+                          }}>
+                            Next Due: {formatDate(s.next_due_date)}
+                          </span>
+                        )}
+                        {(s.is_privilege === 1 || s.is_privilege === true || parseFloat(s.price_snapshot) === 0) && (
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: '700',
+                            color: '#9E7437',
+                            background: '#FAF3E3',
+                            border: '1px solid #D6A87C',
+                            borderRadius: '4px',
+                            padding: '1px 6px',
+                            textTransform: 'uppercase'
+                          }}>
+                            Privilege (₹0)
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '10px 10px', color: 'var(--text-muted)', fontSize: '12px' }}>
                       {s.staff_name || 'Staff'}

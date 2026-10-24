@@ -31,11 +31,31 @@ export function setStoredUser(user) {
   }
 }
 
+export function getStoredLocation() {
+  const l = localStorage.getItem('maison_active_location');
+  try {
+    return l ? JSON.parse(l) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function setStoredLocation(location) {
+  if (location) {
+    localStorage.setItem('maison_active_location', JSON.stringify(location));
+  } else {
+    localStorage.removeItem('maison_active_location');
+  }
+}
+
 export async function apiRequest(endpoint, options = {}) {
   const token = getStoredToken();
+  const activeLoc = getStoredLocation();
+  const isFormData = options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(activeLoc?.location_id ? { 'x-location-id': String(activeLoc.location_id) } : {}),
     ...options.headers
   };
 
@@ -51,6 +71,7 @@ export async function apiRequest(endpoint, options = {}) {
       // Clear token if expired or unauthorized
       setStoredToken(null);
       setStoredUser(null);
+      setStoredLocation(null);
       window.dispatchEvent(new Event('auth_change'));
     }
     throw new Error(data.error || `Request failed with status ${response.status}`);

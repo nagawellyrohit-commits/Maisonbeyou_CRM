@@ -1,17 +1,38 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Building2, Handshake,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
   Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check,
-  Edit2, FileText
+  Edit2, FileText, Crown
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
+import { MEMBERSHIP_PLANS } from './NewVisitWizard';
+import ClientsList from './ClientsList';
+import ServiceManagement from './ServiceManagement';
+import StaffManagement from './StaffManagement';
+import ReportsView from './ReportsView';
+import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 
-export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab }) {
-  const isAdmin = currentUser?.role === 'admin';
+export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation }) {
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+  const [currentLocation, setCurrentLocation] = useState(activeLocation);
+  const [isKycModalOpen, setIsKycModalOpen] = useState(false);
+
+  useEffect(() => {
+    setCurrentLocation(activeLocation);
+  }, [activeLocation]);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ summary: {}, visits: [] });
   const [error, setError] = useState('');
+
+  // In-dashboard sub-module section switcher ('visits' | 'clients' | 'services' | 'staff' | 'reports')
+  const [activeSection, setActiveSection] = useState('visits');
+  const sectionContentRef = useRef(null);
+
+  useEffect(() => {
+    setActiveSection('visits');
+  }, [activeLocation?.location_id]);
 
   // Staff allocation & Payment verification state for Reception
   const [staffList, setStaffList] = useState([]);
@@ -43,6 +64,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [actionToast, setActionToast] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hoveredServicesVisitId, setHoveredServicesVisitId] = useState(null);
+  const [isSelectingUpgradeMembership, setIsSelectingUpgradeMembership] = useState(false);
+  const [pendingUpgradePlan, setPendingUpgradePlan] = useState(null);
 
   const formatVisitTime = (dateStr) => {
     if (!dateStr) return '—';
@@ -76,8 +99,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   };
 
   useEffect(() => {
+    setData({ summary: {}, visits: [] });
+    setLoading(true);
     fetchDashboardData();
-    // Load staff options for assignment
+    // Load staff options for assignment strictly for this location
     apiRequest('/staff')
       .then(res => setStaffList(res.staff || []))
       .catch(e => console.error('Staff fetch error:', e));
@@ -95,7 +120,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       clearInterval(pollInterval);
       window.removeEventListener('visit_created', handleVisitCreated);
     };
-  }, []);
+  }, [activeLocation?.location_id]);
 
   const handleManualRefresh = async () => {
     try {
@@ -182,6 +207,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const openPaymentModal = (visit) => {
     setPaymentModalVisit(visit);
     setIsEditingPerkInModal(false);
+    setIsSelectingUpgradeMembership(false);
+    setPendingUpgradePlan(null);
 
     const rawTier = (
       visit?.effective_membership_tier ||
@@ -201,35 +228,29 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       ? parseFloat(visit.membership_balance)
       : (isExistingMember ? tierBase : 0);
 
-    // Initial membership credit used (ONLY if existing member specifically requested credits > 0 during booking)
-    const requestedCredit = (visit.membership_amount_used !== undefined && visit.membership_amount_used !== null)
-      ? parseFloat(visit.membership_amount_used)
-      : 0;
-
-    const clientWantsCredits = isExistingMember && requestedCredit > 0;
-
+    // Initial membership credit used:
+    // If existing member and has credits available, default to using credits for the visit
     let initialCredit = 0;
-    if (clientWantsCredits) {
-      initialCredit = requestedCredit;
-      if (clientBal > 0 && initialCredit > clientBal) {
-        initialCredit = clientBal;
-      }
+    let initialMethod = 'UPI';
+
+    if (isExistingMember && clientBal > 0) {
+      initialCredit = Math.min(visit.total_amount, clientBal);
+      const remainingForManual = Math.max(0, visit.total_amount - initialCredit);
+      initialMethod = remainingForManual === 0 ? 'Membership' : (visit.payment_method || 'UPI');
+      setSettlementTab('membership');
+    } else {
+      setSettlementTab('manual');
+      if (visit.payment_method === 'Card') initialMethod = 'Card';
+      else if (visit.payment_method === 'Cash') initialMethod = 'Cash';
+      else if (visit.payment_method === 'UPI') initialMethod = 'UPI';
     }
 
     const remainingForManual = Math.max(0, visit.total_amount - initialCredit);
 
-    let initialMethod = 'UPI';
-    if (visit.payment_method === 'Card') initialMethod = 'Card';
-    else if (visit.payment_method === 'Cash') initialMethod = 'Cash';
-    else if (visit.payment_method === 'UPI') initialMethod = 'UPI';
-
-    // If non-member, purchasing membership today, or member doesn't want to use credits -> directly manual!
-    setSettlementTab(clientWantsCredits ? 'membership' : 'manual');
-
     setPaymentForm({
       amount_paid: remainingForManual,
       payment_method: initialMethod,
-      notes: visit.notes || '',
+      notes: visit.notes || (initialCredit > 0 ? '[MEMBERSHIP SETTLEMENT: Auto Credits Applied]' : ''),
       card_ref: '',
       membership_amount_used: initialCredit,
       membership_benefit_used: visit.membership_benefit_used || '',
@@ -253,6 +274,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
     if (!paymentModalVisit) return;
     try {
       setIsSavingPayment(true);
+      const baseBill = paymentModalVisit.total_amount;
+      const upgradePrice = pendingUpgradePlan ? (parseFloat(pendingUpgradePlan.price) || 0) : 0;
+      const effectiveTotalBill = baseBill + upgradePrice;
+
       const manualAmount = parseFloat(paymentForm.amount_paid) || 0;
       const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
       const totalSettled = manualAmount + creditUsed;
@@ -260,29 +285,53 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       const notes = [
         paymentForm.notes,
-        paymentForm.card_ref ? `Card Slip Ref: ${paymentForm.card_ref}` : ''
+        paymentForm.card_ref ? `Card Slip Ref: ${paymentForm.card_ref}` : '',
+        pendingUpgradePlan ? `[MEMBERSHIP UPGRADE AT RECEPTION: ${pendingUpgradePlan.name} (${formatCurrency(pendingUpgradePlan.price)})]` : ''
       ].filter(Boolean).join(' • ');
 
       const benefitText = (paymentForm.membership_benefit_used || '').trim();
       const hasBenefitUsed = benefitText !== '' && benefitText.toLowerCase() !== 'none';
       const autoBenefitStatus = (hasBenefitUsed || creditUsed > 0) ? 'Partially used' : 'Available';
 
-      const finalStatus = totalSettled >= paymentModalVisit.total_amount ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
+      const finalStatus = totalSettled >= effectiveTotalBill ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
       const finalMethod = (creditUsed > 0 && manualAmount > 0) ? `${method} + Member Credit` : (creditUsed > 0 ? 'Membership' : method);
+
+      const patchPayload = {
+        amount_paid: manualAmount,
+        payment_method: finalMethod,
+        payment_status: finalStatus,
+        notes: notes || undefined,
+        membership_amount_used: creditUsed,
+        membership_benefit_used: hasBenefitUsed ? benefitText : '',
+        benefit_used_date: paymentForm.benefit_used_date || undefined,
+        benefit_status: autoBenefitStatus
+      };
+
+      if (pendingUpgradePlan) {
+        patchPayload.total_amount = effectiveTotalBill;
+        patchPayload.membership_tier = pendingUpgradePlan.name;
+        patchPayload.membership_price = pendingUpgradePlan.price;
+      }
 
       await apiRequest(`/visits/${paymentModalVisit.visit_id}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          amount_paid: manualAmount,
-          payment_method: finalMethod,
-          payment_status: finalStatus,
-          notes: notes || undefined,
-          membership_amount_used: creditUsed,
-          membership_benefit_used: hasBenefitUsed ? benefitText : '',
-          benefit_used_date: paymentForm.benefit_used_date || undefined,
-          benefit_status: autoBenefitStatus
-        })
+        body: JSON.stringify(patchPayload)
       });
+
+      // Broadcast real-time payment update to client kiosks / checkout tabs
+      try {
+        const bc = new BroadcastChannel('crm_visit_updates');
+        bc.postMessage({
+          type: 'payment_received',
+          visit_id: paymentModalVisit.visit_id,
+          status: finalStatus
+        });
+        bc.close();
+      } catch (e) {}
+
+      window.dispatchEvent(new CustomEvent('visit_payment_updated', {
+        detail: { visit_id: paymentModalVisit.visit_id, status: finalStatus }
+      }));
 
       setActionToast(`✓ Payment & membership settlement recorded for ${paymentModalVisit.client_name}`);
       setTimeout(() => setActionToast(null), 3500);
@@ -323,25 +372,43 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         width: '100%',
         boxSizing: 'border-box'
       }}>
-        <div style={{ maxWidth: '460px', minWidth: '240px' }}>
+        <div style={{ maxWidth: '520px', minWidth: '240px' }}>
           <div style={{
             fontSize: '12px',
             textTransform: 'uppercase',
             letterSpacing: '0.14em',
             color: '#B88B4A',
             fontWeight: '700',
-            marginBottom: '4px'
+            marginBottom: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
           }}>
-            {isAdmin ? 'Admin Studio Operations' : 'Reception Desk Operations'}
+            {activeLocation ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                {activeLocation.type === 'franchise' ? <Handshake size={14} color="#B88B4A" /> : <Building2 size={14} color="#B88B4A" />}
+                {activeLocation.type === 'franchise' ? 'Franchise Studio Operations' : 'Branch Studio Operations'}
+              </span>
+            ) : (
+              <span>{isAdmin ? 'Admin Studio Operations' : 'Reception Desk Operations'}</span>
+            )}
+            {activeLocation && (
+              <span style={{
+                background: '#FAF6EE',
+                border: '1px solid #DAC493',
+                color: '#9F7335',
+                padding: '1px 8px',
+                borderRadius: '6px',
+                fontSize: '10.5px',
+                fontWeight: '800'
+              }}>
+                {activeLocation.code || 'MB-LOC'}
+              </span>
+            )}
           </div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', lineHeight: 1.2 }}>
-            {isAdmin ? "Admin Studio Overview" : "Reception Desk Dashboard"}
+          <h1 style={{ fontSize: '26px', color: '#1C1917', lineHeight: 1.2, margin: 0 }}>
+            {activeLocation ? activeLocation.name : (isAdmin ? "Admin Studio Overview" : "Reception Desk Dashboard")}
           </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            {isAdmin
-              ? 'Real-time studio management, financial metrics, and operational control.'
-              : 'Real-time client intake queue, staff allocations, service timings, and payment collections.'}
-          </p>
         </div>
 
         {/* Right Corner Controls: Quick Module Navigation */}
@@ -364,12 +431,21 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 { id: 'reports', label: 'Reports', icon: BarChart3, show: isAdmin }
               ].filter(item => item.show).map(item => {
                 const Icon = item.icon;
+                const isActive = activeSection === item.id;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => {
-                      if (onNavigateTab) onNavigateTab(item.id);
+                      setActiveSection(prev => {
+                        const next = prev === item.id ? 'visits' : item.id;
+                        setTimeout(() => {
+                          if (sectionContentRef.current) {
+                            sectionContentRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }
+                        }, 50);
+                        return next;
+                      });
                     }}
                     style={{
                       display: 'inline-flex',
@@ -379,29 +455,71 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       borderRadius: '9999px',
                       fontSize: '13.5px',
                       fontWeight: '600',
-                      color: '#44403C',
-                      background: '#FAF6EE',
-                      border: '1.5px solid rgba(218, 196, 147, 0.45)',
+                      color: isActive ? '#FFFFFF' : '#44403C',
+                      background: isActive ? '#B88B4A' : '#FAF6EE',
+                      border: isActive ? '1.5px solid #B88B4A' : '1.5px solid rgba(218, 196, 147, 0.45)',
                       cursor: 'pointer',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                      boxShadow: isActive ? '0 2px 8px rgba(184, 139, 74, 0.28)' : '0 1px 3px rgba(0,0,0,0.02)',
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = '#F5ECE0';
-                      e.currentTarget.style.borderColor = '#B88B4A';
-                      e.currentTarget.style.color = '#1C1917';
+                      if (!isActive) {
+                        e.currentTarget.style.background = '#F5ECE0';
+                        e.currentTarget.style.borderColor = '#B88B4A';
+                        e.currentTarget.style.color = '#1C1917';
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = '#FAF6EE';
-                      e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.45)';
-                      e.currentTarget.style.color = '#44403C';
+                      if (!isActive) {
+                        e.currentTarget.style.background = '#FAF6EE';
+                        e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.45)';
+                        e.currentTarget.style.color = '#44403C';
+                      }
                     }}
                   >
-                    <Icon size={15} color="#B88B4A" />
+                    <Icon size={15} color={isActive ? '#FFFFFF' : '#B88B4A'} />
                     <span>{item.label}</span>
                   </button>
                 );
               })}
+
+              {/* KYC Details Pill Button matching Image 1 */}
+              {activeLocation && (
+                <button
+                  type="button"
+                  onClick={() => setIsKycModalOpen(true)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                    padding: '9px 18px',
+                    borderRadius: '9999px',
+                    fontSize: '13.5px',
+                    fontWeight: '700',
+                    color: '#9F7335',
+                    background: '#FAF6EE',
+                    border: '1.5px solid #DAC493',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#F5ECE0';
+                    e.currentTarget.style.borderColor = '#B88B4A';
+                    e.currentTarget.style.color = '#1C1917';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#FAF6EE';
+                    e.currentTarget.style.borderColor = '#DAC493';
+                    e.currentTarget.style.color = '#9F7335';
+                  }}
+                  title="View or update Statutory KYC Details for this location"
+                >
+                  <ShieldCheck size={16} color="#B88B4A" />
+                  <span>KYC Details</span>
+                </button>
+              )}
+
             </div>
           )}
         </div>
@@ -454,46 +572,51 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
-          gap: '16px'
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
+          gap: '16px',
+          alignItems: 'stretch'
         }}>
           {/* Total Clients */}
-          <div className="card" style={{ padding: '20px 22px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600', letterSpacing: '0.05em' }}>
-                  Clients Today
-                </div>
-                <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--text-main)', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                  {summary.total_clients}
-                </div>
+          <div className="card" style={{
+            padding: '20px 22px 24px 22px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            minHeight: '124px',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+              <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                Clients Today
               </div>
-              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Users size={20} color="#B88B4A" />
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Users size={19} color="#B88B4A" />
               </div>
             </div>
-            <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Studio appointments & walk-ins
+            <div style={{ fontSize: '32px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+              {summary.total_clients}
             </div>
           </div>
 
           {/* New Clients */}
-          <div className="card" style={{ padding: '20px 22px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600', letterSpacing: '0.05em' }}>
-                  New Clients
-                </div>
-                <div style={{ fontSize: '32px', fontWeight: '700', color: '#166534', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                  {summary.new_clients}
-                </div>
+          <div className="card" style={{
+            padding: '20px 22px 24px 22px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            minHeight: '124px',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+              <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                New Clients
               </div>
-              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <UserPlus size={20} color="#166534" />
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <UserPlus size={19} color="#166534" />
               </div>
             </div>
-            <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              First-time studio registrations
+            <div style={{ fontSize: '32px', fontWeight: '800', color: '#166534', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+              {summary.new_clients}
             </div>
           </div>
 
@@ -501,90 +624,104 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           {isAdmin && (
             <>
               {/* Returning / Regular Clients */}
-              <div className="card" style={{ padding: '20px 22px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600', letterSpacing: '0.05em' }}>
-                      Regular Clients
-                    </div>
-                    <div style={{ fontSize: '32px', fontWeight: '700', color: '#1E40AF', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                      {summary.regular_clients}
-                    </div>
+              <div className="card" style={{
+                padding: '20px 22px 24px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '124px',
+                boxSizing: 'border-box'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+                  <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                    Regular Clients
                   </div>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <UserCheck size={20} color="#1E40AF" />
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <UserCheck size={19} color="#1E40AF" />
                   </div>
                 </div>
-                <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Returning repeat clients
+                <div style={{ fontSize: '32px', fontWeight: '800', color: '#1E40AF', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                  {summary.regular_clients}
                 </div>
               </div>
 
-              {/* Total Services */}
-              <div className="card" style={{ padding: '20px 22px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600', letterSpacing: '0.05em' }}>
-                      Total Services
-                    </div>
-                    <div style={{ fontSize: '32px', fontWeight: '700', color: '#7E22CE', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                      {summary.total_services}
-                    </div>
+              {/* Membership Credits / Earned Through Membership */}
+              <div className="card" style={{
+                padding: '20px 22px 24px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '124px',
+                boxSizing: 'border-box'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+                  <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                    Membership Redeemed
                   </div>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: '#FAF5FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Sparkles size={20} color="#7E22CE" />
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#FAF5FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Crown size={19} color="#7E22CE" />
                   </div>
                 </div>
-                <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Procedures & treatments performed
+                <div style={{ fontSize: '30px', fontWeight: '800', color: '#7E22CE', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                  {formatCurrency(summary.membership_revenue || 0)}
                 </div>
               </div>
 
               {/* Total Revenue */}
-              <div className="card" style={{ padding: '20px 22px', background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)', border: '1px solid var(--primary-border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontSize: '12px', textTransform: 'uppercase', color: '#B88B4A', fontWeight: '700', letterSpacing: '0.05em' }}>
-                      Revenue Today
-                    </div>
-                    <div style={{ fontSize: '30px', fontWeight: '700', color: '#1C1917', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                      {formatCurrency(summary.total_revenue)}
-                    </div>
+              <div className="card" style={{
+                padding: '20px 22px 24px 22px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '124px',
+                boxSizing: 'border-box',
+                background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)',
+                border: '1.5px solid var(--primary-border)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+                  <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: '#B88B4A', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                    Revenue Today
                   </div>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <IndianRupee size={20} color="#B88B4A" />
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <IndianRupee size={19} color="#B88B4A" />
                   </div>
                 </div>
-                <div style={{ marginTop: '12px', fontSize: '12px', color: '#B88B4A', fontWeight: '500' }}>
-                  Collected across Cash, UPI & Card
+                <div style={{ fontSize: '30px', fontWeight: '800', color: '#1C1917', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                  {formatCurrency(summary.total_revenue)}
                 </div>
               </div>
             </>
           )}
 
           {/* Pending Balance */}
-          <div className="card" style={{ padding: '20px 22px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '12px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600', letterSpacing: '0.05em' }}>
-                  Pending Balance
-                </div>
-                <div style={{ fontSize: '30px', fontWeight: '700', color: summary.pending_balance > 0 ? '#DC2626' : 'var(--text-main)', marginTop: '4px', fontFamily: 'var(--font-sans)' }}>
-                  {formatCurrency(summary.pending_balance)}
-                </div>
+          <div className="card" style={{
+            padding: '20px 22px 24px 22px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            minHeight: '124px',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
+              <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                Pending Balance
               </div>
-              <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: summary.pending_balance > 0 ? 'var(--danger-bg)' : 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <AlertCircle size={20} color={summary.pending_balance > 0 ? '#DC2626' : 'var(--text-muted)'} />
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: summary.pending_balance > 0 ? 'var(--danger-bg)' : 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertCircle size={19} color={summary.pending_balance > 0 ? '#DC2626' : 'var(--text-muted)'} />
               </div>
             </div>
-            <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Outstanding customer balances
+            <div style={{ fontSize: '30px', fontWeight: '800', color: summary.pending_balance > 0 ? '#DC2626' : 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+              {formatCurrency(summary.pending_balance)}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Today's Visits Table (Section 3 Requirement) */}
+      {/* Anchor Ref for smooth scrolling into Section 3 */}
+      <div ref={sectionContentRef} style={{ scrollMarginTop: '80px' }} />
+
+      {/* Dynamic Section 3: Today's Visits Table or Selected Sub-Module */}
+      {activeSection === 'visits' && (
       <div className="card" style={{ overflow: 'hidden' }}>
         <div style={{
           padding: '20px 24px',
@@ -781,9 +918,23 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                         <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
                                           {s.service_name_snapshot}
                                         </span>
+                                        {(s.is_privilege === 1 || s.is_privilege === true || parseFloat(s.price_snapshot) === 0) && (
+                                          <span style={{
+                                            fontSize: '9.5px',
+                                            fontWeight: '700',
+                                            color: '#9E7437',
+                                            background: '#FAF3E3',
+                                            border: '1px solid #D6A87C',
+                                            borderRadius: '4px',
+                                            padding: '1px 5px',
+                                            textTransform: 'uppercase'
+                                          }}>
+                                            Privilege
+                                          </span>
+                                        )}
                                       </div>
-                                      <span style={{ fontWeight: '700', color: '#B88B4A', fontSize: '12px' }}>
-                                        {formatCurrency(s.price_snapshot)}
+                                      <span style={{ fontWeight: '700', color: (s.is_privilege || parseFloat(s.price_snapshot) === 0) ? '#9E7437' : '#B88B4A', fontSize: '12px' }}>
+                                        {(s.is_privilege || parseFloat(s.price_snapshot) === 0) ? '₹0' : formatCurrency(s.price_snapshot)}
                                       </span>
                                     </div>
                                   ))}
@@ -848,18 +999,31 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             Check
                           </button>
                         </div>
-                        {/* Only show payment method after payment is done (Paid / Partially Paid), NEVER when Pending */}
-                        {v.payment_status !== 'Pending' && (() => {
+                        {v.payment_status === 'Pending' ? (() => {
+                          let methodLabel = v.payment_method || 'UPI';
+                          const usedCredits = parseFloat(v.membership_amount_used) || 0;
+                          let intendedLabel = `Prefers: ${methodLabel}`;
+                          if (usedCredits > 0 && (methodLabel === 'Membership' || !v.payment_method || v.balance === 0)) {
+                            intendedLabel = `Prefers: Member Credits (${formatCurrency(usedCredits)})`;
+                          } else if (usedCredits > 0 && v.balance > 0) {
+                            intendedLabel = `Prefers: Credits (${formatCurrency(usedCredits)}) + ${methodLabel} (${formatCurrency(v.balance)})`;
+                          }
+                          return (
+                            <div style={{ fontSize: '11px', color: '#92400E', fontWeight: '600', marginTop: '3px' }}>
+                              {intendedLabel}
+                            </div>
+                          );
+                        })() : (() => {
                           let methodLabel = v.payment_method || 'UPI';
                           if (methodLabel === 'Other') methodLabel = 'Desk Settlement';
 
-                          const usedMembership = parseFloat(v.membership_amount_used) > 0;
+                          const usedCredits = parseFloat(v.membership_amount_used) || 0;
                           let displayMethod = `Via ${methodLabel}`;
 
-                          if (methodLabel === 'Membership') {
-                            displayMethod = 'Via Membership';
-                          } else if (usedMembership && methodLabel) {
-                            displayMethod = `Via ${methodLabel} + Membership`;
+                          if (usedCredits > 0 && (methodLabel === 'Membership' || !v.payment_method || v.balance === 0)) {
+                            displayMethod = `Via Member Credits (${formatCurrency(usedCredits)})`;
+                          } else if (usedCredits > 0 && methodLabel) {
+                            displayMethod = `Via ${methodLabel} + Credits (${formatCurrency(usedCredits)})`;
                           }
 
                           return (
@@ -1056,6 +1220,218 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           </div>
         )}
       </div>
+      )}
+
+      {/* Clients Section (Rendered inside Dashboard Section 3) */}
+      {activeSection === 'clients' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+            border: '1.5px solid #DAC493',
+            borderRadius: '12px',
+            padding: '12px 20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Users size={18} color="#B88B4A" />
+              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                CLIENTS DIRECTORY
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSection('visits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+              }}
+            >
+              ← Back to Today's Visits
+            </button>
+          </div>
+          <ClientsList
+            onOpenClient={(id) => onOpenClient(id, 'dashboard')}
+            onBackToDashboard={() => setActiveSection('visits')}
+          />
+        </div>
+      )}
+
+      {/* Services Section (Rendered inside Dashboard Section 3) */}
+      {activeSection === 'services' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+            border: '1.5px solid #DAC493',
+            borderRadius: '12px',
+            padding: '12px 20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Scissors size={18} color="#B88B4A" />
+              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                SERVICE & PRICING MANAGEMENT
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSection('visits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+              }}
+            >
+              ← Back to Today's Visits
+            </button>
+          </div>
+          <ServiceManagement />
+        </div>
+      )}
+
+      {/* Staff Section (Rendered inside Dashboard Section 3) */}
+      {activeSection === 'staff' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+            border: '1.5px solid #DAC493',
+            borderRadius: '12px',
+            padding: '12px 20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Award size={18} color="#B88B4A" />
+              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                STAFF & PRACTITIONERS MANAGEMENT
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSection('visits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+              }}
+            >
+              ← Back to Today's Visits
+            </button>
+          </div>
+          <StaffManagement />
+        </div>
+      )}
+
+      {/* Reports Section (Rendered inside Dashboard Section 3) */}
+      {activeSection === 'reports' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+            border: '1.5px solid #DAC493',
+            borderRadius: '12px',
+            padding: '12px 20px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <BarChart3 size={18} color="#B88B4A" />
+              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                STUDIO REPORTS & ANALYTICS
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSection('visits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+              }}
+            >
+              ← Back to Today's Visits
+            </button>
+          </div>
+          <ReportsView />
+        </div>
+      )}
 
       {/* Floating Action Toast */}
       {actionToast && (
@@ -1419,773 +1795,996 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 1200,
-          padding: '20px'
+          padding: '20px',
+          overflowY: 'auto'
         }}>
-          <div className="card animate-fade-in" style={{
-            maxWidth: '480px',
-            width: '100%',
-            background: '#FFFFFF',
-            borderRadius: 'var(--radius-xl)',
-            padding: '26px 28px',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.2)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-              <div>
-                <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800' }}>
-                  Reception Payment Desk
-                </div>
-                <h3 style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
-                  Collect Payment • {paymentModalVisit.client_name}
-                </h3>
-                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
-                  Add Card or Cash payment collected and click <strong>Done</strong> to change status to Paid.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPaymentModalVisit(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Bill Amount Summary Banner */}
-            <div style={{
-              background: '#FAF6EE',
-              border: '1.5px solid #DAC493',
-              borderRadius: 'var(--radius-md)',
-              padding: '14px 16px',
-              marginBottom: '18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
+          {isSelectingUpgradeMembership ? (
+            <div className="card animate-fade-in" style={{
+              maxWidth: '860px',
+              width: '100%',
+              background: '#FFFFFF',
+              borderRadius: 'var(--radius-xl)',
+              padding: '28px 30px',
+              boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
+              maxHeight: '90vh',
+              overflowY: 'auto'
             }}>
-              <div>
-                <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
-                  Total Bill
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800' }}>
+                    Maison BeYou • Membership Upgrade Desk
+                  </div>
+                  <h3 style={{ fontSize: '22px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                    Select Membership Tier for {paymentModalVisit.client_name}
+                  </h3>
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                    Select a tier below to add to today's checkout bill, or click <strong>Skip</strong> to return without any changes.
+                  </p>
                 </div>
-                <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
-                  {formatCurrency(paymentModalVisit.total_amount)}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSelectingUpgradeMembership(false)}
+                  style={{
+                    background: '#FAF6EE',
+                    border: '1px solid #DAC493',
+                    color: '#B88B4A',
+                    padding: '6px 14px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Skip & Return
+                </button>
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
-                  Current Status
+
+              {/* 4 Cards Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>
+                {MEMBERSHIP_PLANS.map(plan => {
+                  const isSelected = pendingUpgradePlan?.id === plan.id;
+                  return (
+                    <div
+                      key={plan.id}
+                      style={{
+                        background: isSelected ? '#FAF6EE' : '#FFFFFF',
+                        border: isSelected ? '2px solid #B88B4A' : '1.5px solid var(--border-color)',
+                        borderRadius: '12px',
+                        padding: '16px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        boxShadow: isSelected ? '0 4px 14px rgba(184, 139, 74, 0.2)' : '0 2px 6px rgba(0,0,0,0.03)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div>
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: '800',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.06em',
+                          color: '#B88B4A',
+                          background: '#FDF8F0',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          border: '1px solid #E8D6BC'
+                        }}>
+                          {plan.validity}
+                        </span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '8px' }}>
+                          {plan.name}
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: '800', color: '#B88B4A', marginTop: '4px' }}>
+                          {plan.priceFormatted || formatCurrency(plan.price)}
+                        </div>
+                        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.35 }}>
+                          {plan.tagline}
+                        </p>
+                        <div style={{ marginTop: '10px', borderTop: '1px dashed #E5E7EB', paddingTop: '8px' }}>
+                          <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', color: '#78716C', marginBottom: '4px' }}>
+                            Privileges:
+                          </div>
+                          <ul style={{ margin: 0, paddingLeft: '14px', fontSize: '11px', color: '#44403C', lineHeight: 1.4 }}>
+                            {plan.benefits.slice(0, 2).map((b, i) => (
+                              <li key={i}>{b}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingUpgradePlan(plan);
+                          setIsSelectingUpgradeMembership(false);
+                          const newTotal = paymentModalVisit.total_amount + plan.price;
+                          setPaymentForm(prev => ({
+                            ...prev,
+                            amount_paid: newTotal
+                          }));
+                        }}
+                        style={{
+                          marginTop: '14px',
+                          width: '100%',
+                          padding: '9px 12px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #B88B4A 0%, #9E7437 100%)',
+                          color: '#FFFFFF',
+                          fontWeight: '700',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 2px 8px rgba(184, 139, 74, 0.25)'
+                        }}
+                      >
+                        <Check size={14} />
+                        <span>Select {plan.name.replace(' MEMBER', '')}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Bottom footer */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '14px', borderTop: '1px solid var(--border-light)' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Current Services Bill: <strong>{formatCurrency(paymentModalVisit.total_amount)}</strong>
                 </div>
-                <span className={`badge ${paymentModalVisit.payment_status === 'Paid' ? 'badge-paid' : 'badge-pending'}`}>
-                  {paymentModalVisit.payment_status}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsSelectingUpgradeMembership(false)}
+                  className="btn-secondary"
+                  style={{ padding: '8px 18px', fontSize: '13px' }}
+                >
+                  Skip & Return without Changes
+                </button>
               </div>
             </div>
+          ) : (() => {
+            const rawClientTier = (
+              paymentModalVisit?.effective_membership_tier ||
+              paymentModalVisit?.client_membership_tier ||
+              paymentModalVisit?.membership_tier ||
+              ''
+            ).trim();
+            const isMember = Boolean(rawClientTier && rawClientTier.toLowerCase() !== 'none' && rawClientTier.toLowerCase() !== 'non-member');
+            const isPurchasingMembership = (parseFloat(paymentModalVisit?.membership_price) > 0) || Boolean(pendingUpgradePlan);
+            const isExistingMember = isMember && !isPurchasingMembership;
 
-            {/* VIP Membership & Manual Payment Settlement */}
-            {(() => {
-              const rawClientTier = (
-                paymentModalVisit?.effective_membership_tier ||
-                paymentModalVisit?.client_membership_tier ||
-                paymentModalVisit?.membership_tier ||
-                ''
-              ).trim();
-              const isMember = Boolean(rawClientTier && rawClientTier.toLowerCase() !== 'none' && rawClientTier.toLowerCase() !== 'non-member');
-              const isPurchasingMembership = parseFloat(paymentModalVisit?.membership_price) > 0;
-              const isExistingMember = isMember && !isPurchasingMembership;
+            const tierCostMap = { 'lumiere': 50000, 'infini': 25000, 'eternal': 15000, 'eclat': 6000 };
+            const matchedK = Object.keys(tierCostMap).find(k => rawClientTier.toLowerCase().includes(k));
+            const defaultTierCost = matchedK ? tierCostMap[matchedK] : 25000;
+            const availableCredits = paymentModalVisit?.membership_balance !== undefined && paymentModalVisit?.membership_balance !== null
+              ? parseFloat(paymentModalVisit.membership_balance)
+              : (isExistingMember ? defaultTierCost : 0);
 
-              const tierCostMap = { 'lumiere': 50000, 'infini': 25000, 'eternal': 15000, 'eclat': 6000 };
-              const matchedK = Object.keys(tierCostMap).find(k => rawClientTier.toLowerCase().includes(k));
-              const defaultTierCost = matchedK ? tierCostMap[matchedK] : 25000;
-              const availableCredits = paymentModalVisit?.membership_balance !== undefined && paymentModalVisit?.membership_balance !== null
-                ? parseFloat(paymentModalVisit.membership_balance)
-                : (isExistingMember ? defaultTierCost : 0);
+            const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
+            const manualAmount = parseFloat(paymentForm.amount_paid) || 0;
+            const baseBill = parseFloat(paymentModalVisit?.total_amount) || 0;
+            const upgradeCost = pendingUpgradePlan ? (parseFloat(pendingUpgradePlan.price) || 0) : 0;
+            const totalBill = baseBill + upgradeCost;
+            const remainingAfterCredit = Math.max(0, totalBill - creditUsed);
+            const totalSettled = creditUsed + manualAmount;
+            const isFullySettled = totalSettled >= totalBill;
+            const hasValidCredits = isExistingMember && availableCredits > 0;
+            const isCreditInsufficient = isExistingMember && (!hasValidCredits || availableCredits < totalBill);
+            const isUsingCredits = creditUsed > 0;
+            const balanceCreditsAfterVisit = Math.max(0, availableCredits - creditUsed);
 
-              const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
-              const manualAmount = parseFloat(paymentForm.amount_paid) || 0;
-              const totalBill = paymentModalVisit.total_amount;
-              const remainingAfterCredit = Math.max(0, totalBill - creditUsed);
-              const totalSettled = creditUsed + manualAmount;
-              const isFullySettled = totalSettled >= totalBill;
+            let tierPerks = [];
+            if (rawClientTier.toLowerCase().includes('lumiere')) {
+              tierPerks = [
+                'Unlimited expert aesthetic & dermatological consultations',
+                'Birthday: ₹10,000 voucher + luxury wellness package',
+                '4 Complimentary premium medi-facials or laser sessions',
+                '20% Off all services & homecare product lines',
+                'Personal aesthetician of choice for all visits',
+                'VIP private lounge booking & companion guest passes'
+              ];
+            } else if (rawClientTier.toLowerCase().includes('infini')) {
+              tierPerks = [
+                'Free comprehensive 3D skin & hair analysis twice a year',
+                'Birthday: ₹5000 voucher + complimentary luxury medi-facial',
+                '2 Complimentary medi-facials or signature body therapies',
+                '15% Off all aesthetic, laser & salon services year-round',
+                'Dedicated relationship manager & VIP suite access',
+                'Priority weekend & late-evening scheduling'
+              ];
+            } else if (rawClientTier.toLowerCase().includes('eternal')) {
+              tierPerks = [
+                'Free advanced skin analysis (worth ₹1500–₹2000)',
+                'Birthday: ₹2500 Voucher / Complimentary Services',
+                '1 Free express facial / peel quarterly or 2 per year',
+                'Priority booking + peak hour preference',
+                'Exclusive pricing on laser packages',
+                'Early access to new treatments & offers'
+              ];
+            } else if (rawClientTier.toLowerCase().includes('eclat')) {
+              tierPerks = [
+                'Complimentary skin analysis (basic) once a year',
+                'Birthday: ₹1000 voucher / free add-ons',
+                'Priority booking on weekends',
+                'Access to member-only packages',
+                'Free consultation anytime'
+              ];
+            }
 
-              let tierPerks = [];
-              if (rawClientTier.toLowerCase().includes('lumiere')) {
-                tierPerks = [
-                  'Unlimited expert aesthetic & dermatological consultations',
-                  'Birthday: ₹10,000 voucher + luxury wellness package',
-                  '4 Complimentary premium medi-facials or laser sessions',
-                  '20% Off all services & homecare product lines',
-                  'Personal aesthetician of choice for all visits',
-                  'VIP private lounge booking & companion guest passes'
-                ];
-              } else if (rawClientTier.toLowerCase().includes('infini')) {
-                tierPerks = [
-                  'Free comprehensive 3D skin & hair analysis twice a year',
-                  'Birthday: ₹5000 voucher + complimentary luxury medi-facial',
-                  '2 Complimentary medi-facials or signature body therapies',
-                  '15% Off all aesthetic, laser & salon services year-round',
-                  'Dedicated relationship manager & VIP suite access',
-                  'Priority weekend & late-evening scheduling'
-                ];
-              } else if (rawClientTier.toLowerCase().includes('eternal')) {
-                tierPerks = [
-                  'Free advanced skin analysis (worth ₹1500–₹2000)',
-                  'Birthday: ₹2500 Voucher / Complimentary Services',
-                  '1 Free express facial / peel quarterly or 2 per year',
-                  'Priority booking + peak hour preference',
-                  'Exclusive pricing on laser packages',
-                  'Early access to new treatments & offers'
-                ];
-              } else if (rawClientTier.toLowerCase().includes('eclat')) {
-                tierPerks = [
-                  'Complimentary skin analysis (basic) once a year',
-                  'Birthday: ₹1000 voucher / free add-ons',
-                  'Priority booking on weekends',
-                  'Access to member-only packages',
-                  'Free consultation anytime'
-                ];
-              }
+            const hasBenefitSelected = paymentForm.membership_benefit_used && paymentForm.membership_benefit_used.trim() !== '' && paymentForm.membership_benefit_used !== 'None';
 
-              const hasBenefitSelected = paymentForm.membership_benefit_used && paymentForm.membership_benefit_used.trim() !== '' && paymentForm.membership_benefit_used !== 'None';
-              const autoGeneratedStatus = (hasBenefitSelected || creditUsed > 0) ? 'Partially used' : 'Available';
+            return (
+              <div className="card animate-fade-in" style={{
+                maxWidth: '490px',
+                width: '100%',
+                maxHeight: '88vh',
+                overflowY: 'auto',
+                background: '#FFFFFF',
+                borderRadius: 'var(--radius-xl)',
+                padding: '18px 22px',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.2)',
+                boxSizing: 'border-box'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800' }}>
+                      Reception Payment Desk
+                    </div>
+                    <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', marginTop: '2px', marginBottom: '2px' }}>
+                      Payment Settlement • {paymentModalVisit?.client_name || 'Client'}
+                    </h3>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                      Verify membership credits and collect any balance, then click <strong>Approve & Confirm</strong> to mark as Paid.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModalVisit(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
 
-              return (
-                <div>
-                  {/* Membership Purchase Callout Banner */}
-                  {isPurchasingMembership && (
-                    <div style={{
-                      background: '#FAF6EE',
-                      border: '1.5px solid #DAC493',
-                      borderRadius: '8px',
-                      padding: '12px 14px',
-                      marginBottom: '16px',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '10px'
-                    }}>
-                      <span style={{ fontSize: '20px', lineHeight: 1 }}>👑</span>
-                      <div style={{ fontSize: '12px', lineHeight: 1.45, color: '#44403C' }}>
-                        <div style={{ fontWeight: '800', color: '#B88B4A', marginBottom: '2px' }}>
-                          New Membership Purchase Included: {paymentModalVisit.membership_tier} ({formatCurrency(paymentModalVisit.membership_price)})
+                {/* Bill Amount Summary Banner */}
+                <div style={{
+                  background: '#FAF6EE',
+                  border: '1.5px solid #DAC493',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '10px 14px',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
+                      Total Bill
+                    </div>
+                    <div style={{ fontSize: '22px', fontWeight: '800', color: '#1C1917', marginTop: '1px' }}>
+                      {formatCurrency(totalBill)}
+                    </div>
+                    {pendingUpgradePlan && (
+                      <div style={{ fontSize: '11px', color: '#B88B4A', marginTop: '1px', fontWeight: '600' }}>
+                        Services: {formatCurrency(baseBill)} + Upgrade: {formatCurrency(upgradeCost)}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
+                      Current Status
+                    </div>
+                    <span className={`badge ${paymentModalVisit?.payment_status === 'Paid' ? 'badge-paid' : 'badge-pending'}`}>
+                      {paymentModalVisit?.payment_status || 'Pending'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Upgrade Added Banner OR Credits Insufficient Alert */}
+                {pendingUpgradePlan ? (
+                  <div style={{
+                    background: '#FAF6EE',
+                    border: '1.5px solid #DAC493',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Crown size={20} color="#B88B4A" style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: '800', color: '#785422' }}>
+                          Upgrade Added: {pendingUpgradePlan.name} (+{formatCurrency(upgradeCost)})
                         </div>
-                        <div>
-                          This client is purchasing a membership on this visit. Please collect the full bill amount (<strong>{formatCurrency(totalBill)}</strong>) below via manual payment (UPI, Cash, or Card). Membership credits & benefits will be automatically activated on their profile once settled.
+                        <div style={{ fontSize: '11px', color: '#92400E', marginTop: '1px' }}>
+                          Added to bill. Membership credits & perks will be activated upon approval.
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* Two Tabs if Existing Member AND client chose to use credits (or currently in membership tab) */}
-                  {isExistingMember && (creditUsed > 0 || settlementTab === 'membership') ? (
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '8px',
-                      marginBottom: '16px',
-                      background: '#F5F5F4',
-                      padding: '4px',
-                      borderRadius: '10px'
-                    }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <button
                         type="button"
-                        onClick={() => setSettlementTab('membership')}
+                        onClick={() => setIsSelectingUpgradeMembership(true)}
                         style={{
-                          padding: '9px 12px',
-                          borderRadius: '7px',
-                          border: 'none',
-                          background: settlementTab === 'membership' ? '#FFFFFF' : 'transparent',
-                          color: settlementTab === 'membership' ? '#B88B4A' : '#78716C',
+                          background: '#FFFFFF',
+                          border: '1px solid #DAC493',
+                          color: '#B88B4A',
+                          borderRadius: '5px',
+                          padding: '4px 10px',
+                          fontSize: '11px',
                           fontWeight: '700',
-                          fontSize: '12.5px',
-                          cursor: 'pointer',
-                          boxShadow: settlementTab === 'membership' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          transition: 'all 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (settlementTab !== 'membership') {
-                            e.currentTarget.style.background = '#EDECEB';
-                            e.currentTarget.style.color = '#1C1917';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (settlementTab !== 'membership') {
-                            e.currentTarget.style.background = 'transparent';
-                            e.currentTarget.style.color = '#78716C';
-                          }
+                          cursor: 'pointer'
                         }}
                       >
-                        <span>💎</span>
-                        <span>1. Member Credits</span>
-                        {creditUsed > 0 && (
-                          <span style={{ fontSize: '10px', background: '#DCFCE7', color: '#166534', padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
-                            ₹{creditUsed}
-                          </span>
-                        )}
+                        Change Tier
                       </button>
-
                       <button
                         type="button"
-                        onClick={() => setSettlementTab('manual')}
+                        onClick={() => {
+                          setPendingUpgradePlan(null);
+                          setPaymentForm(prev => ({
+                            ...prev,
+                            amount_paid: baseBill
+                          }));
+                        }}
                         style={{
-                          padding: '9px 12px',
-                          borderRadius: '7px',
+                          background: 'transparent',
                           border: 'none',
-                          background: settlementTab === 'manual' ? '#FFFFFF' : 'transparent',
-                          color: settlementTab === 'manual' ? '#B88B4A' : '#78716C',
-                          fontWeight: '700',
-                          fontSize: '12.5px',
+                          color: '#DC2626',
+                          fontSize: '11px',
+                          fontWeight: '600',
                           cursor: 'pointer',
-                          boxShadow: settlementTab === 'manual' ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          transition: 'all 0.15s ease'
-                        }}
-                        onMouseEnter={(e) => {
-                          if (settlementTab !== 'manual') {
-                            e.currentTarget.style.background = '#EDECEB';
-                            e.currentTarget.style.color = '#1C1917';
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          if (settlementTab !== 'manual') {
-                            e.currentTarget.style.background = 'transparent';
-                            e.currentTarget.style.color = '#78716C';
-                          }
+                          textDecoration: 'underline'
                         }}
                       >
-                        <span>💳</span>
-                        <span>2. Manual Payment</span>
-                        {manualAmount > 0 && (
-                          <span style={{ fontSize: '10px', background: '#FEF3C7', color: '#92400E', padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
-                            ₹{manualAmount}
-                          </span>
-                        )}
+                        Remove
                       </button>
                     </div>
-                  ) : null}
+                  </div>
+                ) : isCreditInsufficient ? (
+                  <div style={{
+                    background: '#FFFBEB',
+                    border: '1.5px solid #FDE68A',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <AlertCircle size={18} color="#D97706" style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#92400E' }}>
+                          Credits Insufficient {!hasValidCredits ? '(No Active Credits)' : `(${formatCurrency(availableCredits)} available)`}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#B45309', marginTop: '1px' }}>
+                          Client has insufficient credits to settle today's bill.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSelectingUpgradeMembership(true)}
+                      style={{
+                        background: 'linear-gradient(135deg, #B88B4A 0%, #9E7437 100%)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '7px 14px',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: '0 2px 6px rgba(184, 139, 74, 0.28)'
+                      }}
+                    >
+                      <Crown size={14} />
+                      <span>Upgrade Membership</span>
+                    </button>
+                  </div>
+                ) : null}
 
-                  {/* If member paying direct manually with 0 credits: direct clean view with option to switch if needed */}
-                  {isMember && creditUsed === 0 && settlementTab === 'manual' && (
+                {/* Membership Purchase Callout Banner */}
+                {isPurchasingMembership && (
+                  <div style={{
+                    background: '#FAF6EE',
+                    border: '1.5px solid #DAC493',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '16px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '10px'
+                  }}>
+                    <span style={{ fontSize: '20px', lineHeight: 1 }}>👑</span>
+                    <div style={{ fontSize: '12px', lineHeight: 1.45, color: '#44403C' }}>
+                      <div style={{ fontWeight: '800', color: '#B88B4A', marginBottom: '2px' }}>
+                        New Membership Purchase Included: {paymentModalVisit?.membership_tier} ({formatCurrency(paymentModalVisit?.membership_price || 0)})
+                      </div>
+                      <div>
+                        This client is purchasing a membership on this visit. Please collect the full bill amount (<strong>{formatCurrency(totalBill)}</strong>) below via manual payment (UPI, Cash, or Card). Membership credits & benefits will be automatically activated on their profile once settled.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* EXISTING VIP MEMBER CARD & CREDITS DEDUCTION */}
+                {isExistingMember && (
+                  <div style={{
+                    background: '#FAF6EE',
+                    border: '1.5px solid #DAC493',
+                    borderRadius: '12px',
+                    padding: '12px 14px',
+                    marginBottom: '10px',
+                    boxShadow: '0 4px 14px rgba(184, 139, 74, 0.08)'
+                  }}>
+                    {/* Member Info & Available Credits Header */}
                     <div style={{
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      background: '#FAF6EE',
-                      border: '1px solid #DAC493',
-                      borderRadius: '8px',
-                      padding: '8px 12px',
-                      marginBottom: '14px'
+                      marginBottom: '8px',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid rgba(218, 196, 147, 0.5)'
                     }}>
-                      <div style={{ fontSize: '11.5px', color: '#92400E' }}>
-                        💎 <strong>{rawClientTier}</strong> • Paying Direct (₹0 Credits Used)
-                      </div>
-                      {availableCredits > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const maxCredit = Math.min(totalBill, availableCredits);
-                            setSettlementTab('membership');
-                            setPaymentForm(prev => ({
-                              ...prev,
-                              membership_amount_used: maxCredit,
-                              amount_paid: Math.max(0, totalBill - maxCredit)
-                            }));
-                          }}
-                          style={{
-                            fontSize: '11px',
-                            color: '#B88B4A',
-                            fontWeight: '700',
-                            background: '#FFFFFF',
-                            border: '1px solid #DAC493',
-                            padding: '3px 8px',
-                            borderRadius: '5px',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#FAF6EE'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = '#FFFFFF'; }}
-                        >
-                          + Apply Member Credits
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* TAB 1: MEMBERSHIP CREDITS & BENEFIT */}
-                  {isMember && settlementTab === 'membership' ? (
-                    <div style={{
-                      padding: '14px 16px',
-                      background: '#FAF6EE',
-                      border: '1.5px solid #DAC493',
-                      borderRadius: 'var(--radius-md)',
-                      marginBottom: '16px'
-                    }}>
-                      {/* Available Credits Verification */}
-                      <div style={{
-                        background: creditUsed <= availableCredits ? '#F0FDF4' : '#FEF2F2',
-                        border: `1.5px solid ${creditUsed <= availableCredits ? '#BBF7D0' : '#FECACA'}`,
-                        borderRadius: '8px',
-                        padding: '10px 12px',
-                        marginBottom: '14px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: '6px'
-                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '20px', lineHeight: 1 }}>💎</span>
                         <div>
-                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.06em', color: creditUsed <= availableCredits ? '#166534' : '#991B1B', fontWeight: '800' }}>
-                            {creditUsed <= availableCredits ? '✓ Available Credits Verified' : '⚠️ Exceeds Available Credits'}
+                          <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#785422', letterSpacing: '0.04em' }}>
+                            {rawClientTier}
                           </div>
-                          <div style={{ fontSize: '12px', color: '#1C1917', marginTop: '2px' }}>
-                            Client has <strong>{formatCurrency(availableCredits)}</strong> available ({rawClientTier})
+                          <div style={{ fontSize: '10.5px', color: '#92400E', fontWeight: '600' }}>
+                            Active VIP Member
                           </div>
                         </div>
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: '800',
-                          padding: '3px 8px',
-                          borderRadius: '5px',
-                          background: creditUsed <= availableCredits ? '#DCFCE7' : '#FEE2E2',
-                          color: creditUsed <= availableCredits ? '#166534' : '#991B1B'
-                        }}>
-                          {creditUsed <= availableCredits ? 'Sufficient Balance' : 'Over Balance Limit'}
-                        </span>
                       </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
+                          Available Credits
+                        </div>
+                        <div style={{ fontSize: '18px', fontWeight: '800', color: availableCredits > 0 ? '#166534' : '#DC2626' }}>
+                          {formatCurrency(availableCredits)}
+                        </div>
+                      </div>
+                    </div>
 
-                      {/* Amount to Deduct from Membership Credits */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
-                          <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
-                            Amount to Deduct from Credits (₹)
-                          </label>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const maxCredit = Math.min(totalBill, availableCredits);
-                                setPaymentForm(prev => ({
-                                  ...prev,
-                                  membership_amount_used: maxCredit,
-                                  amount_paid: Math.max(0, totalBill - maxCredit)
-                                }));
-                              }}
-                              style={{ fontSize: '10.5px', color: '#B88B4A', background: '#FFFFFF', border: '1px solid #DAC493', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: '700' }}
-                            >
-                              Max Available (₹{Math.min(totalBill, availableCredits)})
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
+                    {/* Interactive Credit Usage Box */}
+                    {availableCredits > 0 ? (
+                      <div style={{
+                        background: '#FFFFFF',
+                        border: isUsingCredits ? '1.5px solid #166534' : '1.5px solid #DAC493',
+                        borderRadius: '10px',
+                        padding: '10px 12px',
+                        boxShadow: isUsingCredits ? '0 2px 8px rgba(22, 101, 52, 0.08)' : 'none',
+                        marginBottom: '10px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <CheckCircle2 size={18} color={isUsingCredits ? '#166534' : '#9CA3AF'} />
+                            <div>
+                              <div style={{ fontSize: '12.5px', fontWeight: '800', color: isUsingCredits ? '#166534' : '#1C1917' }}>
+                                {isUsingCredits ? '✓ Membership Credits Applied' : 'Use Membership Credits'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                {isUsingCredits
+                                  ? `Deducting ${formatCurrency(creditUsed)} for today's visit`
+                                  : `Click to deduct service cost from ${formatCurrency(availableCredits)} available credits`}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isUsingCredits) {
+                                // Remove credits -> pay manually
                                 setPaymentForm(prev => ({
                                   ...prev,
                                   membership_amount_used: 0,
-                                  amount_paid: totalBill
+                                  amount_paid: totalBill,
+                                  payment_method: prev.payment_method === 'Membership' ? 'UPI' : prev.payment_method
                                 }));
                                 setSettlementTab('manual');
-                              }}
-                              style={{ fontSize: '10.5px', color: '#78716C', background: '#FFFFFF', border: '1px solid #E5E7EB', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontWeight: '600' }}
-                            >
-                              Zero (Pay Manually)
-                            </button>
-                          </div>
-                        </div>
-                        <input
-                          type="number"
-                          min="0"
-                          max={availableCredits}
-                          value={paymentForm.membership_amount_used}
-                          onChange={(e) => {
-                            const val = Math.max(0, parseFloat(e.target.value) || 0);
-                            setPaymentForm(prev => ({
-                              ...prev,
-                              membership_amount_used: val,
-                              amount_paid: Math.max(0, totalBill - val)
-                            }));
-                          }}
-                          placeholder="e.g. 5000"
-                          style={{
-                            width: '100%',
-                            padding: '9px 12px',
-                            borderRadius: 'var(--radius-sm)',
-                            border: '1.5px solid #DAC493',
-                            fontSize: '15px',
-                            fontWeight: '700',
-                            background: '#FFFFFF',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      {/* Date Benefit/Credit Used */}
-                      <div style={{ marginBottom: '14px' }}>
-                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#1C1917', marginBottom: '4px' }}>
-                          Date Benefit / Credits Used
-                        </label>
-                        <input
-                          type="date"
-                          value={paymentForm.benefit_used_date}
-                          onChange={(e) => setPaymentForm(prev => ({ ...prev, benefit_used_date: e.target.value }))}
-                          style={{
-                            width: '100%',
-                            padding: '8px 10px',
-                            borderRadius: 'var(--radius-sm)',
-                            border: '1px solid #DAC493',
-                            fontSize: '13px',
-                            fontWeight: '600',
-                            background: '#FFFFFF',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      {/* Benefit Availed / Redeemed: ONLY Show Selected Benefit */}
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                          <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
-                            Benefit Availed / Redeemed:
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setIsEditingPerkInModal(!isEditingPerkInModal)}
-                            style={{ fontSize: '11px', color: '#B88B4A', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline' }}
+                              } else {
+                                // Apply credits
+                                const maxCredit = Math.min(totalBill, availableCredits);
+                                const remainingManual = Math.max(0, totalBill - maxCredit);
+                                setPaymentForm(prev => ({
+                                  ...prev,
+                                  membership_amount_used: maxCredit,
+                                  amount_paid: remainingManual,
+                                  payment_method: remainingManual === 0 ? 'Membership' : (prev.payment_method || 'UPI'),
+                                  notes: prev.notes || '[MEMBERSHIP SETTLEMENT: Auto Credits Applied]'
+                                }));
+                                setSettlementTab(remainingManual === 0 ? 'membership' : 'manual');
+                              }
+                            }}
+                            style={{
+                              background: isUsingCredits ? '#DCFCE7' : 'linear-gradient(135deg, #B88B4A 0%, #9E7437 100%)',
+                              color: isUsingCredits ? '#166534' : '#FFFFFF',
+                              border: isUsingCredits ? '1px solid #BBF7D0' : 'none',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              transition: 'all 0.15s ease'
+                            }}
                           >
-                            {isEditingPerkInModal ? 'Done' : (hasBenefitSelected ? 'Change' : '+ Select')}
+                            {isUsingCredits ? (
+                              <>
+                                <Check size={13} />
+                                <span>Credits Applied</span>
+                              </>
+                            ) : (
+                              <span>🔘 Use Credits</span>
+                            )}
                           </button>
                         </div>
 
-                        {!isEditingPerkInModal ? (
-                          hasBenefitSelected ? (
+                        {/* Deduction breakdown */}
+                        {isUsingCredits && (
+                          <div style={{
+                            marginTop: '8px',
+                            paddingTop: '8px',
+                            borderTop: '1px dashed #E5E7EB',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '4px',
+                            fontSize: '11.5px'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4B5563' }}>
+                              <span>Available Membership Credits:</span>
+                              <span style={{ fontWeight: '600' }}>{formatCurrency(availableCredits)}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontWeight: '700' }}>
+                              <span>Visit / Service Cost Deducted:</span>
+                              <span>-{formatCurrency(creditUsed)}</span>
+                            </div>
                             <div style={{
-                              padding: '10px 14px',
-                              borderRadius: '8px',
-                              background: '#FFFFFF',
-                              border: '1.5px solid #DAC493',
                               display: 'flex',
-                              alignItems: 'center',
                               justifyContent: 'space-between',
-                              gap: '8px'
+                              alignItems: 'center',
+                              paddingTop: '5px',
+                              borderTop: '1.5px solid #F3F4F6',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              color: '#1C1917'
                             }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <Sparkles size={15} color="#B88B4A" style={{ flexShrink: 0 }} />
-                                <span style={{ fontSize: '13px', fontWeight: '700', color: '#1C1917' }}>
-                                  {paymentForm.membership_benefit_used}
-                                </span>
-                              </div>
-                              <span style={{
-                                fontSize: '10.5px',
-                                fontWeight: '700',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                background: '#DCFCE7',
-                                color: '#166534',
-                                border: '1px solid #BBF7D0',
-                                flexShrink: 0
-                              }}>
-                                ✓ Selected by Client
+                              <span>Remaining Balance Credits:</span>
+                              <span style={{ color: '#B88B4A', fontSize: '13.5px' }}>{formatCurrency(balanceCreditsAfterVisit)}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{
+                        background: '#FFFBEB',
+                        border: '1px solid #FDE68A',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        fontSize: '12px',
+                        color: '#92400E',
+                        marginBottom: '12px'
+                      }}>
+                        Zero balance remaining on this membership. Please collect via manual payment below or upgrade membership.
+                      </div>
+                    )}
+
+                    {/* Benefit Availed / Redeemed Perk */}
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
+                          Benefit Availed / Redeemed:
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingPerkInModal(!isEditingPerkInModal)}
+                          style={{ fontSize: '11px', color: '#B88B4A', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline' }}
+                        >
+                          {isEditingPerkInModal ? 'Done' : (hasBenefitSelected ? 'Change' : '+ Select')}
+                        </button>
+                      </div>
+
+                      {!isEditingPerkInModal ? (
+                        hasBenefitSelected ? (
+                          <div style={{
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            background: '#FFFFFF',
+                            border: '1.5px solid #DAC493',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '8px'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Sparkles size={15} color="#B88B4A" style={{ flexShrink: 0 }} />
+                              <span style={{ fontSize: '13px', fontWeight: '700', color: '#1C1917' }}>
+                                {paymentForm.membership_benefit_used}
                               </span>
                             </div>
-                          ) : (
-                            <div style={{
-                              padding: '9px 12px',
-                              borderRadius: '8px',
-                              background: '#FFFFFF',
-                              border: '1px solid #E5E7EB',
-                              fontSize: '12px',
-                              color: '#6B7280'
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '700',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              background: '#DCFCE7',
+                              color: '#166534',
+                              border: '1px solid #BBF7D0',
+                              flexShrink: 0
                             }}>
-                              None (No perk selected for this visit)
-                            </div>
-                          )
+                              ✓ Selected by Client
+                            </span>
+                          </div>
                         ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: '#FFFFFF', padding: '10px', borderRadius: '8px', border: '1px solid #DAC493' }}>
+                          <div style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            background: '#FFFFFF',
+                            border: '1px solid #E5E7EB',
+                            fontSize: '11.5px',
+                            color: '#6B7280'
+                          }}>
+                            None (No perk selected for this visit)
+                          </div>
+                        )
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: '#FFFFFF', padding: '10px', borderRadius: '8px', border: '1px solid #DAC493' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPaymentForm(prev => ({ ...prev, membership_benefit_used: '' }));
+                              setIsEditingPerkInModal(false);
+                            }}
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: '5px',
+                              border: !paymentForm.membership_benefit_used ? '1.5px solid #B88B4A' : '1px solid #E5E7EB',
+                              background: !paymentForm.membership_benefit_used ? '#FAF6EE' : '#FFFFFF',
+                              color: !paymentForm.membership_benefit_used ? '#B88B4A' : '#4B5563',
+                              fontSize: '11.5px',
+                              fontWeight: '600',
+                              textAlign: 'left',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            None (Do not avail perk today)
+                          </button>
+                          {tierPerks.map(p => (
                             <button
+                              key={p}
                               type="button"
                               onClick={() => {
-                                setPaymentForm(prev => ({ ...prev, membership_benefit_used: '' }));
+                                setPaymentForm(prev => ({ ...prev, membership_benefit_used: p }));
                                 setIsEditingPerkInModal(false);
                               }}
                               style={{
                                 padding: '6px 10px',
                                 borderRadius: '5px',
-                                border: !paymentForm.membership_benefit_used ? '1.5px solid #B88B4A' : '1px solid #E5E7EB',
-                                background: !paymentForm.membership_benefit_used ? '#FAF6EE' : '#FFFFFF',
-                                color: !paymentForm.membership_benefit_used ? '#B88B4A' : '#4B5563',
+                                border: paymentForm.membership_benefit_used === p ? '1.5px solid #B88B4A' : '1px solid #E5E7EB',
+                                background: paymentForm.membership_benefit_used === p ? '#FAF6EE' : '#FFFFFF',
+                                color: paymentForm.membership_benefit_used === p ? '#B88B4A' : '#1C1917',
                                 fontSize: '11.5px',
-                                fontWeight: '600',
+                                fontWeight: paymentForm.membership_benefit_used === p ? '700' : '500',
                                 textAlign: 'left',
                                 cursor: 'pointer'
                               }}
                             >
-                              None (Do not avail perk today)
-                            </button>
-                            {tierPerks.map(p => (
-                              <button
-                                key={p}
-                                type="button"
-                                onClick={() => {
-                                  setPaymentForm(prev => ({ ...prev, membership_benefit_used: p }));
-                                  setIsEditingPerkInModal(false);
-                                }}
-                                style={{
-                                  padding: '6px 10px',
-                                  borderRadius: '5px',
-                                  border: paymentForm.membership_benefit_used === p ? '1.5px solid #B88B4A' : '1px solid #E5E7EB',
-                                  background: paymentForm.membership_benefit_used === p ? '#FAF6EE' : '#FFFFFF',
-                                  color: paymentForm.membership_benefit_used === p ? '#B88B4A' : '#1C1917',
-                                  fontSize: '11.5px',
-                                  fontWeight: paymentForm.membership_benefit_used === p ? '700' : '500',
-                                  textAlign: 'left',
-                                  cursor: 'pointer'
-                                }}
-                              >
-                                {paymentForm.membership_benefit_used === p && <span style={{ marginRight: '6px' }}>✓</span>}
-                                {p}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Benefit Status */}
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '7px 12px',
-                        borderRadius: '6px',
-                        background: '#FFFFFF',
-                        border: '1px solid rgba(184, 139, 74, 0.25)',
-                        marginTop: '8px'
-                      }}>
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          Benefit Status:
-                        </span>
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: '800',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          background: autoGeneratedStatus === 'Available' ? '#DCFCE7' : '#FEF3C7',
-                          color: autoGeneratedStatus === 'Available' ? '#166534' : '#92400E',
-                          border: autoGeneratedStatus === 'Available' ? '1px solid #BBF7D0' : '1px solid #FDE68A'
-                        }}>
-                          • {autoGeneratedStatus}
-                        </span>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* TAB 2: MANUAL PAYMENT (REMAINING BALANCE) */}
-                  {(!isExistingMember || settlementTab === 'manual') ? (
-                    <div>
-                      {/* Remaining Balance Summary Banner (ONLY when credits used) */}
-                      {isExistingMember && creditUsed > 0 && (
-                        <div style={{
-                          background: remainingAfterCredit > 0 ? '#FAF6EE' : '#F0FDF4',
-                          border: `1.5px solid ${remainingAfterCredit > 0 ? '#DAC493' : '#BBF7D0'}`,
-                          borderRadius: '8px',
-                          padding: '10px 14px',
-                          marginBottom: '14px',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center'
-                        }}>
-                          <div>
-                            <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
-                              Remaining Balance to Collect
-                            </div>
-                            <div style={{ fontSize: '20px', fontWeight: '800', color: remainingAfterCredit > 0 ? '#92400E' : '#166534', marginTop: '2px' }}>
-                              {formatCurrency(remainingAfterCredit)}
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right', fontSize: '11.5px', color: '#78716C' }}>
-                            <div>Total Bill: <strong>{formatCurrency(totalBill)}</strong></div>
-                            <div>Credits Used: <strong style={{ color: '#166534' }}>-{formatCurrency(creditUsed)}</strong></div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Payment Method Selector (UPI, Cash, Card) */}
-                      <div style={{ marginBottom: '14px' }}>
-                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#1C1917', marginBottom: '6px' }}>
-                          Select Manual Payment Method:
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                          {[
-                            { id: 'UPI', label: '📱 UPI' },
-                            { id: 'Cash', label: '💵 Cash' },
-                            { id: 'Card', label: '💳 Card' }
-                          ].map(m => (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => setPaymentForm(prev => ({ ...prev, payment_method: m.id }))}
-                              style={{
-                                padding: '10px 4px',
-                                borderRadius: 'var(--radius-md)',
-                                border: paymentForm.payment_method === m.id ? '2px solid #B88B4A' : '1px solid var(--border-color)',
-                                background: paymentForm.payment_method === m.id ? '#FAF6EE' : '#FFFFFF',
-                                color: paymentForm.payment_method === m.id ? '#B88B4A' : 'var(--text-main)',
-                                fontWeight: '700',
-                                fontSize: '13px',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '4px',
-                                transition: 'all 0.15s ease'
-                              }}
-                            >
-                              {paymentForm.payment_method === m.id && <CheckCircle2 size={13} color="#B88B4A" />}
-                              <span>{m.label}</span>
+                              {paymentForm.membership_benefit_used === p && <span style={{ marginRight: '6px' }}>✓</span>}
+                              {p}
                             </button>
                           ))}
                         </div>
-                      </div>
-
-                      {/* Amount Paid Input */}
-                      <div style={{ marginBottom: '14px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                          <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
-                            Amount Collected Manually (₹)
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setPaymentForm(prev => ({ ...prev, amount_paid: remainingAfterCredit }))}
-                            style={{ fontSize: '11px', color: '#B88B4A', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline' }}
-                          >
-                            Mark Full Remaining ({formatCurrency(remainingAfterCredit)})
-                          </button>
-                        </div>
-                        <input
-                          type="number"
-                          min="0"
-                          max={totalBill}
-                          value={paymentForm.amount_paid}
-                          onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.max(0, parseFloat(e.target.value) || 0) }))}
-                          style={{
-                            width: '100%',
-                            padding: '10px 14px',
-                            borderRadius: 'var(--radius-md)',
-                            border: '1.5px solid var(--border-color)',
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            outline: 'none'
-                          }}
-                        />
-                      </div>
-
-                      {/* Card Slip Ref if Card */}
-                      {paymentForm.payment_method === 'Card' && (
-                        <div style={{ marginBottom: '14px' }}>
-                          <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                            Card Slip / Auth Ref (Optional)
-                          </label>
-                          <input
-                            type="text"
-                            value={paymentForm.card_ref || ''}
-                            onChange={(e) => setPaymentForm(prev => ({ ...prev, card_ref: e.target.value }))}
-                            placeholder="e.g. POS Auth 98234 / Card Last 4"
-                            style={{
-                              width: '100%',
-                              padding: '8px 12px',
-                              borderRadius: 'var(--radius-sm)',
-                              border: '1px solid var(--border-color)',
-                              fontSize: '13px',
-                              outline: 'none'
-                            }}
-                          />
-                        </div>
                       )}
+                    </div>
+                  </div>
+                )}
 
-                      {/* Notes */}
-                      <div style={{ marginBottom: '12px' }}>
+                {/* IF 100% COVERED BY MEMBERSHIP CREDITS: ONLY SHOW CREDITS SETTLEMENT */}
+                {isExistingMember && isUsingCredits && remainingAfterCredit === 0 ? (
+                  <div style={{
+                    background: '#F0FDF4',
+                    border: '1.5px solid #BBF7D0',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    marginBottom: '14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <CheckCircle2 size={18} color="#166534" style={{ flexShrink: 0 }} />
+                      <div>
+                        <div style={{ fontSize: '12.5px', color: '#166534', fontWeight: '800' }}>
+                          100% Settled via Membership Credits
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#15803D' }}>
+                          No cash or card collection required. Click Approve & Settle below.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaymentForm(prev => ({
+                          ...prev,
+                          membership_amount_used: 0,
+                          amount_paid: totalBill,
+                          payment_method: 'UPI'
+                        }));
+                        setSettlementTab('manual');
+                      }}
+                      style={{
+                        background: '#FFFFFF',
+                        border: '1px solid #BBF7D0',
+                        color: '#78716C',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        padding: '4px 10px',
+                        borderRadius: '5px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Pay Manually Instead
+                    </button>
+                  </div>
+                ) : (
+                  /* MANUAL PAYMENT SECTION (Shown for non-members, 0 credits, or partial balances) */
+                  <div>
+                    {/* Remaining Balance Banner if partial credits used */}
+                    {isExistingMember && isUsingCredits && remainingAfterCredit > 0 && (
+                      <div style={{
+                        background: '#FFFBEB',
+                        border: '1.5px solid #FDE68A',
+                        borderRadius: '8px',
+                        padding: '10px 14px',
+                        marginBottom: '14px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#92400E', fontWeight: '700' }}>
+                            Remaining Balance to Collect Manually
+                          </div>
+                          <div style={{ fontSize: '20px', fontWeight: '800', color: '#92400E', marginTop: '2px' }}>
+                            {formatCurrency(remainingAfterCredit)}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: '11.5px', color: '#78716C' }}>
+                          <div>Total Bill: <strong>{formatCurrency(totalBill)}</strong></div>
+                          <div>Credits Applied: <strong style={{ color: '#166534' }}>-{formatCurrency(creditUsed)}</strong></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Payment Method Selector (UPI, Cash, Card) */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#1C1917', marginBottom: '6px' }}>
+                        Select Manual Payment Method:
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                        {[
+                          { id: 'UPI', label: '📱 UPI' },
+                          { id: 'Cash', label: '💵 Cash' },
+                          { id: 'Card', label: '💳 Card' }
+                        ].map(m => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setPaymentForm(prev => ({ ...prev, payment_method: m.id }))}
+                            style={{
+                              padding: '10px 4px',
+                              borderRadius: 'var(--radius-md)',
+                              border: paymentForm.payment_method === m.id ? '2px solid #B88B4A' : '1px solid var(--border-color)',
+                              background: paymentForm.payment_method === m.id ? '#FAF6EE' : '#FFFFFF',
+                              color: paymentForm.payment_method === m.id ? '#B88B4A' : 'var(--text-main)',
+                              fontWeight: '700',
+                              fontSize: '13px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '4px',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            {paymentForm.payment_method === m.id && <CheckCircle2 size={13} color="#B88B4A" />}
+                            <span>{m.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Amount Paid Input */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
+                          Amount Collected Manually (₹)
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentForm(prev => ({ ...prev, amount_paid: remainingAfterCredit }))}
+                          style={{ fontSize: '11px', color: '#B88B4A', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline' }}
+                        >
+                          Mark Full Remaining ({formatCurrency(remainingAfterCredit)})
+                        </button>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        max={totalBill}
+                        value={paymentForm.amount_paid}
+                        onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.max(0, parseFloat(e.target.value) || 0) }))}
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--radius-md)',
+                          border: '1.5px solid var(--border-color)',
+                          fontSize: '16px',
+                          fontWeight: '700',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+
+                    {/* Card Slip Ref if Card */}
+                    {paymentForm.payment_method === 'Card' && (
+                      <div style={{ marginBottom: '14px' }}>
                         <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          Receptionist Settlement Notes (Optional)
+                          Card Slip / Auth Ref (Optional)
                         </label>
                         <input
                           type="text"
-                          value={paymentForm.notes || ''}
-                          onChange={(e) => setPaymentForm(prev => ({ ...prev, notes: e.target.value }))}
-                          placeholder="e.g. Paid via receptionist desk, split verified"
+                          value={paymentForm.card_ref || ''}
+                          onChange={(e) => setPaymentForm(prev => ({ ...prev, card_ref: e.target.value }))}
+                          placeholder="e.g. POS Auth 98234 / Card Last 4"
                           style={{
                             width: '100%',
                             padding: '8px 12px',
                             borderRadius: 'var(--radius-sm)',
                             border: '1px solid var(--border-color)',
-                            fontSize: '12.5px',
+                            fontSize: '13px',
                             outline: 'none'
                           }}
                         />
                       </div>
-                    </div>
-                  ) : null}
+                    )}
 
-                  {/* Settlement Summary Footer Banner */}
-                  <div style={{
-                    marginTop: '14px',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    background: '#F9FAFB',
-                    border: '1px solid #E5E7EB',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '8px',
-                    fontSize: '12px'
-                  }}>
-                    <div>
-                      <span style={{ color: '#4B5563' }}>Settlement: </span>
-                      {creditUsed > 0 && <strong style={{ color: '#166534' }}>💎 {formatCurrency(creditUsed)} + </strong>}
-                      <strong>💳 {formatCurrency(manualAmount)}</strong>
-                    </div>
-                    <div>
-                      <span style={{
-                        fontWeight: '800',
-                        color: isFullySettled ? '#166534' : '#DC2626'
-                      }}>
-                        {isFullySettled ? '✓ Fully Settled (Paid)' : `Due: ${formatCurrency(Math.max(0, totalBill - totalSettled))}`}
-                      </span>
+                    {/* Notes */}
+                    <div style={{ marginBottom: '12px' }}>
+                      <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                        Receptionist Settlement Notes (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={paymentForm.notes || ''}
+                        onChange={(e) => setPaymentForm(prev => ({ ...prev, notes: e.target.value }))}
+                        placeholder="e.g. Paid via receptionist desk, split verified"
+                        style={{
+                          width: '100%',
+                          padding: '8px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid var(--border-color)',
+                          fontSize: '12.5px',
+                          outline: 'none'
+                        }}
+                      />
                     </div>
                   </div>
-                </div>
-              );
-            })()}
-
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-              <button
-                type="button"
-                onClick={() => setPaymentModalVisit(null)}
-                className="btn-secondary"
-                style={{ padding: '10px 18px', fontSize: '13.5px' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSavePayment}
-                disabled={isSavingPayment}
-                className="btn-primary"
-                style={{
-                  padding: '10px 24px',
-                  fontSize: '14px',
-                  fontWeight: '700',
-                  display: 'inline-flex',
+                )}
+                {/* Settlement Summary Footer Banner */}
+                <div style={{
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: '#F9FAFB',
+                  border: '1px solid #E5E7EB',
+                  display: 'flex',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <CheckCircle2 size={16} />
-                {isSavingPayment ? 'Saving...' : 'Done'}
-              </button>
-            </div>
-          </div>
+                  flexWrap: 'wrap',
+                  gap: '6px',
+                  fontSize: '11.5px'
+                }}>
+                  <div>
+                    <span style={{ color: '#4B5563' }}>Settlement: </span>
+                    {creditUsed > 0 && <strong style={{ color: '#166534' }}>💎 {formatCurrency(creditUsed)} + </strong>}
+                    <strong>💳 {formatCurrency(manualAmount)}</strong>
+                    {pendingUpgradePlan && (
+                      <span style={{ fontSize: '10.5px', color: '#B88B4A', marginLeft: '6px', fontWeight: '700' }}>
+                        (Includes {pendingUpgradePlan.name})
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <span style={{
+                      fontWeight: '800',
+                      color: isFullySettled ? '#166534' : '#DC2626'
+                    }}>
+                      {isFullySettled ? '✓ Fully Settled (Paid)' : `Due: ${formatCurrency(Math.max(0, totalBill - totalSettled))}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Modal Actions */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px' }}>
+                  <div>
+                    {!pendingUpgradePlan && (
+                      <button
+                        type="button"
+                        onClick={() => setIsSelectingUpgradeMembership(true)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#B88B4A',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        <Crown size={13} />
+                        <span>Upgrade / Add Membership</span>
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentModalVisit(null)}
+                      className="btn-secondary"
+                      style={{ padding: '8px 16px', fontSize: '13px' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSavePayment}
+                      disabled={isSavingPayment}
+                      className="btn-primary"
+                      style={{
+                        padding: '8px 20px',
+                        fontSize: '13.5px',
+                        fontWeight: '700',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <CheckCircle2 size={15} />
+                      {isSavingPayment
+                        ? 'Saving...'
+                        : (isUsingCredits && manualAmount === 0
+                            ? 'Approve & Settle from Credits'
+                            : (paymentModalVisit?.payment_status === 'Pending' ? 'Approve & Confirm' : 'Save Changes'))}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2424,6 +3023,44 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 {isSavingServiceTime ? 'Saving...' : 'Save Service Timing'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Branch & Franchise Statutory KYC Modal Overlay */}
+      {isKycModalOpen && (
+        <div 
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsKycModalOpen(false);
+            }
+          }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(28, 25, 23, 0.65)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 1000,
+            overflowY: 'auto',
+            padding: '28px 16px'
+          }}
+        >
+          <div style={{ maxWidth: '1080px', margin: '0 auto' }}>
+            <BranchFranchiseKYCModal
+              isOpen={isKycModalOpen}
+              onClose={() => setIsKycModalOpen(false)}
+              locationToEdit={currentLocation}
+              onSuccess={(updatedLoc) => {
+                setCurrentLocation(updatedLoc);
+                setIsKycModalOpen(false);
+                if (onSwitchLocation) onSwitchLocation(updatedLoc);
+              }}
+              defaultType={currentLocation?.type || 'branch'}
+              defaultFirmType={currentLocation?.kyc?.firm_type || currentLocation?.firm_type || 'Proprietor'}
+            />
           </div>
         </div>
       )}

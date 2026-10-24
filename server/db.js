@@ -15,15 +15,102 @@ db.pragma('journal_mode = WAL');
 
 export function initDatabase() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS LOCATIONS (
+      location_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      code TEXT UNIQUE,
+      type TEXT NOT NULL CHECK(type IN ('branch', 'franchise')),
+      address TEXT,
+      city TEXT,
+      state TEXT,
+      pincode TEXT,
+      phone TEXT,
+      email TEXT,
+      status TEXT NOT NULL DEFAULT 'Active' CHECK(status IN ('Active', 'Inactive', 'Opening Soon')),
+      manager_name TEXT,
+      firm_type TEXT,
+      firm_name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS LOCATION_KYC (
+      kyc_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER NOT NULL UNIQUE REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,
+      firm_type TEXT NOT NULL CHECK(firm_type IN ('Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP')),
+      firm_name TEXT NOT NULL,
+      address_line1 TEXT,
+      address_line2 TEXT,
+      pincode TEXT,
+      city TEXT,
+      state TEXT,
+      mobile_numbers TEXT,
+      email_ids TEXT,
+      firm_pan TEXT,
+      firm_pan_doc TEXT,
+      gst_number TEXT,
+      gst_doc TEXT,
+      gumastha_number TEXT,
+      gumastha_doc TEXT,
+      cin_number TEXT,
+      incorporation_doc TEXT,
+      aoa_moa_doc TEXT,
+      aoa_doc TEXT,
+      moa_doc TEXT,
+      bank_firm_name TEXT,
+      bank_name TEXT,
+      bank_account_number TEXT,
+      bank_ifsc_code TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS LOCATION_STAKEHOLDERS (
+      stakeholder_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER NOT NULL REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,
+      role_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mobile TEXT,
+      mobile_numbers TEXT,
+      email TEXT,
+      email_ids TEXT,
+      gender TEXT,
+      dob TEXT,
+      marital_status TEXT,
+      anniversary_date TEXT,
+      pan_number TEXT,
+      pan_doc TEXT,
+      aadhaar_number TEXT,
+      aadhaar_doc TEXT,
+      din_number TEXT,
+      display_order INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS USERS (
       user_id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
+      phone TEXT,
       password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff')),
+      role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff', 'master_admin')),
       active INTEGER NOT NULL DEFAULT 1,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS AUDIT_LOGS (
+      log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      action TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id INTEGER,
+      location_id INTEGER,
+      details TEXT,
+      ip_address TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS STAFF (
@@ -32,6 +119,7 @@ export function initDatabase() {
       role TEXT NOT NULL,
       phone TEXT,
       active INTEGER NOT NULL DEFAULT 1,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -41,6 +129,8 @@ export function initDatabase() {
       category_name TEXT NOT NULL,
       description TEXT,
       icon TEXT,
+      image_url TEXT,
+      image_position TEXT,
       display_order INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -56,6 +146,10 @@ export function initDatabase() {
       description TEXT,
       display_order INTEGER NOT NULL DEFAULT 0,
       active INTEGER NOT NULL DEFAULT 1,
+      has_sessions INTEGER DEFAULT 0,
+      total_sessions INTEGER DEFAULT 1,
+      session_interval INTEGER DEFAULT 0,
+      session_interval_unit TEXT DEFAULT 'days',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -79,6 +173,7 @@ export function initDatabase() {
       total_visits INTEGER NOT NULL DEFAULT 0,
       total_spend REAL NOT NULL DEFAULT 0.0,
       status TEXT NOT NULL DEFAULT 'active',
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       membership_tier TEXT,
       membership_status TEXT DEFAULT 'active',
       membership_started_at TEXT,
@@ -90,6 +185,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS VISITS (
       visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
       client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       visit_date TEXT NOT NULL,
       subtotal REAL NOT NULL,
       discount_type TEXT NOT NULL DEFAULT 'fixed' CHECK(discount_type IN ('fixed', 'percentage')),
@@ -113,9 +209,22 @@ export function initDatabase() {
       service_name_snapshot TEXT NOT NULL,
       price_snapshot REAL NOT NULL,
       staff_id INTEGER REFERENCES STAFF(staff_id),
+      course_id INTEGER,
+      session_number INTEGER,
+      total_sessions INTEGER,
+      session_status TEXT DEFAULT 'completed',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // Safe migrations for services spotlight/media details
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN subtitle TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN tag TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN downtime TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN highlights TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN video_url TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN image_url TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN gallery TEXT;`); } catch(e) {}
 
   // Safe migrations for membership and upi_ref columns
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
@@ -151,13 +260,13 @@ export function initDatabase() {
       WHERE last_benefit_used IS NOT NULL AND (last_membership_benefit_used IS NULL OR last_membership_benefit_used = '');
 
       UPDATE CLIENTS 
-      SET membership_balance = CASE
+      SET membership_balance = MAX(0.0, CASE
         WHEN LOWER(membership_tier) LIKE '%lumiere%' THEN 50000.0
         WHEN LOWER(membership_tier) LIKE '%infini%' THEN 25000.0
         WHEN LOWER(membership_tier) LIKE '%eternal%' THEN 15000.0
         WHEN LOWER(membership_tier) LIKE '%eclat%' THEN 6000.0
         ELSE 0.0
-      END - COALESCE((SELECT SUM(membership_amount_used) FROM VISITS WHERE VISITS.client_id = CLIENTS.client_id), 0.0)
+      END - COALESCE((SELECT SUM(membership_amount_used) FROM VISITS WHERE VISITS.client_id = CLIENTS.client_id), 0.0))
       WHERE membership_tier IS NOT NULL 
         AND membership_tier != '' 
         AND LOWER(membership_tier) != 'non-member';
@@ -174,10 +283,155 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN benefit_used_date TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN benefit_status TEXT DEFAULT 'Available';`); } catch(e) {}
 
-  // Safe migration to support 'visitor' in USERS role constraint if needed
+  // Safe migration for VISIT_SERVICES privilege tracking
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN is_privilege INTEGER DEFAULT 0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN privilege_id TEXT;`); } catch(e) {}
+
+  // Safe migrations for Service Session Planning & Tracking
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN has_sessions INTEGER DEFAULT 0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN total_sessions INTEGER DEFAULT 1;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN session_interval INTEGER DEFAULT 0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN session_interval_unit TEXT DEFAULT 'days';`); } catch(e) {}
+
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN course_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN session_number INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN total_sessions INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN session_status TEXT DEFAULT 'completed';`); } catch(e) {}
+
+  // Schema for permanent Membership Purchase instances and Privilege Redemptions
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS CLIENT_MEMBERSHIPS (
+      membership_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id) ON DELETE CASCADE,
+      tier_name TEXT NOT NULL,
+      cost REAL NOT NULL DEFAULT 0.0,
+      credits_allocated REAL NOT NULL DEFAULT 0.0,
+      start_date TEXT NOT NULL,
+      expiry_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'expired', 'upgraded', 'renewed', 'cancelled')),
+      purchase_visit_id INTEGER REFERENCES VISITS(visit_id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS MEMBERSHIP_PRIVILEGE_REDEMPTIONS (
+      redemption_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      membership_id INTEGER NOT NULL REFERENCES CLIENT_MEMBERSHIPS(membership_id) ON DELETE CASCADE,
+      client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id) ON DELETE CASCADE,
+      privilege_id TEXT NOT NULL,
+      privilege_name TEXT NOT NULL,
+      visit_id INTEGER REFERENCES VISITS(visit_id),
+      redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed', 'cancelled')),
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS CLIENT_TREATMENT_COURSES (
+      course_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id) ON DELETE CASCADE,
+      service_id INTEGER NOT NULL REFERENCES SERVICES(service_id),
+      service_name_snapshot TEXT NOT NULL,
+      total_planned_sessions INTEGER NOT NULL DEFAULT 1,
+      interval_value INTEGER NOT NULL DEFAULT 0,
+      interval_unit TEXT NOT NULL DEFAULT 'days',
+      completed_sessions_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'completed', 'cancelled')),
+      start_date TEXT,
+      last_completed_date TEXT,
+      next_due_date TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS TREATMENT_COURSE_SESSIONS (
+      session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_id INTEGER NOT NULL REFERENCES CLIENT_TREATMENT_COURSES(course_id) ON DELETE CASCADE,
+      client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id) ON DELETE CASCADE,
+      service_id INTEGER NOT NULL REFERENCES SERVICES(service_id),
+      session_number INTEGER NOT NULL,
+      total_sessions INTEGER NOT NULL,
+      visit_id INTEGER REFERENCES VISITS(visit_id),
+      visit_service_id INTEGER REFERENCES VISIT_SERVICES(visit_service_id) UNIQUE,
+      session_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('upcoming', 'completed', 'cancelled', 'no_show')),
+      staff_id INTEGER REFERENCES STAFF(staff_id),
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Backfill CLIENT_MEMBERSHIPS for existing active member clients
+  try {
+    const existingMembers = db.prepare(`
+      SELECT client_id, membership_tier, membership_cost, membership_balance, 
+             membership_started_at, membership_expires_at, membership_status
+      FROM CLIENTS
+      WHERE membership_tier IS NOT NULL 
+        AND membership_tier != '' 
+        AND LOWER(membership_tier) != 'non-member'
+        AND (membership_status IS NULL OR membership_status = 'active')
+    `).all();
+
+    for (const mem of existingMembers) {
+      const activeRec = db.prepare(`
+        SELECT membership_id FROM CLIENT_MEMBERSHIPS 
+        WHERE client_id = ? AND status = 'active'
+      `).get(mem.client_id);
+
+      if (!activeRec) {
+        const rawT = (mem.membership_tier || '').toLowerCase();
+        const tierCost = rawT.includes('lumiere') ? 50000 :
+          rawT.includes('infini') ? 25000 :
+          rawT.includes('eternal') ? 15000 :
+          rawT.includes('eclat') ? 6000 : 25000;
+
+        const info = db.prepare(`
+          INSERT INTO CLIENT_MEMBERSHIPS (
+            client_id, tier_name, cost, credits_allocated, start_date, expiry_date, status
+          ) VALUES (?, ?, ?, ?, ?, ?, 'active')
+        `).run(
+          mem.client_id,
+          mem.membership_tier,
+          mem.membership_cost || tierCost,
+          mem.membership_cost || tierCost,
+          mem.membership_started_at || '2026-10-15',
+          mem.membership_expires_at || '2027-10-15'
+        );
+
+        const newMemId = info.lastInsertRowid;
+
+        // If this is an Infini member, seed initial used privileges (analysis x2 and VIP access) matching screenshot
+        if (rawT.includes('infini')) {
+          const insertRedemption = db.prepare(`
+            INSERT INTO MEMBERSHIP_PRIVILEGE_REDEMPTIONS (membership_id, client_id, privilege_id, privilege_name, status)
+            VALUES (?, ?, ?, ?, 'completed')
+          `);
+          // 3D skin & hair analysis twice a year: 2 redemptions (allowed 2 -> USED)
+          insertRedemption.run(newMemId, mem.client_id, 'priv_infini_analysis', 'Free comprehensive 3D skin & hair analysis twice a year');
+          insertRedemption.run(newMemId, mem.client_id, 'priv_infini_analysis', 'Free comprehensive 3D skin & hair analysis twice a year');
+          // Dedicated relationship manager & VIP suite access: 1 redemption (allowed 1 -> USED)
+          insertRedemption.run(newMemId, mem.client_id, 'priv_infini_vip', 'Dedicated relationship manager & VIP suite access');
+        }
+      }
+    }
+  } catch(e) {
+    console.error('Membership backfill notice:', e.message);
+  }
+
+  // Safe migrations for location_id columns
+  try { db.exec(`ALTER TABLE USERS ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_type TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_name TEXT;`); } catch(e) {}
+
+  // Safe migration to support 'master_admin' in USERS role constraint if needed
   try {
     const userSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='USERS'").get()?.sql || '';
-    if (userSql && !userSql.includes('visitor')) {
+    if (userSql && !userSql.includes('master_admin')) {
       db.exec(`
         PRAGMA foreign_keys = OFF;
         CREATE TABLE USERS_new (
@@ -185,20 +439,100 @@ export function initDatabase() {
           name TEXT NOT NULL,
           email TEXT UNIQUE NOT NULL,
           password_hash TEXT NOT NULL,
-          role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff')),
+          role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff', 'master_admin')),
           active INTEGER NOT NULL DEFAULT 1,
+          location_id INTEGER,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO USERS_new (user_id, name, email, password_hash, role, active, created_at, updated_at)
-        SELECT user_id, name, email, password_hash, role, active, created_at, updated_at FROM USERS;
+        INSERT INTO USERS_new (user_id, name, email, password_hash, role, active, location_id, created_at, updated_at)
+        SELECT user_id, name, email, password_hash, role, active, location_id, created_at, updated_at FROM USERS;
         DROP TABLE USERS;
         ALTER TABLE USERS_new RENAME TO USERS;
         PRAGMA foreign_keys = ON;
       `);
+      console.log('USERS table migrated to support master_admin role.');
     }
   } catch (e) {
     console.error('Users migration notice:', e.message);
+  }
+
+  // Safe migration and seeding of default LOCATIONS
+  try {
+    const locCount = db.prepare("SELECT COUNT(*) as count FROM LOCATIONS").get().count;
+    if (locCount === 0) {
+      console.log('Seeding initial branches and franchises...');
+      const insertLoc = db.prepare(`
+        INSERT INTO LOCATIONS (name, code, type, address, city, state, pincode, phone, email, status, manager_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      insertLoc.run(
+        'Maison BeYou — Jubilee Hills Flagship',
+        'MB-JH-01',
+        'branch',
+        'Road No. 36, Jubilee Hills',
+        'Hyderabad',
+        'Telangana',
+        '500033',
+        '+91 98200 12345',
+        'jubilee@maisonbeyou.com',
+        'Active',
+        'Ayesha Khan'
+      );
+
+      insertLoc.run(
+        'Maison BeYou — Bandra West Studio',
+        'MB-BW-02',
+        'branch',
+        'Linking Road, Bandra West',
+        'Mumbai',
+        'Maharashtra',
+        '400050',
+        '+91 98200 54321',
+        'bandra@maisonbeyou.com',
+        'Active',
+        'Vikram Rathore'
+      );
+
+      insertLoc.run(
+        'Maison BeYou — Indiranagar Franchise',
+        'MB-IN-F01',
+        'franchise',
+        '100ft Road, Indiranagar',
+        'Bengaluru',
+        'Karnataka',
+        '560038',
+        '+91 98800 11223',
+        'indiranagar@maisonbeyou.com',
+        'Active',
+        'Karan Verma'
+      );
+
+      insertLoc.run(
+        'Maison BeYou — Koregaon Park Franchise',
+        'MB-KP-F02',
+        'franchise',
+        'North Main Road, Koregaon Park',
+        'Pune',
+        'Maharashtra',
+        '411001',
+        '+91 98900 33445',
+        'koregaon@maisonbeyou.com',
+        'Active',
+        'Tanvi Deshmukh'
+      );
+    }
+
+    // Associate existing records with flagship branch (location_id = 1) if not already associated
+    db.exec(`
+      UPDATE USERS SET location_id = 1 WHERE location_id IS NULL AND role != 'master_admin';
+      UPDATE STAFF SET location_id = 1 WHERE location_id IS NULL;
+      UPDATE CLIENTS SET location_id = 1 WHERE location_id IS NULL;
+      UPDATE VISITS SET location_id = 1 WHERE location_id IS NULL;
+    `);
+  } catch (e) {
+    console.error('Locations migration notice:', e.message);
   }
 
   // Safe migration to support 'Membership' in VISITS payment_method constraint
@@ -280,6 +614,51 @@ function seedData() {
   if (!visitorUser) {
     console.log('Seeding visitor user...');
     insertUser.run('Visitor Desk', 'visitor@maisonbeyou.com', bcrypt.hashSync('visitor123', salt), 'visitor');
+  }
+
+  // Ensure master admin user exists
+  const masterUser = db.prepare('SELECT * FROM USERS WHERE email = ?').get('master@maisonbeyou.com');
+  if (!masterUser) {
+    console.log('Seeding Master Admin user...');
+    insertUser.run('Maison Master Admin', 'master@maisonbeyou.com', bcrypt.hashSync('master123', salt), 'master_admin');
+  }
+
+  // Multi-location sample staff and clients for isolation demo
+  try {
+    const loc2Staff = db.prepare('SELECT COUNT(*) as count FROM STAFF WHERE location_id = 2').get().count;
+    if (loc2Staff === 0) {
+      const insertStaffLoc = db.prepare(`INSERT INTO STAFF (name, role, phone, active, location_id) VALUES (?, ?, ?, 1, ?)`);
+      insertStaffLoc.run('Dr. Sameer Sen', 'Aesthetic Physician', '+91 98205 11223', 2);
+      insertStaffLoc.run('Natasha Rao', 'Skin & Laser Specialist', '+91 98205 22334', 2);
+    }
+
+    const loc3Staff = db.prepare('SELECT COUNT(*) as count FROM STAFF WHERE location_id = 3').get().count;
+    if (loc3Staff === 0) {
+      const insertStaffLoc = db.prepare(`INSERT INTO STAFF (name, role, phone, active, location_id) VALUES (?, ?, ?, 1, ?)`);
+      insertStaffLoc.run('Dr. Kavita Reddy', 'Consultant Dermatologist', '+91 98801 11223', 3);
+      insertStaffLoc.run('Deepak Nair', 'Senior Laser Therapist', '+91 98801 22334', 3);
+    }
+
+    const loc2Clients = db.prepare('SELECT COUNT(*) as count FROM CLIENTS WHERE location_id = 2').get().count;
+    if (loc2Clients === 0) {
+      const insertClientLoc = db.prepare(`
+        INSERT OR IGNORE INTO CLIENTS (name, surname, phone, email, location_id, total_visits, total_spend, status, membership_tier)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      `);
+      insertClientLoc.run('Meera', 'Singhania', '9820500001', 'meera.s@example.com', 2, 3, 24000, 'LUMIÈRE PRIVILEGE');
+      insertClientLoc.run('Arjun', 'Kapoor', '9820500002', 'arjun.k@example.com', 2, 1, 8500, 'ÉCLAT ESSENTIALS');
+    }
+
+    const loc3Clients = db.prepare('SELECT COUNT(*) as count FROM CLIENTS WHERE location_id = 3').get().count;
+    if (loc3Clients === 0) {
+      const insertClientLoc = db.prepare(`
+        INSERT OR IGNORE INTO CLIENTS (name, surname, phone, email, location_id, total_visits, total_spend, status, membership_tier)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      `);
+      insertClientLoc.run('Ananya', 'Iyer', '9880100003', 'ananya.iyer@example.com', 3, 2, 18500, 'INFINI PRIVILEGE');
+    }
+  } catch(e) {
+    console.error('Multi-location seed notice:', e.message);
   }
 
   // Check if staff exist
@@ -431,9 +810,9 @@ function seedData() {
 
     // Today's date in YYYY-MM-DD
     const today = new Date().toISOString().split('T')[0];
-    const prevDate1 = '2026-09-28';
-    const prevDate2 = '2026-08-12';
-    const prevDate3 = '2026-07-20';
+    const prevDate1 = '2026-10-05';
+    const prevDate2 = '2026-10-05';
+    const prevDate3 = '2026-10-05';
 
     // Client 1: Priya Shah (+91 98765 43210)
     const priyaId = insertClient.run(
@@ -441,7 +820,7 @@ function seedData() {
       '9876543210',
       'priya.shah@example.com',
       'Prefers herbal tea, sensitive skin near cheekbones',
-      '2026-03-12',
+      '2026-10-05',
       today,
       9,
       39000
@@ -549,16 +928,198 @@ function seedData() {
     }
   }
 
-  // Backfill reg_no for existing clients if missing
+  // Runtime Migration for LOCATIONS: daily_income and return_tier
+  const locationCols = [
+    ['daily_income', 'REAL DEFAULT 0'],
+    ['return_tier', "TEXT DEFAULT 'Good'"]
+  ];
+  for (const [colName, colType] of locationCols) {
+    try {
+      db.prepare(`ALTER TABLE LOCATIONS ADD COLUMN ${colName} ${colType}`).run();
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Runtime Migration for LOCATION_STAKEHOLDERS: din_number, aadhaar_number, aadhaar_doc, mobile_numbers, email_ids
+  const stakeholderCols = [
+    ['din_number', 'TEXT'],
+    ['aadhaar_number', 'TEXT'],
+    ['aadhaar_doc', 'TEXT'],
+    ['mobile_numbers', 'TEXT'],
+    ['email_ids', 'TEXT']
+  ];
+  for (const [colName, colType] of stakeholderCols) {
+    try {
+      db.prepare(`ALTER TABLE LOCATION_STAKEHOLDERS ADD COLUMN ${colName} ${colType}`).run();
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Runtime Migration for LOCATION_KYC: bank details
+  const kycBankCols = [
+    ['bank_firm_name', 'TEXT'],
+    ['bank_name', 'TEXT'],
+    ['bank_account_number', 'TEXT'],
+    ['bank_ifsc_code', 'TEXT']
+  ];
+  for (const [colName, colType] of kycBankCols) {
+    try {
+      db.prepare(`ALTER TABLE LOCATION_KYC ADD COLUMN ${colName} ${colType}`).run();
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Runtime Migration for USERS: phone
   try {
-    const clientsMissingReg = db.prepare("SELECT client_id FROM CLIENTS WHERE reg_no IS NULL OR reg_no = ''").all();
-    const updateReg = db.prepare("UPDATE CLIENTS SET reg_no = ? WHERE client_id = ?");
-    for (const c of clientsMissingReg) {
-      updateReg.run(`MB-REG-${String(c.client_id).padStart(5, '0')}`, c.client_id);
+    db.prepare("ALTER TABLE USERS ADD COLUMN phone TEXT").run();
+  } catch (e) {
+    // Column already exists
+  }
+  try {
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99000' WHERE email = 'master@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99005' WHERE email = 'admin@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99006' WHERE email = 'reception@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99007' WHERE email = 'visitor@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
+  } catch (e) {
+    // Ignore update errors
+  }
+
+  // 90-day Inactivity threshold: ensure sample older visits exist and update status
+  try {
+    const inactiveCount = db.prepare(`
+      SELECT COUNT(*) as c FROM CLIENTS 
+      WHERE last_visit_date IS NOT NULL AND (julianday('now') - julianday(last_visit_date)) > 90
+    `).get()?.c || 0;
+
+    if (inactiveCount === 0) {
+      db.prepare(`UPDATE CLIENTS SET last_visit_date = date('now', '-96 days') WHERE client_id = 4`).run();
+      db.prepare(`UPDATE CLIENTS SET last_visit_date = date('now', '-125 days') WHERE client_id = 5`).run();
+      db.prepare(`UPDATE CLIENTS SET last_visit_date = date('now', '-150 days') WHERE client_id = 10`).run();
+      db.prepare(`UPDATE CLIENTS SET last_visit_date = date('now', '-110 days') WHERE client_id = 60`).run();
+      db.prepare(`UPDATE CLIENTS SET last_visit_date = date('now', '-135 days') WHERE client_id = 62`).run();
+    }
+
+    // Auto-update status for all clients: Active if visited within 90 days, else Inactive
+    db.prepare(`
+      UPDATE CLIENTS 
+      SET status = CASE 
+        WHEN last_visit_date IS NOT NULL AND (julianday('now') - julianday(last_visit_date)) <= 90 THEN 'active'
+        WHEN last_visit_date IS NULL AND (julianday('now') - julianday(created_at)) <= 90 THEN 'active'
+        ELSE 'inactive'
+      END
+    `).run();
+  } catch (e) {
+    console.error('Clients 90-day status migration notice:', e.message);
+  }
+
+  // Runtime Migration for LOCATION_KYC: cin_number, incorporation_doc, aoa_moa_doc, aoa_doc, moa_doc
+  const kycCols = [
+    ['cin_number', 'TEXT'],
+    ['incorporation_doc', 'TEXT'],
+    ['aoa_moa_doc', 'TEXT'],
+    ['aoa_doc', 'TEXT'],
+    ['moa_doc', 'TEXT']
+  ];
+  for (const [colName, colType] of kycCols) {
+    try {
+      db.prepare(`ALTER TABLE LOCATION_KYC ADD COLUMN ${colName} ${colType}`).run();
+    } catch (e) {
+      // Column already exists
+    }
+  }
+
+  // Reset any hardcoded mock daily_income in LOCATIONS table to 0 so values strictly reflect real branch metrics
+  try {
+    db.prepare("UPDATE LOCATIONS SET daily_income = 0").run();
+  } catch (e) {
+    // Ignore
+  }
+
+  // Migration for SERVICE_CATEGORIES image_url and image_position
+  try {
+    db.prepare(`ALTER TABLE SERVICE_CATEGORIES ADD COLUMN image_url TEXT`).run();
+  } catch (e) {
+    // Column already exists
+  }
+  try {
+    db.prepare(`ALTER TABLE SERVICE_CATEGORIES ADD COLUMN image_position TEXT`).run();
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Backfill default luxury images for categories if missing
+  try {
+    const defaultCategoryImages = {
+      1: '/services/categories/cat_03_laser_treatments.png',
+      2: '/services/categories/cat_01_signature_facials.png?v=44',
+      3: '/services/categories/cat_02_skin_treatments.png?v=42',
+      4: '/services/categories/cat_05_body_sculpting.png?v=2',
+      5: '/services/categories/cat_04_hair_rituals.png',
+      6: '/services/categories/cat_06_salon_services.png?v=3'
+    };
+    const updateCatImg = db.prepare(`UPDATE SERVICE_CATEGORIES SET image_url = ? WHERE category_id = ? AND (image_url IS NULL OR image_url = '')`);
+    for (const [id, url] of Object.entries(defaultCategoryImages)) {
+      updateCatImg.run(url, id);
     }
   } catch (e) {
     // Ignore
   }
+}
+
+export function recordAuditLog({ userId, action, targetType, targetId, locationId, details, ipAddress }) {
+  try {
+    const detailsStr = typeof details === 'object' ? JSON.stringify(details) : (details || null);
+    db.prepare(`
+      INSERT INTO AUDIT_LOGS (user_id, action, target_type, target_id, location_id, details, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(userId || null, action, targetType, targetId || null, locationId || null, detailsStr, ipAddress || null);
+  } catch (err) {
+    console.error('Failed to write audit log:', err);
+  }
+}
+
+export function ensureLocationAccounts(location) {
+  if (!location || !location.location_id) return [];
+  const locId = location.location_id;
+  const cleanCode = (location.code || `LOC${locId}`).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const salt = bcrypt.genSaltSync(10);
+  const defaultPass = `${cleanCode}123`;
+  const defaultHash = bcrypt.hashSync(defaultPass, salt);
+
+  const existingUsers = db.prepare('SELECT role FROM USERS WHERE location_id = ?').all(locId);
+  const existingRoles = new Set(existingUsers.map(u => u.role));
+
+  const created = [];
+  const rolesToEnsure = [
+    { role: 'admin', title: `${location.name} Admin`, email: `admin.${cleanCode}@maisonbeyou.com` },
+    { role: 'reception', title: `${location.name} Reception`, email: `reception.${cleanCode}@maisonbeyou.com` },
+    { role: 'visitor', title: `${location.name} Visitor Desk`, email: `visitor.${cleanCode}@maisonbeyou.com` }
+  ];
+
+  for (const r of rolesToEnsure) {
+    if (!existingRoles.has(r.role)) {
+      let targetEmail = r.email;
+      const emailExists = db.prepare('SELECT user_id FROM USERS WHERE email = ?').get(targetEmail);
+      if (emailExists) {
+        targetEmail = `${r.role}.${cleanCode}.${locId}@maisonbeyou.com`;
+      }
+      const res = db.prepare(`
+        INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
+        VALUES (?, ?, ?, ?, ?, 1, ?)
+      `).run(r.title, targetEmail, null, defaultHash, r.role, locId);
+
+      created.push({
+        user_id: res.lastInsertRowid,
+        role: r.role,
+        email: targetEmail,
+        location_id: locId
+      });
+    }
+  }
+  return created;
 }
 
 export default db;

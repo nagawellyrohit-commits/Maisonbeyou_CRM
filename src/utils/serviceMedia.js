@@ -186,15 +186,18 @@ const MEDIA_CATALOG = {
     ]
   },
   'beu clear skin therapy': {
-    image: 'https://images.unsplash.com/photo-1512290903672-0056637b51e0?w=800&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&auto=format&fit=crop&q=80',
     video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4',
     downtime: 'Zero Downtime',
     protocol: 'Ultrasonic Extraction + Blue LED',
     tag: 'Blemish Clearance',
     highlights: [
-      'Deep ultrasonic pore vacuum extraction',
-      'Photodynamic blue LED eliminates acne bacteria',
-      'Calming botanical centella soothing mask'
+      'Deeply cleanses and purifies congested skin',
+      'Helps control excess oil and sebum',
+      'Targets acne and recurring breakouts',
+      'Calms inflammation and visible redness',
+      'Unclogs pores and removes impurities',
+      'Promotes a clearer, healthier complexion'
     ]
   },
   '24k gold radiance facial': {
@@ -248,7 +251,7 @@ const MEDIA_CATALOG = {
 
   // Skin Aesthetics & Peels
   'salicylic acne peel': {
-    image: 'https://images.unsplash.com/photo-1512290903672-0056637b51e0?w=800&auto=format&fit=crop&q=80',
+    image: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&auto=format&fit=crop&q=80',
     video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/friday.mp4',
     downtime: '1–2 Days Mild Flaking',
     protocol: 'Beta-Hydroxy Acid 20%',
@@ -592,12 +595,12 @@ const CATEGORY_GALLERIES = {
   ],
   'facials & medi-facials': [
     'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1512290903672-0056637b51e0?w=800&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1629909613654-28e377c37b09?w=800&auto=format&fit=crop&q=80'
   ],
   'skin aesthetics & peels': [
-    'https://images.unsplash.com/photo-1512290903672-0056637b51e0?w=800&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1560750588-73207b1ef5b8?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1519699047748-de8e457a634e?w=800&auto=format&fit=crop&q=80'
@@ -617,7 +620,7 @@ const CATEGORY_GALLERIES = {
   'brows & semi-permanent': [
     'https://images.unsplash.com/photo-1583001809873-a128495da465?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1522337360788-8b13dee7a37e?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1512290903672-0056637b51e0?w=800&auto=format&fit=crop&q=80',
+    'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?w=800&auto=format&fit=crop&q=80',
     'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80'
   ]
 };
@@ -638,61 +641,92 @@ export function getServiceMedia(service, categoryName = '') {
     return unique.slice(0, 4);
   };
 
-  if (!service) {
-    const fallback = {
+  // Determine base catalog match
+  let base = null;
+  const sKey = (service?.service_name || '').toLowerCase().trim();
+
+  if (sKey && MEDIA_CATALOG[sKey]) {
+    base = MEDIA_CATALOG[sKey];
+  } else if (sKey) {
+    for (const [key, val] of Object.entries(MEDIA_CATALOG)) {
+      if (sKey.includes(key) || key.includes(sKey)) {
+        base = val;
+        break;
+      }
+    }
+  }
+
+  if (!base && CATEGORY_DEFAULTS[cKey]) {
+    base = CATEGORY_DEFAULTS[cKey];
+  } else if (!base && cKey) {
+    for (const [key, val] of Object.entries(CATEGORY_DEFAULTS)) {
+      if (cKey.includes(key) || key.includes(cKey)) {
+        base = val;
+        break;
+      }
+    }
+  }
+
+  if (!base) {
+    base = {
       image: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80',
       video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
       downtime: 'Zero Downtime',
       protocol: 'Clinical Aesthetic Protocol',
       tag: 'Studio Treatment',
+      subtitle: 'Clinical aesthetic protocol',
       highlights: [
-        'Premium medical-grade technology',
-        'Customized by senior aesthetic specialists',
-        'Exceptional comfort and visible results'
+        'Tailored consultation & assessment prior to session',
+        'Clinical aesthetic protocol with maximum comfort',
+        'Immediate post-treatment care and guidance'
       ]
     };
-    return { ...fallback, gallery: resolveGallery(fallback) };
   }
 
-  const sKey = (service.service_name || '').toLowerCase().trim();
-
-  // Direct match
-  if (MEDIA_CATALOG[sKey]) {
-    const res = MEDIA_CATALOG[sKey];
-    return { ...res, gallery: resolveGallery(res) };
-  }
-
-  // Fuzzy match on service name
-  for (const [key, val] of Object.entries(MEDIA_CATALOG)) {
-    if (sKey.includes(key) || key.includes(sKey)) {
-      return { ...val, gallery: resolveGallery(val) };
+  // Parse custom highlights if provided
+  let customHighlights = null;
+  if (service?.highlights) {
+    if (Array.isArray(service.highlights)) {
+      customHighlights = service.highlights.filter(Boolean);
+    } else if (typeof service.highlights === 'string') {
+      try {
+        const parsed = JSON.parse(service.highlights);
+        if (Array.isArray(parsed)) customHighlights = parsed.filter(Boolean);
+      } catch (e) {
+        customHighlights = service.highlights.split('\n').map(s => s.trim()).filter(Boolean);
+      }
     }
   }
 
-  // Category match
-  if (CATEGORY_DEFAULTS[cKey]) {
-    const res = CATEGORY_DEFAULTS[cKey];
-    return { ...res, gallery: resolveGallery(res) };
-  }
-
-  for (const [key, val] of Object.entries(CATEGORY_DEFAULTS)) {
-    if (cKey.includes(key) || key.includes(cKey)) {
-      return { ...val, gallery: resolveGallery(val) };
+  // Parse custom gallery if provided
+  let customGallery = null;
+  if (service?.gallery) {
+    if (Array.isArray(service.gallery)) {
+      customGallery = service.gallery.filter(Boolean);
+    } else if (typeof service.gallery === 'string') {
+      try {
+        const parsed = JSON.parse(service.gallery);
+        if (Array.isArray(parsed)) customGallery = parsed.filter(Boolean);
+      } catch (e) {
+        customGallery = service.gallery.split(',').map(s => s.trim()).filter(Boolean);
+      }
     }
   }
 
-  // Default fallback
-  const def = {
-    image: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80',
-    video: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    downtime: 'Zero Downtime',
-    protocol: 'Clinical Aesthetic Protocol',
-    tag: 'Studio Treatment',
-    highlights: [
-      'Tailored consultation & assessment prior to session',
-      'Clinical aesthetic protocol with maximum comfort',
-      'Immediate post-treatment care and guidance'
-    ]
+  const baseGallery = resolveGallery(base);
+  const finalGallery = (customGallery && customGallery.length > 0)
+    ? [...customGallery, ...baseGallery].slice(0, 4)
+    : baseGallery;
+
+  return {
+    ...base,
+    video: service?.video_url || service?.video || base.video,
+    image: service?.image_url || service?.image || base.image,
+    heroImage: service?.image_url || service?.heroImage || base.heroImage,
+    downtime: service?.downtime || base.downtime || 'Zero Downtime',
+    tag: service?.tag || base.tag || 'Quick & Effective',
+    subtitle: service?.subtitle || service?.description || base.subtitle || 'Quick & effective',
+    highlights: (customHighlights && customHighlights.length > 0) ? customHighlights : base.highlights,
+    gallery: finalGallery
   };
-  return { ...def, gallery: resolveGallery(def) };
 }
