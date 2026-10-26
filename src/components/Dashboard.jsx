@@ -530,7 +530,6 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h2 style={{ fontSize: '18px', color: 'var(--text-main)' }}>TODAY'S SUMMARY</h2>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>• Real-time operational metrics</span>
           </div>
           <button
             type="button"
