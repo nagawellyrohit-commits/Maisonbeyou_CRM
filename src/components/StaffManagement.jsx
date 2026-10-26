@@ -231,25 +231,26 @@ export default function StaffManagement() {
                   flexDirection: 'column',
                   justifyContent: 'space-between',
                   gap: '16px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
                   transition: 'box-shadow 0.2s ease'
                 }}
               >
                 <div>
-                  {/* Card Header */}
+                  {/* Card Header: Avatar, Name, Role, Status */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                       <div style={{
-                        width: '46px',
-                        height: '46px',
+                        width: '44px',
+                        height: '44px',
                         borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #FAF6EE 0%, #EEDBBE 100%)',
+                        background: '#FAF8F5',
                         color: '#8C6228',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontWeight: '700',
-                        fontSize: '18px',
-                        border: '1px solid #DAC493'
+                        fontSize: '17px',
+                        border: '1px solid #EADBBE'
                       }}>
                         {s.name.charAt(0)}
                       </div>
@@ -257,97 +258,76 @@ export default function StaffManagement() {
                         <h2 style={{ fontSize: '17px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
                           {s.name}
                         </h2>
-                        <div style={{ fontSize: '12.5px', color: '#9F7335', fontWeight: '600' }}>
+                        <div style={{ fontSize: '12.5px', color: '#8C6228', fontWeight: '600', marginTop: '2px' }}>
                           {s.role}
                         </div>
                       </div>
                     </div>
 
-                    <span className={`badge ${s.active === 1 ? 'badge-paid' : 'badge-neutral'}`} style={{ fontSize: '11px' }}>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      background: '#FAF8F5',
+                      color: s.active === 1 ? '#57534E' : '#78716C',
+                      border: '1px solid #EADBBE'
+                    }}>
                       {s.active === 1 ? 'Active' : 'Inactive'}
                     </span>
                   </div>
 
-                  {/* Phone & Compensation Model Badge */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '14px' }}>
+                  {/* Contact & Remuneration Model Details (Single unified style, no blue/yellow boxes) */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginTop: '14px', fontSize: '12.5px', color: '#57534E' }}>
                     {s.phone && (
-                      <div style={{
-                        fontSize: '12px',
-                        color: '#57534E',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        background: '#F5F5F4',
-                        padding: '4px 8px',
-                        borderRadius: '6px'
-                      }}>
-                        <Phone size={12} color="#B88B4A" />
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <Phone size={13} color="#8C6228" />
                         <span>{formatPhone(s.phone)}</span>
                       </div>
                     )}
 
-                    {/* Compensation Badge */}
-                    <div style={{
-                      fontSize: '11.5px',
-                      fontWeight: '700',
-                      padding: '4px 9px',
-                      borderRadius: '6px',
-                      background: hasSalaryPlusIncentive ? '#FEF3C7' : '#EFF6FF',
-                      color: hasSalaryPlusIncentive ? '#92400E' : '#1E40AF',
-                      border: `1px solid ${hasSalaryPlusIncentive ? '#FCD34D' : '#BFDBFE'}`,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      {hasSalaryPlusIncentive ? (
-                        <>
-                          <Sparkles size={11} />
-                          <span>Base {formatCurrency(salaryAmt)} + {incentivePct}% Inc.</span>
-                        </>
-                      ) : (
-                        <>
-                          <DollarSign size={11} />
-                          <span>Fixed Salary: {formatCurrency(salaryAmt)}/mo</span>
-                        </>
-                      )}
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#1C1917', fontWeight: '600' }}>
+                      <DollarSign size={13} color="#8C6228" />
+                      <span>
+                        {hasSalaryPlusIncentive
+                          ? `Base ${formatCurrency(salaryAmt)} + ${incentivePct}% Incentive`
+                          : `Fixed Salary: ${formatCurrency(salaryAmt)}/mo`}
+                      </span>
                     </div>
                   </div>
 
-                  {/* KYC Details Strip */}
+                  {/* KYC Details Strip (Clean inline border, single background color) */}
                   <div style={{
-                    marginTop: '12px',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    background: '#FAFAF9',
-                    border: '1px solid #E7E5E4',
+                    marginTop: '14px',
+                    padding: '12px 0',
+                    borderTop: '1px solid #F0ECE4',
+                    borderBottom: '1px solid #F0ECE4',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '6px'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', color: '#78716C' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', color: '#78716C', letterSpacing: '0.04em' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <ShieldCheck size={12} color="#8C6228" />
+                        <ShieldCheck size={13} color="#8C6228" />
                         KYC & IDENTIFICATION
                       </span>
-                      {hasKyc ? (
-                        <span style={{ color: '#166534', fontWeight: '600' }}>✓ Verified</span>
-                      ) : (
-                        <span style={{ color: '#DC2626', fontWeight: '600' }}>Pending</span>
-                      )}
+                      <span style={{ color: hasKyc ? '#8C6228' : '#78716C', fontWeight: '600' }}>
+                        {hasKyc ? 'Verified' : 'Pending'}
+                      </span>
                     </div>
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '11.5px', color: '#44403C' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '12px', color: '#44403C' }}>
                       {/* Aadhaar */}
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ color: '#78716C', fontWeight: '600' }}>Aadhaar:</span>
-                        <span>{s.aadhaar_number ? s.aadhaar_number : 'Not added'}</span>
+                        <span style={{ color: '#78716C' }}>Aadhaar:</span>
+                        <span style={{ fontWeight: '500' }}>{s.aadhaar_number ? s.aadhaar_number : 'Not added'}</span>
                         {s.aadhaar_doc && (
                           <a
                             href={s.aadhaar_doc}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
-                              marginLeft: '2px',
+                              marginLeft: '3px',
                               color: '#8C6228',
                               fontSize: '11px',
                               fontWeight: '600',
@@ -365,15 +345,15 @@ export default function StaffManagement() {
 
                       {/* PAN */}
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ color: '#78716C', fontWeight: '600' }}>PAN:</span>
-                        <span>{s.pan_number ? s.pan_number : 'Not added'}</span>
+                        <span style={{ color: '#78716C' }}>PAN:</span>
+                        <span style={{ fontWeight: '500' }}>{s.pan_number ? s.pan_number : 'Not added'}</span>
                         {s.pan_doc && (
                           <a
                             href={s.pan_doc}
                             target="_blank"
                             rel="noopener noreferrer"
                             style={{
-                              marginLeft: '2px',
+                              marginLeft: '3px',
                               color: '#8C6228',
                               fontSize: '11px',
                               fontWeight: '600',
@@ -391,61 +371,57 @@ export default function StaffManagement() {
                     </div>
                   </div>
 
-                  {/* Performance & Payout Stats */}
+                  {/* Performance & Payout Stats (Clean layout on card, no colored background block) */}
                   <div style={{
                     marginTop: '12px',
-                    padding: '12px 14px',
-                    background: '#FAF6EE',
-                    border: '1px solid #EADBBE',
-                    borderRadius: '8px',
                     display: 'grid',
                     gridTemplateColumns: hasSalaryPlusIncentive ? '1fr 1fr' : '1fr 1fr 1fr',
-                    gap: '10px'
+                    gap: '12px'
                   }}>
                     <div>
-                      <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                      <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
                         Services Done
                       </div>
-                      <div style={{ fontSize: '15px', fontWeight: '700', color: '#1C1917', marginTop: '2px' }}>
+                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
                         {s.total_services || 0}
                       </div>
                     </div>
 
                     <div>
-                      <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                      <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
                         Revenue Handled
                       </div>
-                      <div style={{ fontSize: '15px', fontWeight: '700', color: '#166534', marginTop: '2px' }}>
+                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
                         {formatCurrency(totalRevenue)}
                       </div>
                     </div>
 
                     {hasSalaryPlusIncentive ? (
                       <>
-                        <div style={{ borderTop: '1px solid #EADBBE', paddingTop: '8px', marginTop: '4px' }}>
-                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                        <div>
+                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
                             Earned Inc. ({incentivePct}%)
                           </div>
-                          <div style={{ fontSize: '15px', fontWeight: '700', color: '#B45309', marginTop: '2px' }}>
+                          <div style={{ fontSize: '16px', fontWeight: '700', color: '#8C6228', marginTop: '3px' }}>
                             +{formatCurrency(earnedIncentive)}
                           </div>
                         </div>
 
-                        <div style={{ borderTop: '1px solid #EADBBE', paddingTop: '8px', marginTop: '4px' }}>
-                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                        <div>
+                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
                             Est. Total Payout
                           </div>
-                          <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                          <div style={{ fontSize: '16px', fontWeight: '800', color: '#1C1917', marginTop: '3px' }}>
                             {formatCurrency(totalPayout)}
                           </div>
                         </div>
                       </>
                     ) : (
                       <div>
-                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                        <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
                           Monthly Salary
                         </div>
-                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                        <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
                           {formatCurrency(salaryAmt)}
                         </div>
                       </div>
@@ -453,8 +429,8 @@ export default function StaffManagement() {
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '12px', borderTop: '1px solid #F5F5F4' }}>
+                {/* Actions: Clean unified buttons */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '14px', borderTop: '1px solid #F0ECE4' }}>
                   <button
                     onClick={() => handleToggleActive(s)}
                     style={{
@@ -463,7 +439,7 @@ export default function StaffManagement() {
                       borderRadius: '6px',
                       border: '1px solid #E7E5E4',
                       background: '#FFFFFF',
-                      color: s.active === 1 ? '#DC2626' : '#166534',
+                      color: '#57534E',
                       fontWeight: '600',
                       cursor: 'pointer'
                     }}
@@ -478,7 +454,7 @@ export default function StaffManagement() {
                       padding: '6px 14px',
                       borderRadius: '6px',
                       border: '1px solid #DAC493',
-                      background: '#FAF6EE',
+                      background: '#FAF8F5',
                       color: '#8C6228',
                       fontWeight: '700',
                       display: 'inline-flex',

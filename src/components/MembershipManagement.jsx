@@ -563,14 +563,14 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                           width: '42px',
                           height: '42px',
                           borderRadius: '50%',
-                          background: planConfig.bg || '#FAF6EE',
-                          color: planConfig.color || '#B88B4A',
+                          background: '#FAF8F5',
+                          color: '#8C6228',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: '800',
                           fontSize: '16px',
-                          border: `1px solid ${planConfig.color || '#DAC493'}`
+                          border: '1px solid #EADBBE'
                         }}>
                           {m.name.charAt(0)}
                         </div>
@@ -586,11 +586,12 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
                       <span style={{
                         fontSize: '11px',
-                        fontWeight: '700',
+                        fontWeight: '600',
                         padding: '3px 8px',
-                        borderRadius: '9999px',
-                        background: m.is_expired ? '#FEE2E2' : '#DCFCE7',
-                        color: m.is_expired ? '#B91C1C' : '#15803D'
+                        borderRadius: '6px',
+                        background: '#FAF8F5',
+                        color: m.is_expired ? '#78716C' : '#57534E',
+                        border: '1px solid #EADBBE'
                       }}>
                         {m.effective_status}
                       </span>
@@ -600,12 +601,12 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px' }}>
                       <span style={{
                         fontSize: '11.5px',
-                        fontWeight: '800',
+                        fontWeight: '700',
                         padding: '3px 9px',
                         borderRadius: '6px',
-                        background: planConfig.bg || '#FEF3C7',
-                        color: planConfig.color || '#92400E',
-                        border: '1px solid #DAC493',
+                        background: '#FAF8F5',
+                        color: '#8C6228',
+                        border: '1px solid #EADBBE',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '5px'
@@ -618,8 +619,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                         <span style={{
                           fontSize: '11px',
                           fontWeight: '600',
-                          color: m.is_expired ? '#DC2626' : (m.days_remaining < 30 ? '#B45309' : '#57534E'),
-                          background: '#F5F5F4',
+                          color: '#57534E',
+                          background: '#FAF8F5',
+                          border: '1px solid #EADBBE',
                           padding: '3px 8px',
                           borderRadius: '6px'
                         }}>
@@ -629,27 +631,26 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       )}
                     </div>
 
-                    {/* Credit Balance Progress Bar */}
+                    {/* Credit Balance Progress Bar (Clean inline layout, single color) */}
                     <div style={{
                       marginTop: '12px',
-                      padding: '12px',
-                      borderRadius: '8px',
-                      background: '#FAF6EE',
-                      border: '1px solid #EADBBE'
+                      padding: '10px 0',
+                      borderTop: '1px solid #F0ECE4',
+                      borderBottom: '1px solid #F0ECE4'
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', marginBottom: '6px' }}>
                         <span style={{ color: '#78716C', fontWeight: '600' }}>Available Balance:</span>
-                        <span style={{ fontWeight: '800', color: '#1E40AF', fontSize: '13px' }}>
+                        <span style={{ fontWeight: '800', color: '#1C1917', fontSize: '13px' }}>
                           {formatCurrency(m.balance)}
                         </span>
                       </div>
 
                       {/* Progress Bar */}
-                      <div style={{ width: '100%', height: '6px', background: '#E7DFD5', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ width: '100%', height: '5px', background: '#F0ECE4', borderRadius: '9999px', overflow: 'hidden' }}>
                         <div style={{
                           width: `${Math.min(100, Math.max(0, 100 - usedPct))}%`,
                           height: '100%',
-                          background: usedPct > 80 ? '#DC2626' : '#B88B4A',
+                          background: '#8C6228',
                           borderRadius: '9999px'
                         }} />
                       </div>
