@@ -979,10 +979,38 @@ function seedData() {
     // Column already exists
   }
   try {
-    db.prepare("UPDATE USERS SET phone = '+91 98205 99000' WHERE email = 'master@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98205 99005' WHERE email = 'admin@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98205 99006' WHERE email = 'reception@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98205 99007' WHERE email = 'visitor@maisonbeyou.com' AND (phone IS NULL OR phone = '')").run();
+    // Master Admin (HQ & Global Network)
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99000' WHERE role = 'master_admin'").run();
+
+    // Jubilee Hills Flagship (Location 1)
+    db.prepare("UPDATE USERS SET phone = '+91 98201 99001' WHERE location_id = 1 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98201 99002' WHERE location_id = 1 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98201 99003' WHERE location_id = 1 AND role = 'visitor'").run();
+
+    // Bandra West Studio (Location 2)
+    db.prepare("UPDATE USERS SET phone = '+91 98202 99001' WHERE location_id = 2 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98202 99002' WHERE location_id = 2 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98202 99003' WHERE location_id = 2 AND role = 'visitor'").run();
+
+    // Indiranagar Franchise (Location 3)
+    db.prepare("UPDATE USERS SET phone = '+91 98801 99001' WHERE location_id = 3 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98801 99002' WHERE location_id = 3 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98801 99003' WHERE location_id = 3 AND role = 'visitor'").run();
+
+    // Koregaon Park Franchise (Location 4)
+    db.prepare("UPDATE USERS SET phone = '+91 98900 99001' WHERE location_id = 4 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98900 99002' WHERE location_id = 4 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98900 99003' WHERE location_id = 4 AND role = 'visitor'").run();
+
+    // Gachibowli Studio (Location 5)
+    db.prepare("UPDATE USERS SET phone = '+91 98400 99881' WHERE location_id = 5 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98400 99882' WHERE location_id = 5 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98400 99883' WHERE location_id = 5 AND role = 'visitor'").run();
+
+    // Juhu Studio (Location 69)
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99001' WHERE (location_id = 69 OR email LIKE '%juhu.admin%') AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99002' WHERE (location_id = 69 OR email LIKE '%juhu.reception%') AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99003' WHERE (location_id = 69 OR email LIKE '%juhu.visitor%') AND role = 'visitor'").run();
   } catch (e) {
     // Ignore update errors
   }

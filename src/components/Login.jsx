@@ -3,8 +3,6 @@ import {
   Building2, 
   Store, 
   Laptop, 
-  KeyRound, 
-  Mail, 
   Phone, 
   ArrowRight, 
   Eye, 
@@ -14,26 +12,21 @@ import {
   Sparkles, 
   AlertCircle, 
   RotateCw,
-  ChevronDown,
-  UserCheck,
-  ShieldAlert
+  Crown,
+  UserCheck
 } from 'lucide-react';
 import { setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
 import brandLogoImg from '../assets/brand-logo.png';
 import loginBg from '../assets/login-bg.jpg';
 
 export default function Login({ onLoginSuccess }) {
-  // Login Mode: 'studio' (Studio & Desk Selector) vs 'direct' (Phone / Email / ID)
-  const [loginMode, setLoginMode] = useState('studio');
-
-  // Locations state
-  const [locations, setLocations] = useState([]);
-  const [selectedLocationId, setSelectedLocationId] = useState(5); // Default to Gachibowli or first
-  const [selectedDeskRole, setSelectedDeskRole] = useState('visitor'); // 'visitor' | 'reception' | 'admin'
-
-  // Direct login state
+  // Mobile / Phone or ID input
   const [identifier, setIdentifier] = useState('');
-  const [directRole, setDirectRole] = useState('visitor');
+  
+  // Auto-detected account state
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectedAccount, setDetectedAccount] = useState(null);
+  const [selectedRole, setSelectedRole] = useState('admin'); // For multi-role branch numbers
 
   // OTP flow states
   const [otp, setOtp] = useState('');
@@ -42,6 +35,8 @@ export default function Login({ onLoginSuccess }) {
   const [otpCooldown, setOtpCooldown] = useState(0);
   const [maskedContact, setMaskedContact] = useState('');
   const [resolvedAccountName, setResolvedAccountName] = useState('');
+  const [resolvedBranchName, setResolvedBranchName] = useState('');
+  const [resolvedRoleLabel, setResolvedRoleLabel] = useState('');
   const [demoOtp, setDemoOtp] = useState('');
   const [sendingOtp, setSendingOtp] = useState(false);
 
@@ -52,24 +47,43 @@ export default function Login({ onLoginSuccess }) {
 
   const otpInputRef = useRef(null);
 
-  // Fetch active studios list on load
+  // Auto-detect account whenever phone number or identifier changes
   useEffect(() => {
-    fetch('/api/auth/locations-list')
-      .then(res => res.json())
-      .then(data => {
-        if (data.locations && data.locations.length > 0) {
-          setLocations(data.locations);
-          // Prefer Gachibowli (id: 5) if present, else first location
-          const hasGachibowli = data.locations.find(l => l.location_id === 5 || (l.name || '').toLowerCase().includes('gachibowli'));
-          if (hasGachibowli) {
-            setSelectedLocationId(hasGachibowli.location_id);
-          } else {
-            setSelectedLocationId(data.locations[0].location_id);
+    const trimmed = identifier.trim();
+    if (!trimmed || trimmed.length < 5) {
+      setDetectedAccount(null);
+      setIsDetecting(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsDetecting(true);
+        const res = await fetch('/api/auth/detect-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: trimmed })
+        });
+        const data = await res.json();
+        if (data.found) {
+          setDetectedAccount(data);
+          if (data.type === 'multiple' && data.accounts && data.accounts.length > 0) {
+            setSelectedRole(data.accounts[0].role);
+          } else if (data.type === 'single') {
+            setSelectedRole(data.user.role);
           }
+        } else {
+          setDetectedAccount(null);
         }
-      })
-      .catch(err => console.error('Failed to load locations list:', err));
-  }, []);
+      } catch (err) {
+        console.error('Failed to detect account:', err);
+      } finally {
+        setIsDetecting(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [identifier]);
 
   // Countdown timer for OTP resend (60s)
   useEffect(() => {
@@ -87,35 +101,25 @@ export default function Login({ onLoginSuccess }) {
     }
   }, [otpSent]);
 
-  const activeLocation = locations.find(l => l.location_id === Number(selectedLocationId)) || locations[0];
-  const isPhoneInput = /^\+?[\d\s\-()]+$/.test(identifier.trim()) && identifier.trim().length >= 7;
-
   // Send OTP handler
   const handleSendOtp = async (e) => {
     e?.preventDefault();
-    setSendingOtp(true);
     setError('');
     setSuccessMsg('');
 
+    const trimmed = identifier.trim();
+    if (!trimmed) {
+      setError('Please enter your registered mobile number');
+      return;
+    }
+
+    setSendingOtp(true);
     try {
-      let payload = {};
-      if (loginMode === 'studio') {
-        if (!selectedLocationId) {
-          throw new Error('Please select a studio branch');
-        }
-        payload = {
-          location_id: Number(selectedLocationId),
-          role: selectedDeskRole
-        };
-      } else {
-        if (!identifier.trim()) {
-          throw new Error('Please enter your Phone number, Email, or Desk ID');
-        }
-        payload = {
-          identifier: identifier.trim(),
-          role: isPhoneInput ? directRole : undefined
-        };
-      }
+      const payload = {
+        identifier: trimmed,
+        role: detectedAccount?.type === 'multiple' ? selectedRole : detectedAccount?.user?.role,
+        location_id: detectedAccount?.location?.location_id || detectedAccount?.user?.location_id
+      };
 
       const res = await fetch('/api/auth/send-login-otp', {
         method: 'POST',
@@ -125,15 +129,21 @@ export default function Login({ onLoginSuccess }) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to send OTP. Please check account details.');
+        throw new Error(data.error || 'No active account found. Please check your mobile number.');
       }
 
       setOtpSent(true);
       setMaskedContact(data.maskedContact || '');
-      setResolvedAccountName(data.name || '');
+      setResolvedAccountName(data.userName || '');
+      setResolvedBranchName(data.locationName || '');
+      setResolvedRoleLabel(
+        data.userRole === 'master_admin' ? 'Maison Master Admin' :
+        data.userRole === 'admin' ? 'Branch Main Admin' :
+        data.userRole === 'reception' ? 'Reception Desk' : 'Visitor Desk'
+      );
       setDemoOtp(data.demoOtp || '784920');
       setOtpCooldown(60);
-      setSuccessMsg(`OTP sent to authorized contact: ${data.maskedContact || 'Studio Contact'}`);
+      setSuccessMsg(`Verification code sent to registered mobile: ${data.maskedContact || 'Authorized contact'}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -153,22 +163,18 @@ export default function Login({ onLoginSuccess }) {
     }
 
     if (!otp.trim()) {
-      setError('Please enter the 6-digit OTP code');
+      setError('Please enter the 6-digit verification code');
       return;
     }
 
     setLoading(true);
     try {
-      let payload = { otp: otp.trim() };
-      if (loginMode === 'studio') {
-        payload.location_id = Number(selectedLocationId);
-        payload.role = selectedDeskRole;
-      } else {
-        payload.identifier = identifier.trim();
-        if (isPhoneInput) {
-          payload.role = directRole;
-        }
-      }
+      const payload = {
+        identifier: identifier.trim(),
+        otp: otp.trim(),
+        role: detectedAccount?.type === 'multiple' ? selectedRole : detectedAccount?.user?.role,
+        location_id: detectedAccount?.location?.location_id || detectedAccount?.user?.location_id
+      };
 
       const res = await fetch('/api/auth/login-otp', {
         method: 'POST',
@@ -178,7 +184,7 @@ export default function Login({ onLoginSuccess }) {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Invalid or expired OTP code');
+        throw new Error(data.error || 'Invalid or expired verification code');
       }
 
       setStoredToken(data.token);
@@ -194,28 +200,26 @@ export default function Login({ onLoginSuccess }) {
     }
   };
 
-  const deskRoles = [
-    {
-      id: 'visitor',
-      title: 'Visitor Desk',
-      subtitle: 'Client Intake Tablet',
-      icon: Laptop,
-      badge: 'Self Intake'
-    },
-    {
-      id: 'reception',
-      title: 'Reception Desk',
-      subtitle: 'Staff & Front-Desk',
-      icon: Store,
-      badge: 'Billing & Visits'
-    },
-    {
-      id: 'admin',
-      title: 'Branch Admin',
-      subtitle: 'Studio Operations',
-      icon: Building2,
-      badge: 'Admin Access'
+  const getRoleIcon = (role) => {
+    switch (role) {
+      case 'master_admin':
+        return <Crown size={18} color="#FFFFFF" />;
+      case 'admin':
+        return <Building2 size={18} color="#FFFFFF" />;
+      case 'reception':
+        return <Store size={18} color="#FFFFFF" />;
+      case 'visitor':
+      default:
+        return <Laptop size={18} color="#FFFFFF" />;
     }
+  };
+
+  const quickDemoAccounts = [
+    { label: 'Master Admin', phone: '98205 99000', badge: '👑 HQ' },
+    { label: 'Gachibowli Admin', phone: '98400 99881', badge: '🏢 Main Admin' },
+    { label: 'Gachibowli Reception', phone: '98400 99882', badge: '🛎️ Front Desk' },
+    { label: 'Juhu Admin', phone: '98205 99001', badge: '🏢 Main Admin' },
+    { label: 'Juhu Reception', phone: '98205 99002', badge: '🛎️ Front Desk' }
   ];
 
   return (
@@ -236,22 +240,22 @@ export default function Login({ onLoginSuccess }) {
       <div style={{
         width: '100%',
         maxWidth: '460px',
-        background: 'rgba(255, 252, 247, 0.95)',
+        background: 'rgba(255, 252, 247, 0.96)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
         borderRadius: '24px',
         boxShadow: '0 25px 60px -15px rgba(90, 60, 20, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.8) inset, 0 10px 30px -5px rgba(0, 0, 0, 0.05)',
         border: '1.5px solid #DAC493',
-        padding: '32px 28px',
+        padding: '34px 30px',
         position: 'relative'
       }}>
         {/* Brand Crest */}
-        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <img 
             src={brandLogoImg} 
             alt="Maison BeYou Logo" 
             style={{
-              height: '50px',
+              height: '52px',
               width: 'auto',
               maxWidth: '220px',
               objectFit: 'contain'
@@ -260,81 +264,14 @@ export default function Login({ onLoginSuccess }) {
           <div style={{ 
             fontSize: '11px', 
             fontWeight: '700', 
-            letterSpacing: '0.12em', 
+            letterSpacing: '0.14em', 
             textTransform: 'uppercase', 
             color: '#8C6228', 
-            marginTop: '6px' 
+            marginTop: '8px' 
           }}>
             Studio Operations & Desk Portal
           </div>
         </div>
-
-        {/* Login Mode Tabs */}
-        {!otpSent && (
-          <div style={{
-            display: 'flex',
-            background: '#F0E8D8',
-            padding: '3px',
-            borderRadius: '12px',
-            marginBottom: '20px',
-            border: '1px solid #E2D7C5'
-          }}>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode('studio');
-                setError('');
-              }}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                borderRadius: '9px',
-                border: 'none',
-                background: loginMode === 'studio' ? '#FFFFFF' : 'transparent',
-                color: loginMode === 'studio' ? '#8C6228' : '#78716C',
-                fontWeight: '700',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-                boxShadow: loginMode === 'studio' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <Store size={14} />
-              <span>Studio Desk Access</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode('direct');
-                setError('');
-              }}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                borderRadius: '9px',
-                border: 'none',
-                background: loginMode === 'direct' ? '#FFFFFF' : 'transparent',
-                color: loginMode === 'direct' ? '#8C6228' : '#78716C',
-                fontWeight: '700',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-                cursor: 'pointer',
-                boxShadow: loginMode === 'direct' ? '0 2px 6px rgba(0,0,0,0.06)' : 'none',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <KeyRound size={14} />
-              <span>Direct ID / Mobile</span>
-            </button>
-          </div>
-        )}
 
         {/* Success Alert */}
         {successMsg && (
@@ -378,387 +315,434 @@ export default function Login({ onLoginSuccess }) {
         )}
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* TAB 1: STUDIO DESK ACCESS */}
-          {loginMode === 'studio' && (
-            <>
-              {/* Studio Dropdown */}
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917', display: 'block', marginBottom: '6px' }}>
-                  Select Studio Branch
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <select
-                    value={selectedLocationId}
-                    disabled={otpSent}
-                    onChange={(e) => {
-                      setSelectedLocationId(Number(e.target.value));
-                      setError('');
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: '11px 36px 11px 14px',
-                      borderRadius: '10px',
-                      border: '1.5px solid #E2D7C5',
-                      background: otpSent ? '#EFE9DE' : '#FFFFFF',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      color: '#1C1917',
-                      outline: 'none',
-                      cursor: otpSent ? 'not-allowed' : 'pointer',
-                      appearance: 'none',
-                      WebkitAppearance: 'none'
-                    }}
-                  >
-                    {locations.map((loc) => (
-                      <option key={loc.location_id} value={loc.location_id}>
-                        {loc.name} {loc.code ? `(${loc.code})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} color="#8C6228" style={{ position: 'absolute', right: '14px', top: '14px', pointerEvents: 'none' }} />
-                </div>
-              </div>
-
-              {/* Desk Selection (Visitor / Reception / Admin) */}
-              <div>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917', display: 'block', marginBottom: '8px' }}>
-                  Select Desk
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                  {deskRoles.map((role) => {
-                    const isSelected = selectedDeskRole === role.id;
-                    const IconComp = role.icon;
-                    return (
-                      <button
-                        key={role.id}
-                        type="button"
-                        disabled={otpSent}
-                        onClick={() => {
-                          setSelectedDeskRole(role.id);
-                          setError('');
-                        }}
-                        style={{
-                          padding: '10px 8px',
-                          borderRadius: '10px',
-                          border: isSelected ? '1.5px solid #B88B4A' : '1px solid #E2D7C5',
-                          background: isSelected ? '#FAF3E3' : '#FFFFFF',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          textAlign: 'center',
-                          gap: '4px',
-                          cursor: otpSent ? 'not-allowed' : 'pointer',
-                          transition: 'all 0.2s ease',
-                          boxShadow: isSelected ? '0 2px 8px rgba(184, 139, 74, 0.2)' : 'none'
-                        }}
-                      >
-                        <IconComp size={18} color={isSelected ? '#8C6228' : '#78716C'} />
-                        <span style={{ fontSize: '12px', fontWeight: '700', color: isSelected ? '#1C1917' : '#44403C' }}>
-                          {role.title}
-                        </span>
-                        <span style={{ fontSize: '9.5px', color: '#78716C' }}>
-                          {role.badge}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Active Studio Account Info Badge */}
-              {activeLocation && (
-                <div style={{
-                  background: '#FBF8F2',
-                  border: '1px solid #EADBBE',
-                  borderRadius: '10px',
-                  padding: '10px 12px',
-                  fontSize: '11.5px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '4px',
-                  color: '#57534E'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: '600', color: '#8C6228' }}>Target Studio Desk:</span>
-                    <span style={{ fontWeight: '700', color: '#1C1917', textTransform: 'capitalize' }}>
-                      {selectedDeskRole} Desk
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>Studio Code:</span>
-                    <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#1C1917' }}>
-                      {activeLocation.code || `MB-LOC-${activeLocation.location_id}`}
-                    </span>
-                  </div>
-                  {resolvedAccountName && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #E2D7C5', paddingTop: '4px', marginTop: '2px' }}>
-                      <span>Desk Account:</span>
-                      <span style={{ fontWeight: '700', color: '#166534' }}>
-                        {resolvedAccountName}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* TAB 2: DIRECT ID / MOBILE LOGIN */}
-          {loginMode === 'direct' && (
+          {/* STEP 1: Phone / Mobile Input */}
+          {!otpSent ? (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917' }}>
-                  Phone Number, Email, or Desk ID
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '700', color: '#1C1917' }}>
+                  Registered Mobile Number
                 </label>
-                {otpSent && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOtpSent(false);
-                      setOtp('');
-                      setOtpCooldown(0);
-                      setError('');
-                      setSuccessMsg('');
-                    }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: '0',
-                      fontSize: '11.5px',
-                      fontWeight: '600',
-                      color: '#8C6228',
-                      cursor: 'pointer',
-                      textDecoration: 'underline'
-                    }}
-                  >
-                    Change
-                  </button>
-                )}
+                <span style={{ fontSize: '11px', color: '#8C6228', fontWeight: '600' }}>
+                  Auto-Detects Role & Branch
+                </span>
               </div>
+
               <div style={{ position: 'relative' }}>
-                {isPhoneInput ? (
-                  <Phone size={16} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '13px' }} />
-                ) : (
-                  <Mail size={16} color="#A89885" style={{ position: 'absolute', left: '14px', top: '13px' }} />
-                )}
+                <Phone size={17} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '14px' }} />
                 <input
                   type="text"
                   value={identifier}
-                  disabled={otpSent}
-                  placeholder="e.g. 9840099887, gachibowli.visitor"
+                  placeholder="Enter phone number (e.g. 98400 99881)"
                   onChange={(e) => {
                     setIdentifier(e.target.value);
                     setError('');
                   }}
+                  autoFocus
                   required
                   style={{
                     width: '100%',
-                    padding: '11px 14px 11px 40px',
-                    borderRadius: '10px',
-                    border: '1.5px solid #E2D7C5',
-                    background: otpSent ? '#EFE9DE' : '#FFFFFF',
+                    padding: '12px 14px 12px 42px',
+                    borderRadius: '12px',
+                    border: '1.5px solid #DAC493',
+                    background: '#FFFFFF',
                     outline: 'none',
-                    fontSize: '13.5px',
+                    fontSize: '14.5px',
+                    fontWeight: '600',
                     color: '#1C1917',
-                    cursor: otpSent ? 'not-allowed' : 'text'
+                    boxShadow: '0 2px 8px rgba(184, 139, 74, 0.08)'
                   }}
                 />
               </div>
 
-              {/* If entering a phone number, ask which desk to access */}
-              {isPhoneInput && !otpSent && (
-                <div style={{ marginTop: '10px' }}>
-                  <label style={{ fontSize: '11.5px', fontWeight: '700', color: '#78716C', display: 'block', marginBottom: '4px' }}>
-                    Desk to Access for this Phone:
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                    {deskRoles.map((role) => (
-                      <button
-                        key={role.id}
-                        type="button"
-                        onClick={() => setDirectRole(role.id)}
-                        style={{
-                          padding: '6px 4px',
-                          borderRadius: '8px',
-                          border: directRole === role.id ? '1.5px solid #B88B4A' : '1px solid #E2D7C5',
-                          background: directRole === role.id ? '#FAF3E3' : '#FFFFFF',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          color: directRole === role.id ? '#8C6228' : '#57534E',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {role.title}
-                      </button>
-                    ))}
+              {/* Live Account Detection Badge */}
+              {isDetecting && (
+                <div style={{ fontSize: '11.5px', color: '#8C6228', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <RotateCw size={12} className="spin" />
+                  <span>Checking registered account...</span>
+                </div>
+              )}
+
+              {detectedAccount?.found && detectedAccount.type === 'single' && (
+                <div style={{
+                  marginTop: '12px',
+                  background: detectedAccount.isMasterAdmin 
+                    ? 'linear-gradient(135deg, #FAF4E6 0%, #F5E8D0 100%)' 
+                    : 'linear-gradient(135deg, #FAF6EE 0%, #F3EDE0 100%)',
+                  border: '1.5px solid #DAC493',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  boxShadow: '0 3px 10px rgba(140, 98, 40, 0.08)'
+                }}>
+                  <div style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow: '0 2px 6px rgba(140, 98, 40, 0.25)'
+                  }}>
+                    {getRoleIcon(detectedAccount.user?.role)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917' }}>
+                        {detectedAccount.roleLabel}
+                      </span>
+                      <span style={{
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        background: '#EEDBBE',
+                        color: '#6A491A',
+                        padding: '1px 6px',
+                        borderRadius: '6px',
+                        textTransform: 'uppercase'
+                      }}>
+                        Verified
+                      </span>
+                    </div>
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#8C6228',
+                      fontWeight: '600',
+                      marginTop: '2px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {detectedAccount.branchName}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {detectedAccount?.found && detectedAccount.type === 'multiple' && (
+                <div style={{
+                  marginTop: '12px',
+                  background: '#FAF6EE',
+                  border: '1.5px solid #DAC493',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  boxShadow: '0 3px 10px rgba(140, 98, 40, 0.08)'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', marginBottom: '2px' }}>
+                    Identified Studio Branch
+                  </div>
+                  <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917', marginBottom: '10px' }}>
+                    {detectedAccount.branchName}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#57534E', fontWeight: '600', marginBottom: '8px' }}>
+                    Select desk to access for this session:
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${detectedAccount.accounts?.length || 3}, 1fr)`, gap: '6px' }}>
+                    {detectedAccount.accounts?.map((acc) => {
+                      const isSelected = selectedRole === acc.role;
+                      return (
+                        <button
+                          key={acc.role}
+                          type="button"
+                          onClick={() => setSelectedRole(acc.role)}
+                          style={{
+                            padding: '8px 4px',
+                            borderRadius: '8px',
+                            border: isSelected ? '1.5px solid #B88B4A' : '1px solid #E2D7C5',
+                            background: isSelected ? '#FAF3E3' : '#FFFFFF',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '3px',
+                            cursor: 'pointer',
+                            boxShadow: isSelected ? '0 2px 6px rgba(184, 139, 74, 0.15)' : 'none'
+                          }}
+                        >
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: isSelected ? '#8C6228' : '#44403C' }}>
+                            {acc.role === 'admin' ? 'Branch Admin' : acc.role === 'reception' ? 'Reception Desk' : 'Visitor Desk'}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
-          )}
-
-          {/* OTP Input Section (Rendered when OTP is sent) */}
-          {otpSent && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917' }}>
-                  Enter 6-Digit OTP
-                </label>
-                {otpCooldown > 0 ? (
-                  <span style={{ fontSize: '11.5px', color: '#8C6228', fontWeight: '600' }}>
-                    Resend in <strong>{otpCooldown}s</strong>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleSendOtp}
-                    disabled={sendingOtp}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: '0',
-                      fontSize: '11.5px',
-                      fontWeight: '700',
-                      color: '#9F7335',
-                      cursor: sendingOtp ? 'not-allowed' : 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <RotateCw size={12} />
-                    {sendingOtp ? 'Sending...' : 'Resend OTP'}
-                  </button>
-                )}
-              </div>
-              <div style={{ position: 'relative' }}>
-                <ShieldCheck size={16} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '13px', pointerEvents: 'none' }} />
-                <input
-                  ref={otpInputRef}
-                  type={showOtp ? 'text' : 'password'}
-                  maxLength={6}
-                  placeholder="------"
-                  value={otp}
-                  onChange={(e) => {
-                    setOtp(e.target.value.replace(/\D/g, ''));
-                    setError('');
-                  }}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '11px 42px 11px 40px',
-                    borderRadius: '10px',
-                    border: '1.5px solid #B88B4A',
-                    background: '#FFFFFF',
-                    outline: 'none',
-                    fontSize: '16px',
-                    fontWeight: '700',
-                    color: '#1C1917',
-                    letterSpacing: '0.25em'
-                  }}
-                />
+          ) : (
+            /* STEP 2: OTP Verification */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Target Desk Summary Header */}
+              <div style={{
+                background: 'linear-gradient(135deg, #FAF6EE 0%, #F5E8D0 100%)',
+                border: '1.5px solid #DAC493',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase' }}>
+                    Signing in as
+                  </div>
+                  <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                    {resolvedRoleLabel}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#57534E', fontWeight: '600' }}>
+                    {resolvedBranchName}
+                  </div>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setShowOtp(!showOtp)}
+                  onClick={() => {
+                    setOtpSent(false);
+                    setOtp('');
+                    setOtpCooldown(0);
+                    setError('');
+                    setSuccessMsg('');
+                  }}
                   style={{
-                    position: 'absolute',
-                    right: '10px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    padding: '6px',
+                    background: '#FFFFFF',
+                    border: '1px solid #DAC493',
+                    padding: '5px 10px',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    color: '#8C6228',
                     cursor: 'pointer',
-                    color: showOtp ? '#9F7335' : '#A89885'
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  {showOtp ? <EyeOff size={16} /> : <Eye size={16} />}
+                  Change
                 </button>
               </div>
 
-              {/* Demo Auto-Fill Badge */}
-              {demoOtp && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: '#FAF3E3',
-                  border: '1px dashed #DAC493',
-                  padding: '6px 10px',
-                  borderRadius: '8px',
-                  fontSize: '11.5px',
-                  color: '#8C6228'
-                }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Sparkles size={13} color="#B88B4A" />
-                    <span>Demo Code: <strong>{demoOtp}</strong></span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOtp(demoOtp);
+              {/* OTP Input Field */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917' }}>
+                    Enter 6-Digit OTP Code
+                  </label>
+                  {otpCooldown > 0 ? (
+                    <span style={{ fontSize: '11.5px', color: '#8C6228', fontWeight: '600' }}>
+                      Resend in <strong>{otpCooldown}s</strong>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSendOtp}
+                      disabled={sendingOtp}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: '0',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        color: '#9F7335',
+                        cursor: sendingOtp ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <RotateCw size={12} />
+                      {sendingOtp ? 'Sending...' : 'Resend OTP'}
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ position: 'relative' }}>
+                  <ShieldCheck size={16} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '13px', pointerEvents: 'none' }} />
+                  <input
+                    ref={otpInputRef}
+                    type={showOtp ? 'text' : 'password'}
+                    maxLength={6}
+                    placeholder="------"
+                    value={otp}
+                    onChange={(e) => {
+                      setOtp(e.target.value.replace(/\D/g, ''));
                       setError('');
                     }}
+                    required
                     style={{
-                      background: '#9F7335',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      padding: '3px 8px',
-                      borderRadius: '4px',
-                      fontSize: '10.5px',
+                      width: '100%',
+                      padding: '11px 42px 11px 40px',
+                      borderRadius: '10px',
+                      border: '1.5px solid #B88B4A',
+                      background: '#FFFFFF',
+                      outline: 'none',
+                      fontSize: '16px',
                       fontWeight: '700',
-                      cursor: 'pointer'
+                      color: '#1C1917',
+                      letterSpacing: '0.25em'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOtp(!showOtp)}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      padding: '6px',
+                      cursor: 'pointer',
+                      color: showOtp ? '#9F7335' : '#A89885'
                     }}
                   >
-                    Auto Fill
+                    {showOtp ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
-              )}
+
+                {/* Demo Auto-Fill Badge */}
+                {demoOtp && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    background: '#FAF3E3',
+                    border: '1px dashed #DAC493',
+                    padding: '6px 10px',
+                    borderRadius: '8px',
+                    fontSize: '11.5px',
+                    color: '#8C6228',
+                    marginTop: '8px'
+                  }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <Sparkles size={13} color="#B88B4A" />
+                      <span>Demo Code: <strong>{demoOtp}</strong></span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOtp(demoOtp);
+                        setError('');
+                      }}
+                      style={{
+                        background: '#9F7335',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        fontSize: '10.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Auto Fill
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Submit Button */}
+          {/* Action Button */}
           <button
             type="submit"
             disabled={loading || sendingOtp}
             style={{
               width: '100%',
-              padding: '12px 18px',
+              padding: '13px 18px',
               fontSize: '14px',
               fontWeight: '700',
-              marginTop: '6px',
-              background: 'linear-gradient(135deg, #A87B3E 0%, #8C6228 100%)',
+              marginTop: '4px',
+              background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
               color: '#FFFFFF',
               border: 'none',
-              borderRadius: '10px',
+              borderRadius: '12px',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
               cursor: (loading || sendingOtp) ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 14px rgba(140, 98, 40, 0.25)',
+              boxShadow: '0 4px 14px rgba(184, 139, 74, 0.3)',
               transition: 'all 0.2s ease'
             }}
           >
-            {loading ? 'Verifying...' : sendingOtp ? 'Sending OTP...' : (
+            {loading ? 'Verifying...' : sendingOtp ? 'Sending Code...' : (
               <>
-                {otpSent ? 'Verify & Open Desk' : 'Get Login OTP'}
+                {otpSent ? 'Verify & Open Desk' : 'Continue to Studio Portal'}
                 <ArrowRight size={16} />
               </>
             )}
           </button>
         </form>
 
-        {/* Quick Demo Helper at Bottom */}
+        {/* Quick Demo Access Chips */}
+        {!otpSent && (
+          <div style={{
+            marginTop: '22px',
+            paddingTop: '16px',
+            borderTop: '1px solid #EADBBE'
+          }}>
+            <div style={{ 
+              fontSize: '10.5px', 
+              fontWeight: '700', 
+              color: '#8C6228', 
+              textTransform: 'uppercase', 
+              letterSpacing: '0.06em', 
+              marginBottom: '8px',
+              textAlign: 'center'
+            }}>
+              Quick-Test Registered Mobile Numbers
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
+              {quickDemoAccounts.map((acc) => (
+                <button
+                  key={acc.phone}
+                  type="button"
+                  onClick={() => {
+                    setIdentifier(acc.phone.replace(/\s/g, ''));
+                    setError('');
+                  }}
+                  style={{
+                    padding: '5px 9px',
+                    borderRadius: '8px',
+                    border: '1px solid #DAC493',
+                    background: '#FFFFFF',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#57534E',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#FAF6EE';
+                    e.currentTarget.style.borderColor = '#B88B4A';
+                    e.currentTarget.style.color = '#8C6228';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#FFFFFF';
+                    e.currentTarget.style.borderColor = '#DAC493';
+                    e.currentTarget.style.color = '#57534E';
+                  }}
+                >
+                  <span style={{ fontSize: '10px' }}>{acc.badge}</span>
+                  <span>{acc.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
         <div style={{
-          marginTop: '18px',
-          paddingTop: '14px',
-          borderTop: '1px solid #E2D7C5',
+          marginTop: '16px',
           textAlign: 'center',
           fontSize: '11px',
-          color: '#78716C'
+          color: '#8C6228',
+          opacity: 0.8
         }}>
-          <span>Maison BeYou Luxury Salon & Clinic Management</span>
+          <span>Maison BeYou Luxury Aesthetic Clinic & Salon</span>
         </div>
       </div>
     </div>

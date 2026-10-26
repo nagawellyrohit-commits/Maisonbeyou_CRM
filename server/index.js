@@ -393,11 +393,26 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
       });
 
       if (matchedUsers.length > 0) {
-        if (detectedRole) {
-          user = matchedUsers.find(u => u.role === detectedRole) || matchedUsers[0];
+        // If master admin matches, return master admin immediately
+        const masterMatch = matchedUsers.find(u => u.role === 'master_admin');
+        if (masterMatch && (!detectedRole || detectedRole === 'master_admin')) {
+          user = masterMatch;
         } else {
-          // If no role specified, prefer admin over reception over visitor
-          user = matchedUsers.find(u => u.role === 'admin') || matchedUsers[0];
+          let pool = matchedUsers;
+          if (explicitLocationId) {
+            const byLoc = pool.filter(u => u.location_id === explicitLocationId);
+            if (byLoc.length > 0) pool = byLoc;
+          }
+          if (detectedRole) {
+            user = pool.find(u => u.role === detectedRole) || pool[0];
+          } else {
+            // If only 1 user in pool, use that exact user
+            if (pool.length === 1) {
+              user = pool[0];
+            } else {
+              user = pool.find(u => u.role === 'admin') || pool[0];
+            }
+          }
         }
       }
 
@@ -428,7 +443,7 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
       }
 
       // Explicit Demo test numbers support
-      if (!user && (digits === '9876543210' || digits === '9820599000')) {
+      if (!user && digits === '9876543210') {
         const adminUser = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get('admin@maisonbeyou.com');
         if (adminUser) {
           user = { ...adminUser, phone: rawInput };
@@ -440,17 +455,185 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
   return user;
 }
 
+// Detect account by phone number or identifier (Auto-detection API)
+app.post('/api/auth/detect-account', (req, res) => {
+  try {
+    const rawInput = (req.body.identifier || '').trim();
+    if (!rawInput) {
+      return res.json({ found: false });
+    }
+
+    const digits = rawInput.replace(/\D/g, '');
+    const isPhone = digits.length >= 7;
+
+    if (isPhone) {
+      // 1. Check Master Admin by phone
+      const masterUser = db.prepare("SELECT user_id, name, email, phone, role, location_id FROM USERS WHERE role = 'master_admin' AND active = 1 AND phone IS NOT NULL").get();
+      if (masterUser && masterUser.phone) {
+        const mDigits = masterUser.phone.replace(/\D/g, '');
+        if (mDigits === digits || mDigits.endsWith(digits) || digits.endsWith(mDigits)) {
+          return res.json({
+            found: true,
+            type: 'single',
+            user: {
+              user_id: masterUser.user_id,
+              name: masterUser.name,
+              email: masterUser.email,
+              phone: masterUser.phone,
+              role: masterUser.role,
+              location_id: null
+            },
+            roleLabel: 'Maison Master Admin',
+            roleSubtitle: 'Executive Control • All Studios & Headquarters',
+            branchName: 'Headquarters & Global Network',
+            isMasterAdmin: true
+          });
+        }
+      }
+
+      // 2. Query all active users with phone numbers
+      const usersWithPhone = db.prepare(`
+        SELECT u.user_id, u.name, u.email, u.phone, u.role, u.location_id,
+               l.name as location_name, l.code as location_code, l.city as location_city
+        FROM USERS u
+        LEFT JOIN LOCATIONS l ON u.location_id = l.location_id
+        WHERE u.active = 1 AND u.phone IS NOT NULL
+      `).all();
+
+      const matchedUsers = usersWithPhone.filter(u => {
+        if (!u.phone) return false;
+        const uDigits = u.phone.replace(/\D/g, '');
+        return uDigits === digits || uDigits.endsWith(digits) || digits.endsWith(uDigits);
+      });
+
+      if (matchedUsers.length === 1) {
+        const u = matchedUsers[0];
+        const roleLabel = u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : u.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor Desk';
+        const roleSubtitle = u.role === 'admin' ? 'Studio Management & Operational Control' : u.role === 'reception' ? 'Front-Desk Billing & Appointments' : 'Client Self-Intake Tablet';
+        return res.json({
+          found: true,
+          type: 'single',
+          user: {
+            user_id: u.user_id,
+            name: u.name,
+            email: u.email,
+            phone: u.phone,
+            role: u.role,
+            location_id: u.location_id
+          },
+          roleLabel,
+          roleSubtitle,
+          branchName: u.location_name || (u.role === 'master_admin' ? 'Headquarters & Global Network' : 'Studio Branch'),
+          branchCode: u.location_code,
+          isMasterAdmin: u.role === 'master_admin'
+        });
+      }
+
+      if (matchedUsers.length > 1) {
+        // Group by location
+        const locId = matchedUsers[0].location_id;
+        const locName = matchedUsers[0].location_name;
+        const locCode = matchedUsers[0].location_code;
+
+        return res.json({
+          found: true,
+          type: 'multiple',
+          location: {
+            location_id: locId,
+            name: locName,
+            code: locCode
+          },
+          branchName: locName,
+          branchCode: locCode,
+          accounts: matchedUsers.map(u => ({
+            user_id: u.user_id,
+            role: u.role,
+            name: u.name,
+            roleLabel: u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : 'Visitor Desk',
+            roleSubtitle: u.role === 'admin' ? 'Management & Reports' : u.role === 'reception' ? 'Billing & Intake' : 'Client Tablet'
+          }))
+        });
+      }
+
+      // Check LOCATIONS table for common studio phone
+      const locMatch = db.prepare(`
+        SELECT location_id, name, code, city, phone, primary_login_phone 
+        FROM LOCATIONS 
+        WHERE phone IS NOT NULL OR primary_login_phone IS NOT NULL
+      `).all().find(l => {
+        const pDigits = (l.primary_login_phone || l.phone || '').replace(/\D/g, '');
+        return pDigits && (pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits));
+      });
+
+      if (locMatch) {
+        const locUsers = db.prepare('SELECT user_id, name, email, phone, role, location_id FROM USERS WHERE location_id = ? AND active = 1').all(locMatch.location_id);
+        if (locUsers.length > 0) {
+          return res.json({
+            found: true,
+            type: 'multiple',
+            location: {
+              location_id: locMatch.location_id,
+              name: locMatch.name,
+              code: locMatch.code
+            },
+            branchName: locMatch.name,
+            branchCode: locMatch.code,
+            accounts: locUsers.map(u => ({
+              user_id: u.user_id,
+              role: u.role,
+              name: u.name,
+              roleLabel: u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : 'Visitor Desk',
+              roleSubtitle: u.role === 'admin' ? 'Management & Reports' : u.role === 'reception' ? 'Billing & Intake' : 'Client Tablet'
+            }))
+          });
+        }
+      }
+    } else {
+      // Non-phone input (e.g. master@maisonbeyou.com or desk id)
+      const user = findUserByIdentifier(rawInput);
+      if (user) {
+        let loc = null;
+        if (user.location_id) {
+          loc = db.prepare('SELECT location_id, name, code FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
+        }
+        const roleLabel = user.role === 'admin' ? 'Branch Main Admin' : user.role === 'reception' ? 'Reception Desk' : user.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor Desk';
+        return res.json({
+          found: true,
+          type: 'single',
+          user: {
+            user_id: user.user_id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            location_id: user.location_id
+          },
+          roleLabel,
+          branchName: loc ? loc.name : 'Headquarters & Global Network',
+          branchCode: loc ? loc.code : null,
+          isMasterAdmin: user.role === 'master_admin'
+        });
+      }
+    }
+
+    return res.json({ found: false });
+  } catch (error) {
+    console.error('Account detection error:', error);
+    res.status(500).json({ error: 'Failed to detect account' });
+  }
+});
+
 // Send OTP for direct Login
 app.post('/api/auth/send-login-otp', (req, res) => {
   try {
     const { identifier, role, location_id } = req.body;
     if ((!identifier || !identifier.trim()) && !location_id) {
-      return res.status(400).json({ error: 'Please enter your Login ID / Phone number or select a studio desk' });
+      return res.status(400).json({ error: 'Please enter your registered mobile number' });
     }
 
     const user = findUserByIdentifier(identifier, role, location_id);
     if (!user) {
-      return res.status(404).json({ error: 'No active studio account found with this Login ID or selection' });
+      return res.status(404).json({ error: 'No active account found with this mobile number. Please check or contact studio support.' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -465,6 +648,12 @@ app.post('/api/auth/send-login-otp', (req, res) => {
     const maskedEmail = user.email ? user.email.replace(/^(.)(.*)(.@.*)$/, (_, a, b, c) => a + '***' + c) : null;
     const maskedPhone = user.phone ? user.phone.slice(0, 4) + '****' + user.phone.slice(-3) : null;
 
+    let locationName = 'Headquarters & Global Network';
+    if (user.location_id) {
+      const loc = db.prepare('SELECT name FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
+      if (loc) locationName = loc.name;
+    }
+
     res.json({
       success: true,
       message: 'OTP sent successfully to registered contact',
@@ -472,7 +661,9 @@ app.post('/api/auth/send-login-otp', (req, res) => {
       demoOtp: otp, // For ease of testing & demonstration
       userId: user.user_id,
       userRole: user.role,
-      userName: user.name
+      userName: user.name,
+      locationId: user.location_id,
+      locationName
     });
   } catch (error) {
     console.error('Send login OTP error:', error);
