@@ -805,8 +805,11 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Role is required to switch' });
     }
 
-    const isOriginalMaster = (req.user.original_role === 'master_admin' || req.user.role === 'master_admin');
-    const isOriginalBranchAdmin = (req.user.original_role === 'admin' || req.user.role === 'admin');
+    const effectiveOriginalRole = req.user.original_role || req.user.role;
+    const isOriginalMaster = effectiveOriginalRole === 'master_admin';
+    const isOriginalBranchAdmin = effectiveOriginalRole === 'admin';
+    const isOriginalReception = effectiveOriginalRole === 'reception';
+    const isOriginalVisitor = effectiveOriginalRole === 'visitor';
 
     let targetLocId = location_id || req.user.location_id || req.locationId;
     if (!isOriginalMaster) {
@@ -822,25 +825,33 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
         return res.status(403).json({ error: 'Only master administrators can switch to master admin' });
       }
       targetUser = db.prepare('SELECT * FROM USERS WHERE role = ? AND active = 1').get('master_admin');
-    } else {
-      if (!isOriginalMaster && !isOriginalBranchAdmin && role === 'admin') {
+    } else if (role === 'admin') {
+      if (!isOriginalMaster && !isOriginalBranchAdmin) {
         return res.status(403).json({ error: 'Only administrators can switch to admin desk' });
       }
       targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
-      if (!targetUser) {
-        const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
-        if (loc) {
-          ensureLocationAccounts(loc);
-          targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
-        }
+    } else if (role === 'reception') {
+      if (!isOriginalMaster && !isOriginalBranchAdmin && !isOriginalReception) {
+        return res.status(403).json({ error: 'Only authorized staff can switch to reception desk' });
+      }
+      targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
+    } else if (role === 'visitor') {
+      targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
+    } else {
+      return res.status(400).json({ error: `Invalid role: ${role}` });
+    }
+
+    if (!targetUser && role !== 'master_admin') {
+      const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
+      if (loc) {
+        ensureLocationAccounts(loc);
+        targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
       }
     }
 
     if (!targetUser) {
       return res.status(404).json({ error: `No active ${role} account found for this location` });
     }
-
-    const effectiveOriginalRole = req.user.original_role || req.user.role;
 
     const token = jwt.sign(
       {

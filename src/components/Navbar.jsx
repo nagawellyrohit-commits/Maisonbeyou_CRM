@@ -146,8 +146,11 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     staff: 'Staff Member'
   };
 
-  const isMasterAdmin = currentUser?.original_role === 'master_admin' || currentUser?.role === 'master_admin';
-  const isBranchAdmin = currentUser?.original_role === 'admin' || currentUser?.role === 'admin';
+  const effectiveOriginalRole = currentUser?.original_role || currentUser?.role;
+  const isMasterAdmin = effectiveOriginalRole === 'master_admin';
+  const isBranchAdmin = effectiveOriginalRole === 'admin';
+  const isReception = effectiveOriginalRole === 'reception';
+  const isVisitor = effectiveOriginalRole === 'visitor';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
 
   const getClientInitials = (name, surname = '') => {
@@ -1184,7 +1187,10 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   zIndex: 100
                 }}>
                   <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-light)', padding: '6px 8px' }}>
-                    {activeLocation ? `Active Desk (${activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name})` : 'Switch Active Role'}
+                    {isVisitor
+                      ? `Active Kiosk (${activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) : 'Visitor Desk'})`
+                      : (activeLocation ? `Active Desk (${activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name})` : 'Switch Active Role')
+                    }
                   </div>
                   
                   {isMasterAdmin && (
@@ -1229,45 +1235,67 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     </button>
                   )}
 
-                  <button
-                    onClick={() => handleQuickSwitchRole('reception')}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '13px',
-                      background: currentUser?.role === 'reception' ? 'var(--primary-subtle)' : 'transparent',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                      🛎️ {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Reception' : 'Reception Desk'}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard, Billing & Visits</span>
-                  </button>
+                  {(isMasterAdmin || isBranchAdmin || isReception) && (
+                    <button
+                      onClick={() => handleQuickSwitchRole('reception')}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13px',
+                        background: currentUser?.role === 'reception' ? 'var(--primary-subtle)' : 'transparent',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                        🛎️ {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Reception' : 'Reception Desk'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard, Billing & Visits</span>
+                    </button>
+                  )}
 
-                  <button
-                    onClick={() => handleQuickSwitchRole('visitor')}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '13px',
-                      background: currentUser?.role === 'visitor' ? 'var(--primary-subtle)' : 'transparent',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                      📋 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Visitor Desk' : 'Visitor Desk'}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Client Check-in & Intake Flow</span>
-                  </button>
+                  {(isMasterAdmin || isBranchAdmin || isReception) ? (
+                    <button
+                      onClick={() => handleQuickSwitchRole('visitor')}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13px',
+                        background: currentUser?.role === 'visitor' ? 'var(--primary-subtle)' : 'transparent',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                        📋 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Visitor Desk' : 'Visitor Desk'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Client Check-in & Intake Flow</span>
+                    </button>
+                  ) : (
+                    <div
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13px',
+                        background: 'var(--primary-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}
+                    >
+                      <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                        📋 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Visitor Desk' : 'Visitor Desk'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#059669', fontWeight: '600' }}>Active Intake Kiosk</span>
+                    </div>
+                  )}
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
 
