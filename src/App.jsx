@@ -7,6 +7,7 @@ import ClientProfile from './components/ClientProfile';
 import ClientsList from './components/ClientsList';
 import ServiceManagement from './components/ServiceManagement';
 import StaffManagement from './components/StaffManagement';
+import MembershipManagement from './components/MembershipManagement';
 import ReportsView from './components/ReportsView';
 import ReceiptModal from './components/ReceiptModal';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -357,6 +358,10 @@ export default function App() {
 
         {isAdmin && activeTab === 'staff' && (
           <StaffManagement />
+        )}
+
+        {activeTab === 'membership' && (
+          <MembershipManagement />
         )}
 
         {isAdmin && activeTab === 'reports' && (

@@ -11,6 +11,7 @@ import { MEMBERSHIP_PLANS } from './NewVisitWizard';
 import ClientsList from './ClientsList';
 import ServiceManagement from './ServiceManagement';
 import StaffManagement from './StaffManagement';
+import MembershipManagement from './MembershipManagement';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 
@@ -428,6 +429,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 { id: 'clients', label: 'Clients', icon: Users, show: true },
                 { id: 'services', label: 'Services', icon: Scissors, show: isAdmin },
                 { id: 'staff', label: 'Staff', icon: Award, show: isAdmin },
+                { id: 'membership', label: 'Membership', icon: Crown, show: true },
                 { id: 'reports', label: 'Reports', icon: BarChart3, show: isAdmin }
               ].filter(item => item.show).map(item => {
                 const Icon = item.icon;
@@ -1341,6 +1343,47 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             </button>
           </div>
           <StaffManagement />
+        </div>
+      )}
+
+      {/* Membership Section (Rendered inside Dashboard Section 3) */}
+      {activeSection === 'membership' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+            <button
+              type="button"
+              onClick={() => setActiveSection('visits')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '7px 16px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+              }}
+            >
+              ← Back to Today's Visits
+            </button>
+          </div>
+          <MembershipManagement
+            onOpenClient={onOpenClient}
+            activeLocation={activeLocation}
+            currentUser={currentUser}
+          />
         </div>
       )}
 

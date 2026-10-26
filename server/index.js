@@ -2977,7 +2977,187 @@ export function getFullClientRecord(clientId) {
     visit_history: fullVisits,
     treatment_courses: treatmentCourses
   };
-}
+// Studio Membership Intelligence & Roster endpoint
+app.get('/api/memberships', authenticateToken, (req, res) => {
+  try {
+    const locId = req.locationId;
+    let query = `
+      SELECT client_id, name, surname, phone, email, location_id,
+             membership_tier, membership_status, membership_started_at,
+             membership_expires_at, membership_balance, membership_cost,
+             membership_benefit_status, last_membership_benefit_used, last_benefit_used,
+             last_benefit_date, last_membership_amount_used, created_at
+      FROM CLIENTS
+      WHERE membership_tier IS NOT NULL 
+        AND membership_tier != '' 
+        AND LOWER(membership_tier) != 'non-member'
+    `;
+    const params = [];
+    if (locId) {
+      query += ' AND location_id = ?';
+      params.push(locId);
+    }
+    query += ' ORDER BY client_id DESC';
+    const memberRows = db.prepare(query).all(...params);
+
+    const canonicalPlans = [
+      {
+        id: 'eclat',
+        tier: 'Éclat',
+        tierNumber: '01 — SERVICE',
+        validity: 'Valid for 3 months',
+        name: 'ECLAT MEMBER',
+        fullName: 'ECLAT PRIVILEGE MEMBERSHIP',
+        price: 6000,
+        credits: 6000,
+        color: '#D97706',
+        bg: '#FEF3C7',
+        tagline: 'Your introduction to thoughtful skincare.',
+        benefits: [
+          'Complimentary skin analysis (basic)',
+          'Priority booking on weekends',
+          'Birthday month: ₹1,000 voucher / free add-on',
+          'Access to member-only packages',
+          'Free consultation during tenure'
+        ]
+      },
+      {
+        id: 'eternal',
+        tier: 'Eternal',
+        tierNumber: '02 — SERVICE',
+        validity: 'Valid for 6 months',
+        name: 'ETERNAL MEMBER',
+        fullName: 'ETERNAL ELEVATION MEMBERSHIP',
+        price: 15000,
+        credits: 15000,
+        color: '#0D9488',
+        bg: '#CCFBF1',
+        tagline: 'Elevated care for your evolving beauty journey.',
+        benefits: [
+          'Free advanced skin analysis (worth ₹1,500–₹2,000)',
+          '1 Free express facial / peel quarterly or 2 per year',
+          'Priority booking + peak hour preference',
+          'Birthday: ₹2,500 Voucher / Complimentary Services',
+          'Exclusive pricing on laser packages',
+          'Early access to new treatments & offers'
+        ]
+      },
+      {
+        id: 'infini',
+        tier: 'Infini',
+        tierNumber: '03 — SERVICE',
+        validity: 'Valid for 1 year',
+        name: 'INFINI MEMBER',
+        fullName: 'INFINI EXCLUSIVITY MEMBERSHIP',
+        price: 25000,
+        credits: 25000,
+        color: '#2563EB',
+        bg: '#DBEAFE',
+        tagline: 'Unmatched luxury and precision-tailored aesthetic care.',
+        benefits: [
+          'Free 3D skin & hair analysis twice a year',
+          '1 Complimentary signature HydraFacial or peel',
+          'Birthday: ₹5,000 voucher + free add-on',
+          '15% off all aesthetic treatments year-round',
+          '2 Guest passes per year with 10% discount',
+          'Dedicated relationship manager & VIP suite access'
+        ]
+      },
+      {
+        id: 'lumiere',
+        tier: 'Lumière',
+        tierNumber: '04 — SERVICE',
+        validity: 'Valid for 1 year',
+        name: 'LUMIERE MEMBER',
+        fullName: 'LUMIÈRE PRESTIGE ELITE MEMBERSHIP',
+        price: 50000,
+        credits: 50000,
+        color: '#B88B4A',
+        bg: '#FAF6EE',
+        tagline: 'The pinnacle of beauty, exclusivity, and personalized attention.',
+        benefits: [
+          'Unlimited comprehensive skin & hair analyses',
+          '2 Complimentary signature HydraFacials per year',
+          'Birthday: ₹10,000 voucher + champagne beauty ritual',
+          '20% off all treatments & packages year-round',
+          '4 Guest passes per year with 15% discount',
+          'Dedicated Aesthetic Concierge & private executive room'
+        ]
+      }
+    ];
+
+    const standardTierCosts = {
+      'Lumière': 50000,
+      'Infini': 25000,
+      'Eternal': 15000,
+      'Éclat': 6000
+    };
+
+    let totalAllocated = 0;
+    let totalUsed = 0;
+    let totalBalance = 0;
+    const tierCounts = { 'Éclat': 0, 'Eternal': 0, 'Infini': 0, 'Lumière': 0 };
+
+    const members = memberRows.map(m => {
+      const tierLower = (m.membership_tier || '').toLowerCase();
+      let tierGroup = 'Infini';
+      if (tierLower.includes('lumi')) tierGroup = 'Lumière';
+      else if (tierLower.includes('infin')) tierGroup = 'Infini';
+      else if (tierLower.includes('etern')) tierGroup = 'Eternal';
+      else if (tierLower.includes('eclat') || tierLower.includes('éclat')) tierGroup = 'Éclat';
+
+      if (tierCounts[tierGroup] !== undefined) tierCounts[tierGroup]++;
+
+      const cost = Number(m.membership_cost) || standardTierCosts[tierGroup] || 25000;
+      const balance = Number(m.membership_balance) !== undefined && !isNaN(Number(m.membership_balance))
+        ? Number(m.membership_balance)
+        : cost;
+      const used = Math.max(0, cost - balance);
+
+      totalAllocated += cost;
+      totalUsed += used;
+      totalBalance += balance;
+
+      const now = new Date();
+      let daysRemaining = null;
+      let isExpired = false;
+      if (m.membership_expires_at) {
+        const exp = new Date(m.membership_expires_at);
+        const diffMs = exp - now;
+        daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (daysRemaining < 0) isExpired = true;
+      }
+
+      return {
+        ...m,
+        tier_group: tierGroup,
+        cost,
+        balance,
+        used,
+        usage_pct: cost > 0 ? Math.round((used / cost) * 100) : 0,
+        days_remaining: daysRemaining,
+        is_expired: isExpired,
+        effective_status: isExpired ? 'Expired' : (m.membership_status || 'Active')
+      };
+    });
+
+    res.json({
+      plans: canonicalPlans,
+      members,
+      stats: {
+        total_members: members.length,
+        total_allocated: totalAllocated,
+        total_used: totalUsed,
+        total_balance: totalBalance,
+        overall_usage_pct: totalAllocated > 0 ? Math.round((totalUsed / totalAllocated) * 100) : 0,
+        tier_counts: tierCounts
+      }
+    });
+  } catch (error) {
+    console.error('Memberships error:', error);
+    res.status(500).json({ error: 'Failed to load memberships' });
+  }
+});
 
 // Get client membership privileges endpoint
 app.get('/api/clients/:id/membership-privileges', authenticateToken, (req, res) => {
@@ -3221,7 +3401,7 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
 // Update client membership status/tier and/or validity
 app.patch('/api/clients/:id/membership', authenticateToken, (req, res) => {
   try {
-    const { membership_tier, membership_expires_at, membership_status, membership_balance } = req.body;
+    const { membership_tier, membership_expires_at, membership_status, membership_balance, membership_cost } = req.body;
     const clientId = req.params.id;
     const existing = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(clientId);
     if (!existing) {
@@ -3249,6 +3429,7 @@ app.patch('/api/clients/:id/membership', authenticateToken, (req, res) => {
     }
 
     const balance = membership_balance !== undefined ? parseFloat(membership_balance) : existing.membership_balance;
+    const cost = membership_cost !== undefined ? parseFloat(membership_cost) : (tier ? balance : existing.membership_cost);
 
     db.prepare(`
       UPDATE CLIENTS
@@ -3257,9 +3438,10 @@ app.patch('/api/clients/:id/membership', authenticateToken, (req, res) => {
           membership_started_at = ?,
           membership_expires_at = ?,
           membership_balance = ?,
+          membership_cost = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE client_id = ?
-    `).run(tier, status, started, expires, balance, clientId);
+    `).run(tier, status, started, expires, balance, cost, clientId);
 
     const clientData = getFullClientRecord(clientId);
     res.json({ success: true, ...clientData });
