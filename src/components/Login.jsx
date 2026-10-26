@@ -214,13 +214,6 @@ export default function Login({ onLoginSuccess }) {
     }
   };
 
-  const quickDemoAccounts = [
-    { label: 'Master Admin', phone: '98205 99000', badge: '👑 HQ' },
-    { label: 'Gachibowli Admin', phone: '98400 99881', badge: '🏢 Main Admin' },
-    { label: 'Gachibowli Reception', phone: '98400 99882', badge: '🛎️ Front Desk' },
-    { label: 'Juhu Admin', phone: '98205 99001', badge: '🏢 Main Admin' },
-    { label: 'Juhu Reception', phone: '98205 99002', badge: '🛎️ Front Desk' }
-  ];
 
   return (
     <div style={{
@@ -674,65 +667,6 @@ export default function Login({ onLoginSuccess }) {
           </button>
         </form>
 
-        {/* Quick Demo Access Chips */}
-        {!otpSent && (
-          <div style={{
-            marginTop: '22px',
-            paddingTop: '16px',
-            borderTop: '1px solid #EADBBE'
-          }}>
-            <div style={{ 
-              fontSize: '10.5px', 
-              fontWeight: '700', 
-              color: '#8C6228', 
-              textTransform: 'uppercase', 
-              letterSpacing: '0.06em', 
-              marginBottom: '8px',
-              textAlign: 'center'
-            }}>
-              Quick-Test Registered Mobile Numbers
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', justifyContent: 'center' }}>
-              {quickDemoAccounts.map((acc) => (
-                <button
-                  key={acc.phone}
-                  type="button"
-                  onClick={() => {
-                    setIdentifier(acc.phone.replace(/\s/g, ''));
-                    setError('');
-                  }}
-                  style={{
-                    padding: '5px 9px',
-                    borderRadius: '8px',
-                    border: '1px solid #DAC493',
-                    background: '#FFFFFF',
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    color: '#57534E',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#FAF6EE';
-                    e.currentTarget.style.borderColor = '#B88B4A';
-                    e.currentTarget.style.color = '#8C6228';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#FFFFFF';
-                    e.currentTarget.style.borderColor = '#DAC493';
-                    e.currentTarget.style.color = '#57534E';
-                  }}
-                >
-                  <span style={{ fontSize: '10px' }}>{acc.badge}</span>
-                  <span>{acc.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Footer */}
         <div style={{
