@@ -353,7 +353,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       </header>
 
       {/* Main Container - Aligned with Image 1 app-container */}
-      <main className="app-container" style={{ flex: 1, padding: '36px var(--container-padding-x) 60px' }}>
+      <main className="app-container" style={{ flex: 1, padding: '44px var(--container-padding-x) 60px' }}>
         {error && (
           <div style={{
             background: 'var(--danger-bg)',

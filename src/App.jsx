@@ -279,6 +279,7 @@ export default function App() {
             width: '100%',
             display: 'flex',
             flexDirection: 'column',
+            paddingTop: '44px',
             ...(activeTab === 'new-visit' ? { paddingBottom: '24px' } : {})
           }}
         >

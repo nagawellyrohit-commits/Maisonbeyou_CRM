@@ -321,7 +321,7 @@ textarea {
   max-width: var(--container-max-width);
   margin-left: auto;
   margin-right: auto;
-  padding: 24px var(--container-padding-x) 60px var(--container-padding-x);
+  padding: 44px var(--container-padding-x) 60px var(--container-padding-x);
   box-sizing: border-box;
 }
 
@@ -421,7 +421,7 @@ textarea {
 
 @media (max-width: 768px) {
   .app-container {
-    padding-top: 16px;
+    padding-top: 28px;
     padding-bottom: 40px;
   }
 
