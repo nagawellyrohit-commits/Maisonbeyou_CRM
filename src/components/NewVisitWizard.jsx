@@ -21,6 +21,7 @@ import { renderCategoryIcon } from '../utils/categoryIcons';
 export const MEMBERSHIP_PLANS = [
   {
     id: 'eclat',
+    tier: 'Éclat',
     tierNumber: '01 — SERVICE',
     validity: 'Valid for 3 months',
     name: 'ECLAT MEMBER',
@@ -46,6 +47,7 @@ export const MEMBERSHIP_PLANS = [
   },
   {
     id: 'eternal',
+    tier: 'Eternal',
     tierNumber: '02 — SERVICE',
     validity: 'Valid for 6 months',
     name: 'ETERNAL MEMBER',
@@ -73,6 +75,7 @@ export const MEMBERSHIP_PLANS = [
   },
   {
     id: 'infini',
+    tier: 'Infini',
     tierNumber: '03 — SERVICE',
     validity: 'Valid for 1 year',
     name: 'INFINI MEMBER',
@@ -102,6 +105,7 @@ export const MEMBERSHIP_PLANS = [
   },
   {
     id: 'lumiere',
+    tier: 'Lumière',
     tierNumber: '04 — SERVICE',
     validity: 'Valid for 1 year',
     name: 'LUMIERE MEMBER',

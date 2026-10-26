@@ -3,12 +3,13 @@ import {
   Crown, Sparkles, Users, Search, Filter, Plus, Calendar, Clock,
   ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RotateCw,
   ChevronRight, Edit2, ExternalLink, X, DollarSign, Wallet,
-  CreditCard, Gift, Star, Check
+  CreditCard, Gift, Star, Check, UserPlus
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
+import { MEMBERSHIP_PLANS } from './NewVisitWizard';
 
 export default function MembershipManagement({ onOpenClient, activeLocation, currentUser }) {
-  const [plans, setPlans] = useState([]);
+  const [plans, setPlans] = useState(MEMBERSHIP_PLANS);
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({
     total_members: 0,
@@ -35,6 +36,12 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   const [customExpiry, setCustomExpiry] = useState('');
   const [enrolling, setEnrolling] = useState(false);
 
+  // Quick New Client Registration within Enroll Modal
+  const [showQuickAddClient, setShowQuickAddClient] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState('');
+  const [creatingClient, setCreatingClient] = useState(false);
+
   // Quick Action Modals
   const [adjustBalanceModal, setAdjustBalanceModal] = useState({ open: false, member: null, amount: '' });
   const [extendValidityModal, setExtendValidityModal] = useState({ open: false, member: null, date: '' });
@@ -43,7 +50,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     try {
       setLoading(true);
       const res = await apiRequest('/memberships');
-      setPlans(res.plans || []);
+      if (res.plans && res.plans.length > 0) {
+        setPlans(res.plans);
+      }
       setMembers(res.members || []);
       setStats(res.stats || {
         total_members: 0,
@@ -73,18 +82,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     fetchMemberships();
   }, [activeLocation]);
 
-  const handleOpenEnrollModal = () => {
-    fetchAllClientsForEnroll();
-    setClientSearch('');
-    setSelectedClient(null);
-    setSelectedPlanId('infini');
-    setCustomCost(25000);
-    const oneYearFromNow = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-    setCustomExpiry(oneYearFromNow);
-    setEnrollModal(true);
-  };
-
   const handleSelectPlanForEnroll = (plan) => {
+    if (!plan) return;
     setSelectedPlanId(plan.id);
     setCustomCost(plan.price);
     let days = 365;
@@ -92,6 +91,57 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     else if (plan.id === 'eternal') days = 180;
     const expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setCustomExpiry(expiryDate);
+  };
+
+  const handleOpenEnrollModal = (preselectedPlan = null) => {
+    fetchAllClientsForEnroll();
+    setClientSearch('');
+    setSelectedClient(null);
+    setShowQuickAddClient(false);
+    setNewClientName('');
+    setNewClientPhone('');
+    if (preselectedPlan) {
+      handleSelectPlanForEnroll(preselectedPlan);
+    } else {
+      const defaultPlan = plans.find(p => p.id === 'infini') || plans[0] || MEMBERSHIP_PLANS[2];
+      handleSelectPlanForEnroll(defaultPlan);
+    }
+    setEnrollModal(true);
+  };
+
+  const handleQuickCreateClient = async (e) => {
+    if (e) e.preventDefault();
+    if (!newClientName.trim()) {
+      alert('Client name is required');
+      return;
+    }
+    try {
+      setCreatingClient(true);
+      const res = await apiRequest('/clients', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newClientName.trim(),
+          phone: newClientPhone.trim(),
+          location_id: activeLocation
+        })
+      });
+      const createdClient = {
+        client_id: res.client_id || res.id,
+        name: newClientName.trim(),
+        phone: newClientPhone.trim(),
+        membership_tier: 'Non-Member'
+      };
+      setAllClients(prev => [createdClient, ...prev]);
+      setSelectedClient(createdClient);
+      setClientSearch(`${createdClient.name} (${createdClient.phone || 'No phone'})`);
+      setShowQuickAddClient(false);
+      setNewClientName('');
+      setNewClientPhone('');
+    } catch (err) {
+      alert('Failed to register client: ' + err.message);
+    } finally {
+      setCreatingClient(false);
+    }
   };
 
   const handleEnrollSubmit = async (e) => {
@@ -224,119 +274,296 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         </div>
       </div>
 
-      {/* SECTION 1: CANONICAL MEMBERSHIP TIER PLANS SHOWCASE */}
+      {/* SECTION 1: WORLD OF PRIVILEGES SHOWCASE (MATCHING IMAGE 2) */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-          <div>
-            <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
-              EXCLUSIVE MEMBERSHIP TIERS
-            </h2>
-            <div style={{ fontSize: '12.5px', color: '#78716C', marginTop: '2px' }}>
-              Click any tier badge to instantly filter enrolled members below.
-            </div>
-          </div>
+        <div style={{ textAlign: 'center', marginBottom: '22px', position: 'relative' }}>
+          <h2 style={{
+            fontSize: 'clamp(22px, 2.2vw, 26px)',
+            color: '#1C1917',
+            fontWeight: '800',
+            letterSpacing: '0.04em',
+            margin: 0,
+            textTransform: 'uppercase'
+          }}>
+            WORLD OF PRIVILEGES
+          </h2>
           {tierFilter !== 'all' && (
-            <button
-              type="button"
-              onClick={() => setTierFilter('all')}
-              style={{
-                fontSize: '12px',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                border: '1px solid #DAC493',
-                background: '#FAF6EE',
-                color: '#8C6228',
-                fontWeight: '700',
-                cursor: 'pointer'
-              }}
-            >
-              Clear Tier Filter ({tierFilter})
-            </button>
+            <div style={{ marginTop: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setTierFilter('all')}
+                style={{
+                  fontSize: '11.5px',
+                  padding: '4px 14px',
+                  borderRadius: '9999px',
+                  border: '1px solid #DAC493',
+                  background: '#FAF6EE',
+                  color: '#8C6228',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  boxShadow: '0 2px 6px rgba(184, 139, 74, 0.1)'
+                }}
+              >
+                Clear Filter ({tierFilter}) ×
+              </button>
+            </div>
           )}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+          gap: '18px'
+        }}>
           {plans.map(p => {
-            const memberCount = stats.tier_counts?.[p.tier] || 0;
+            const memberCount = stats.tier_counts?.[p.tier] || stats.tier_counts?.[p.name] || 0;
             const isSelected = tierFilter === p.tier;
+            const cardImg = p.image || `/memberships/card_${p.id}_3d.jpg`;
+
             return (
               <div
                 key={p.id}
-                onClick={() => setTierFilter(isSelected ? 'all' : p.tier)}
                 style={{
-                  background: isSelected ? '#FAF6EE' : '#FFFFFF',
-                  borderRadius: '14px',
-                  border: isSelected ? '2px solid #B88B4A' : '1px solid #EADBBE',
-                  padding: '20px',
+                  background: '#FFFFFF',
+                  borderRadius: '18px',
+                  border: isSelected ? '2px solid #B88B4A' : '1.5px solid #EADBCC',
+                  boxShadow: isSelected
+                    ? '0 10px 28px rgba(184, 139, 74, 0.22)'
+                    : '0 3px 14px rgba(184, 139, 74, 0.05)',
+                  transform: isSelected ? 'translateY(-3px)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  boxShadow: isSelected ? '0 8px 24px rgba(184, 139, 74, 0.18)' : '0 2px 8px rgba(0,0,0,0.02)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease'
+                  overflow: 'hidden',
+                  transition: 'all 0.22s ease',
+                  position: 'relative'
                 }}
               >
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <span style={{
+                {/* 3D Realistic Metallic Card Showcase Image (Matching Image 2) */}
+                <div style={{
+                  position: 'relative',
+                  width: '100%',
+                  aspectRatio: '4 / 3',
+                  overflow: 'hidden',
+                  background: '#FAF6EE'
+                }}>
+                  <img
+                    src={cardImg}
+                    alt={p.name}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block'
+                    }}
+                  />
+                  {/* Top-Right Member Count Badge */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '10px',
+                    background: 'rgba(255, 255, 255, 0.95)',
+                    backdropFilter: 'blur(4px)',
+                    color: '#8C6228',
+                    padding: '3px 10px',
+                    borderRadius: '9999px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    border: '1px solid #DAC493',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    zIndex: 2
+                  }}>
+                    <Users size={12} />
+                    {memberCount} {memberCount === 1 ? 'member' : 'members'}
+                  </div>
+                  {/* Selected Filter indicator */}
+                  {isSelected && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '10px',
+                      left: '10px',
+                      background: '#B88B4A',
+                      color: '#FFFFFF',
+                      padding: '3px 9px',
+                      borderRadius: '9999px',
                       fontSize: '10px',
                       fontWeight: '800',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      color: p.color,
-                      background: p.bg,
-                      padding: '3px 8px',
-                      borderRadius: '6px',
-                      display: 'inline-flex',
+                      letterSpacing: '0.04em',
+                      display: 'flex',
                       alignItems: 'center',
-                      gap: '4px'
+                      gap: '4px',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                      zIndex: 2
                     }}>
-                      <Crown size={11} />
-                      {p.tierNumber}
-                    </span>
-
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: '800',
-                      padding: '3px 8px',
-                      borderRadius: '9999px',
-                      background: memberCount > 0 ? '#FEF3C7' : '#F5F5F4',
-                      color: memberCount > 0 ? '#92400E' : '#78716C',
-                      border: `1px solid ${memberCount > 0 ? '#FCD34D' : '#E7E5E4'}`
-                    }}>
-                      {memberCount} {memberCount === 1 ? 'member' : 'members'}
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '17px', fontWeight: '800', color: '#1C1917', marginTop: '10px' }}>
-                    {p.name}
-                  </div>
-                  <div style={{ fontSize: '22px', fontWeight: '800', color: '#B88B4A', marginTop: '4px' }}>
-                    {formatCurrency(p.price)}
-                    <span style={{ fontSize: '11.5px', fontWeight: '600', color: '#78716C', marginLeft: '6px' }}>
-                      ({p.validity})
-                    </span>
-                  </div>
-
-                  <p style={{ fontSize: '12px', color: '#78716C', margin: '8px 0 12px 0', lineHeight: 1.4 }}>
-                    {p.tagline}
-                  </p>
-
-                  <div style={{ borderTop: '1px dashed #EADBBE', paddingTop: '10px' }}>
-                    <div style={{ fontSize: '10.5px', fontWeight: '700', textTransform: 'uppercase', color: '#8C6228', marginBottom: '6px' }}>
-                      Privileges & Benefits:
+                      <Check size={11} strokeWidth={2.5} />
+                      FILTER APPLIED
                     </div>
-                    <ul style={{ margin: 0, paddingLeft: '16px', fontSize: '11.5px', color: '#44403C', lineHeight: 1.5 }}>
-                      {p.benefits.slice(0, 3).map((b, idx) => (
-                        <li key={idx}>{b}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  )}
                 </div>
 
-                <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid #FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px', color: isSelected ? '#8C6228' : '#78716C', fontWeight: '700' }}>
-                  <span>{isSelected ? '✓ Filter Applied' : 'Click to Filter Roster'}</span>
-                  <ChevronRight size={14} />
+                {/* Card Body (Matching Image 2) */}
+                <div style={{
+                  padding: '16px 16px 14px 16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flex: 1,
+                  boxSizing: 'border-box'
+                }}>
+                  {/* Category / Tier Name */}
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    letterSpacing: '0.06em',
+                    color: '#292524',
+                    textTransform: 'uppercase',
+                    textAlign: 'center',
+                    marginBottom: '4px'
+                  }}>
+                    {p.fullName || p.name}
+                  </div>
+
+                  {/* Price */}
+                  <div style={{
+                    fontSize: 'clamp(20px, 1.8vw, 24px)',
+                    fontWeight: '800',
+                    color: '#B88B4A',
+                    textAlign: 'center',
+                    lineHeight: 1.15
+                  }}>
+                    {p.priceFormatted || formatCurrency(p.price)}
+                  </div>
+
+                  {/* Duration Subtitle (e.g. per year, per 3 months) */}
+                  <div style={{
+                    fontSize: '9.5px',
+                    color: '#8C827A',
+                    textAlign: 'center',
+                    marginBottom: '8px'
+                  }}>
+                    {p.durationLabel || `(${p.validity})`}
+                  </div>
+
+                  {/* Validity Pill Badge */}
+                  <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                    <span style={{
+                      display: 'inline-block',
+                      background: '#F9F3EA',
+                      border: '1px solid #E6D7C3',
+                      borderRadius: '9999px',
+                      padding: '3px 12px',
+                      fontSize: '9.5px',
+                      fontWeight: '700',
+                      letterSpacing: '0.05em',
+                      textTransform: 'uppercase',
+                      color: '#9C6839'
+                    }}>
+                      {p.validityBadge || (p.validity ? p.validity.toUpperCase() : 'VALID FOR 1 YEAR')}
+                    </span>
+                  </div>
+
+                  {/* Benefits Header */}
+                  <div style={{
+                    fontSize: '10px',
+                    fontWeight: '800',
+                    color: '#B88B4A',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    marginBottom: '6px'
+                  }}>
+                    BENEFITS :
+                  </div>
+
+                  {/* Benefits Bullet List with Red Dots (Matching Image 2) */}
+                  <ul style={{
+                    listStyle: 'none',
+                    padding: 0,
+                    margin: '0 0 16px 0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '5px',
+                    flex: 1
+                  }}>
+                    {(p.benefits || []).map((b, idx) => (
+                      <li key={idx} style={{
+                        fontSize: '10.5px',
+                        color: '#44403C',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '6px',
+                        lineHeight: 1.32
+                      }}>
+                        <span style={{ color: '#E11D48', fontWeight: 'bold', fontSize: '13px', lineHeight: 1 }}>•</span>
+                        <span>{b}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* Direct Action Buttons */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEnrollModal(p)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid #DAC493',
+                        background: '#FAF6EE',
+                        color: '#8E633A',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)';
+                        e.currentTarget.style.color = '#FFFFFF';
+                        e.currentTarget.style.borderColor = '#B88B4A';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#FAF6EE';
+                        e.currentTarget.style.color = '#8E633A';
+                        e.currentTarget.style.borderColor = '#DAC493';
+                      }}
+                    >
+                      <Plus size={14} />
+                      Enroll Client Into This Tier
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTierFilter(isSelected ? 'all' : p.tier)}
+                      style={{
+                        width: '100%',
+                        background: 'transparent',
+                        border: 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '4px',
+                        fontSize: '11px',
+                        color: isSelected ? '#8C6228' : '#78716C',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        userSelect: 'none'
+                      }}
+                    >
+                      <span>{isSelected ? '✓ Filter Active on Roster' : `Filter Roster (${memberCount})`}</span>
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -695,64 +922,151 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             <form onSubmit={handleEnrollSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
               {/* Step 1: Select Client */}
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#1C1917', marginBottom: '6px' }}>
-                  1. Select Studio Client *
-                </label>
-                <input
-                  type="text"
-                  value={clientSearch}
-                  onChange={(e) => {
-                    setClientSearch(e.target.value);
-                    if (selectedClient && !e.target.value.includes(selectedClient.name)) {
-                      setSelectedClient(null);
-                    }
-                  }}
-                  placeholder="Type client name or phone number..."
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: '1px solid #D6D3D1',
-                    fontSize: '13.5px',
-                    background: '#FFFFFF',
-                    outline: 'none'
-                  }}
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '700', color: '#1C1917' }}>
+                    1. Select Studio Client *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAddClient(!showQuickAddClient)}
+                    style={{
+                      fontSize: '11.5px',
+                      color: '#8C6228',
+                      background: '#FAF6EE',
+                      border: '1px solid #DAC493',
+                      borderRadius: '6px',
+                      padding: '3px 8px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <UserPlus size={12} />
+                    {showQuickAddClient ? 'Search Existing' : '+ Quick Add New Client'}
+                  </button>
+                </div>
 
-                {/* Suggestions List */}
-                {clientSearch.trim() && !selectedClient && (
+                {showQuickAddClient ? (
                   <div style={{
-                    maxHeight: '160px',
-                    overflowY: 'auto',
-                    border: '1px solid #EADBBE',
+                    padding: '12px',
                     borderRadius: '8px',
-                    background: '#FFFFFF',
-                    marginTop: '6px'
+                    background: '#FAF6EE',
+                    border: '1px solid #DAC493',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
                   }}>
-                    {allClients
-                      .filter(c => (c.name || '').toLowerCase().includes(clientSearch.toLowerCase()) || (c.phone || '').includes(clientSearch))
-                      .slice(0, 5)
-                      .map(c => (
-                        <div
-                          key={c.client_id}
-                          onClick={() => {
-                            setSelectedClient(c);
-                            setClientSearch(`${c.name} (${c.phone || 'No phone'})`);
-                          }}
-                          style={{
-                            padding: '8px 12px',
-                            borderBottom: '1px solid #F5F5F4',
-                            cursor: 'pointer',
-                            fontSize: '12.5px',
-                            display: 'flex',
-                            justifyContent: 'space-between'
-                          }}
-                        >
-                          <span style={{ fontWeight: '700', color: '#1C1917' }}>{c.name} {c.surname || ''}</span>
-                          <span style={{ color: '#78716C' }}>{c.phone || ''} • Current: {c.membership_tier || 'Non-Member'}</span>
-                        </div>
-                      ))}
+                    <div style={{ fontSize: '12px', fontWeight: '700', color: '#8C6228' }}>
+                      Register New Client
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <input
+                        type="text"
+                        value={newClientName}
+                        onChange={(e) => setNewClientName(e.target.value)}
+                        placeholder="Client Full Name *"
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #D6D3D1',
+                          fontSize: '13px',
+                          background: '#FFFFFF'
+                        }}
+                      />
+                      <input
+                        type="text"
+                        value={newClientPhone}
+                        onChange={(e) => setNewClientPhone(e.target.value)}
+                        placeholder="Phone Number"
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #D6D3D1',
+                          fontSize: '13px',
+                          background: '#FFFFFF'
+                        }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={creatingClient}
+                      onClick={handleQuickCreateClient}
+                      style={{
+                        alignSelf: 'flex-start',
+                        padding: '6px 14px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: '#B88B4A',
+                        color: '#FFFFFF',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {creatingClient ? 'Registering...' : 'Register & Select Client'}
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={clientSearch}
+                      onChange={(e) => {
+                        setClientSearch(e.target.value);
+                        if (selectedClient && !e.target.value.includes(selectedClient.name)) {
+                          setSelectedClient(null);
+                        }
+                      }}
+                      placeholder="Type client name or phone number..."
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        border: '1px solid #D6D3D1',
+                        fontSize: '13.5px',
+                        background: '#FFFFFF',
+                        outline: 'none'
+                      }}
+                    />
+
+                    {/* Suggestions List */}
+                    {clientSearch.trim() && !selectedClient && (
+                      <div style={{
+                        maxHeight: '160px',
+                        overflowY: 'auto',
+                        border: '1px solid #EADBBE',
+                        borderRadius: '8px',
+                        background: '#FFFFFF',
+                        marginTop: '6px'
+                      }}>
+                        {allClients
+                          .filter(c => (c.name || '').toLowerCase().includes(clientSearch.toLowerCase()) || (c.phone || '').includes(clientSearch))
+                          .slice(0, 5)
+                          .map(c => (
+                            <div
+                              key={c.client_id}
+                              onClick={() => {
+                                setSelectedClient(c);
+                                setClientSearch(`${c.name} (${c.phone || 'No phone'})`);
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                borderBottom: '1px solid #F5F5F4',
+                                cursor: 'pointer',
+                                fontSize: '12.5px',
+                                display: 'flex',
+                                justifyContent: 'space-between'
+                              }}
+                            >
+                              <span style={{ fontWeight: '700', color: '#1C1917' }}>{c.name} {c.surname || ''}</span>
+                              <span style={{ color: '#78716C' }}>{c.phone || ''} • Current: {c.membership_tier || 'Non-Member'}</span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {selectedClient && (
@@ -771,28 +1085,46 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                   {plans.map(p => {
                     const isSelected = selectedPlanId === p.id;
+                    const cardImg = p.image || `/memberships/card_${p.id}_3d.jpg`;
                     return (
                       <div
                         key={p.id}
                         onClick={() => handleSelectPlanForEnroll(p)}
                         style={{
-                          padding: '12px',
+                          padding: '10px',
                           borderRadius: '10px',
                           border: isSelected ? '2px solid #B88B4A' : '1px solid #E7E5E4',
                           background: isSelected ? '#FAF6EE' : '#FFFFFF',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          transition: 'all 0.15s ease'
                         }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: '800', fontSize: '13px', color: isSelected ? '#8C6228' : '#1C1917' }}>
-                            {p.tier}
-                          </span>
-                          <span style={{ fontWeight: '800', fontSize: '13px', color: '#B88B4A' }}>
-                            {formatCurrency(p.price)}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: '11px', color: '#78716C', marginTop: '2px' }}>
-                          {p.validity}
+                        <img
+                          src={cardImg}
+                          alt={p.name}
+                          style={{
+                            width: '46px',
+                            height: '34px',
+                            borderRadius: '6px',
+                            objectFit: 'cover',
+                            border: '1px solid #EADBCC'
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: '800', fontSize: '12.5px', color: isSelected ? '#8C6228' : '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {p.tier || p.name}
+                            </span>
+                            <span style={{ fontWeight: '800', fontSize: '12.5px', color: '#B88B4A', marginLeft: '4px' }}>
+                              {formatCurrency(p.price)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '10.5px', color: '#78716C', marginTop: '1px' }}>
+                            {p.validity}
+                          </div>
                         </div>
                       </div>
                     );

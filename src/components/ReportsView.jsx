@@ -2502,20 +2502,41 @@ export default function ReportsView() {
                     {(memberships.tier_breakdown || []).map((t) => {
                       const isSelected = membershipTierFilter === t.tier;
                       const usagePct = t.total_credits_allocated > 0 ? Math.round((t.total_credits_used / t.total_credits_allocated) * 100) : 0;
+                      const cardImg = t.image || (
+                        t.tier === 'Éclat' ? '/memberships/card_eclat_3d.jpg' :
+                        t.tier === 'Eternal' ? '/memberships/card_eternal_3d.jpg' :
+                        t.tier === 'Infini' ? '/memberships/card_infini_3d.jpg' :
+                        '/memberships/card_lumiere_3d.jpg'
+                      );
                       return (
                         <div
                           key={t.tier}
                           onClick={() => setMembershipTierFilter(isSelected ? 'all' : t.tier)}
                           style={{
                             padding: '14px 16px',
-                            borderRadius: '12px',
+                            borderRadius: '14px',
                             background: isSelected ? '#FAF6EE' : '#FFFFFF',
                             border: `1.5px solid ${isSelected ? '#B88B4A' : '#E7DFD5'}`,
                             cursor: 'pointer',
                             transition: 'all 0.15s ease',
-                            boxShadow: isSelected ? '0 4px 12px rgba(184, 139, 74, 0.15)' : 'none'
+                            boxShadow: isSelected ? '0 6px 16px rgba(184, 139, 74, 0.18)' : '0 2px 8px rgba(0,0,0,0.03)',
+                            overflow: 'hidden'
                           }}
                         >
+                          <div style={{
+                            width: '100%',
+                            height: '84px',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            marginBottom: '10px',
+                            background: '#FAF6EE'
+                          }}>
+                            <img
+                              src={cardImg}
+                              alt={t.tier}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                          </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{
                               fontWeight: '800',

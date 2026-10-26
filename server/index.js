@@ -3026,17 +3026,21 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
         tier: 'Éclat',
         tierNumber: '01 — SERVICE',
         validity: 'Valid for 3 months',
+        validityBadge: 'VALID FOR 3 MONTHS',
         name: 'ECLAT MEMBER',
         fullName: 'ECLAT PRIVILEGE MEMBERSHIP',
+        durationLabel: '(per 3 months)',
         price: 6000,
+        priceFormatted: '₹6,000',
         credits: 6000,
-        color: '#D97706',
-        bg: '#FEF3C7',
+        image: '/memberships/card_eclat_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
         tagline: 'Your introduction to thoughtful skincare.',
         benefits: [
           'Complimentary skin analysis (basic)',
           'Priority booking on weekends',
-          'Birthday month: ₹1,000 voucher / free add-on',
+          'Birthday month: ₹1000 voucher / free add-on',
           'Access to member-only packages',
           'Free consultation during tenure'
         ]
@@ -3046,18 +3050,22 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
         tier: 'Eternal',
         tierNumber: '02 — SERVICE',
         validity: 'Valid for 6 months',
+        validityBadge: 'VALID FOR 6 MONTHS',
         name: 'ETERNAL MEMBER',
         fullName: 'ETERNAL ELEVATION MEMBERSHIP',
+        durationLabel: '(per 6 months)',
         price: 15000,
+        priceFormatted: '₹15,000',
         credits: 15000,
-        color: '#0D9488',
-        bg: '#CCFBF1',
+        image: '/memberships/card_eternal_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
         tagline: 'Elevated care for your evolving beauty journey.',
         benefits: [
-          'Free advanced skin analysis (worth ₹1,500–₹2,000)',
+          'Free advanced skin analysis (worth ₹1500–₹2000)',
           '1 Free express facial / peel quarterly or 2 per year',
           'Priority booking + peak hour preference',
-          'Birthday: ₹2,500 Voucher / Complimentary Services',
+          'Birthday: ₹2500 Voucher / Complimentary Services',
           'Exclusive pricing on laser packages',
           'Early access to new treatments & offers'
         ]
@@ -3067,20 +3075,26 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
         tier: 'Infini',
         tierNumber: '03 — SERVICE',
         validity: 'Valid for 1 year',
+        validityBadge: 'VALID FOR 1 YEAR',
         name: 'INFINI MEMBER',
         fullName: 'INFINI EXCLUSIVITY MEMBERSHIP',
+        durationLabel: '(per year)',
         price: 25000,
+        priceFormatted: '₹25,000',
         credits: 25000,
-        color: '#2563EB',
-        bg: '#DBEAFE',
+        image: '/memberships/card_infini_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
         tagline: 'Unmatched luxury and precision-tailored aesthetic care.',
         benefits: [
-          'Free 3D skin & hair analysis twice a year',
-          '1 Complimentary signature HydraFacial or peel',
-          'Birthday: ₹5,000 voucher + free add-on',
-          '15% off all aesthetic treatments year-round',
-          '2 Guest passes per year with 10% discount',
-          'Dedicated relationship manager & VIP suite access'
+          'FREE premium skin consultation + AI analysis',
+          '3–4 complimentary treatments / year',
+          'Dedicated skin advisor / therapist priority',
+          'VIP booking (no waiting)',
+          'Special pricing on full programs & packages',
+          'Birthday: Luxury facial / treatment complimentary',
+          'Exclusive invites to private clinic events',
+          'Complimentary aftercare kits (select treatments)'
         ]
       },
       {
@@ -3088,20 +3102,24 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
         tier: 'Lumière',
         tierNumber: '04 — SERVICE',
         validity: 'Valid for 1 year',
+        validityBadge: 'VALID FOR 1 YEAR',
         name: 'LUMIERE MEMBER',
-        fullName: 'LUMIÈRE PRESTIGE ELITE MEMBERSHIP',
+        fullName: 'LUMIERE SIGNATURE MEMBERSHIP',
+        durationLabel: '(per year)',
         price: 50000,
+        priceFormatted: '₹50,000',
         credits: 50000,
+        image: '/memberships/card_lumiere_3d.jpg',
         color: '#B88B4A',
         bg: '#FAF6EE',
         tagline: 'The pinnacle of beauty, exclusivity, and personalized attention.',
         benefits: [
-          'Unlimited comprehensive skin & hair analyses',
-          '2 Complimentary signature HydraFacials per year',
-          'Birthday: ₹10,000 voucher + champagne beauty ritual',
-          '20% off all treatments & packages year-round',
-          '4 Guest passes per year with 15% discount',
-          'Dedicated Aesthetic Concierge & private executive room'
+          'Unlimited expert aesthetic consultations',
+          '4 Complimentary premium medi-facials or laser sessions',
+          '20% Off all services & homecare product lines',
+          'Personal aesthetician of choice for all visits',
+          'VIP private lounge booking & companion guest passes',
+          'Birthday: ₹10,000 voucher + luxury wellness package'
         ]
       }
     ];
@@ -5965,10 +5983,10 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
 
     // 7b. Membership Intelligence & Credits Audit
     const catalogPlans = [
-      { id: 'infini', name: 'Infini Exclusivity', tier: 'Infini', price: 25000, validity: '1 year', code: 'IN', color: '#B88B4A' },
-      { id: 'lumiere', name: 'Lumière Signature', tier: 'Lumière', price: 50000, validity: '1 year', code: 'LU', color: '#7C3AED' },
-      { id: 'eternal', name: 'Eternal Elevation', tier: 'Eternal', price: 15000, validity: '6 months', code: 'ET', color: '#2563EB' },
-      { id: 'eclat', name: 'Éclat Privilege', tier: 'Éclat', price: 6000, validity: '3 months', code: 'EC', color: '#166534' }
+      { id: 'infini', name: 'INFINI EXCLUSIVITY MEMBERSHIP', tier: 'Infini', price: 25000, validity: '1 year', code: 'IN', color: '#B88B4A', image: '/memberships/card_infini_3d.jpg' },
+      { id: 'lumiere', name: 'LUMIERE SIGNATURE MEMBERSHIP', tier: 'Lumière', price: 50000, validity: '1 year', code: 'LU', color: '#B88B4A', image: '/memberships/card_lumiere_3d.jpg' },
+      { id: 'eternal', name: 'ETERNAL ELEVATION MEMBERSHIP', tier: 'Eternal', price: 15000, validity: '6 months', code: 'ET', color: '#B88B4A', image: '/memberships/card_eternal_3d.jpg' },
+      { id: 'eclat', name: 'ECLAT PRIVILEGE MEMBERSHIP', tier: 'Éclat', price: 6000, validity: '3 months', code: 'EC', color: '#B88B4A', image: '/memberships/card_eclat_3d.jpg' }
     ];
 
     const standardTierCosts = {
@@ -6057,6 +6075,7 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
         validity: planConfig?.validity || '1 year',
         code: planConfig?.code || t.slice(0, 2).toUpperCase(),
         color: planConfig?.color || '#B88B4A',
+        image: planConfig?.image || '/memberships/card_infini_3d.jpg',
         member_count: 0,
         total_credits_allocated: 0,
         total_credits_used: 0,
