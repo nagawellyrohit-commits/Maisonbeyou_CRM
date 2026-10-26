@@ -361,7 +361,7 @@ export default function App() {
         )}
 
         {activeTab === 'membership' && (
-          <MembershipManagement />
+          <MembershipManagement currentUser={currentUser} activeLocation={activeLocation} />
         )}
 
         {isAdmin && activeTab === 'reports' && (

@@ -3008,9 +3008,146 @@ export function getFullClientRecord(clientId) {
   };
 }
 
+// Helper to ensure MEMBERSHIP_PLANS table exists and has default tiers
+function ensureMembershipPlansTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS MEMBERSHIP_PLANS (
+      plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT UNIQUE NOT NULL,
+      tier TEXT NOT NULL,
+      tierNumber TEXT,
+      name TEXT NOT NULL,
+      fullName TEXT NOT NULL,
+      price REAL NOT NULL,
+      credits REAL NOT NULL,
+      validity TEXT NOT NULL,
+      validityBadge TEXT,
+      durationLabel TEXT,
+      image TEXT,
+      color TEXT DEFAULT '#B88B4A',
+      bg TEXT DEFAULT '#FAF6EE',
+      tagline TEXT,
+      benefits TEXT,
+      is_custom INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
+  if (count === 0) {
+    const defaultCanonicalPlans = [
+      {
+        id: 'eclat',
+        tier: 'Éclat',
+        tierNumber: '01 — SERVICE',
+        validity: 'Valid for 3 months',
+        validityBadge: 'VALID FOR 3 MONTHS',
+        name: 'ECLAT MEMBER',
+        fullName: 'ECLAT PRIVILEGE MEMBERSHIP',
+        durationLabel: '(per 3 months)',
+        price: 6000,
+        credits: 6000,
+        image: '/memberships/card_eclat_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
+        tagline: 'Your introduction to thoughtful skincare.',
+        benefits: JSON.stringify([
+          'Complimentary skin analysis (basic)',
+          'Priority booking on weekends',
+          'Birthday month: ₹1000 voucher / free add-on',
+          'Access to member-only packages',
+          'Free consultation during tenure'
+        ])
+      },
+      {
+        id: 'eternal',
+        tier: 'Eternal',
+        tierNumber: '02 — SERVICE',
+        validity: 'Valid for 6 months',
+        validityBadge: 'VALID FOR 6 MONTHS',
+        name: 'ETERNAL MEMBER',
+        fullName: 'ETERNAL ELEVATION MEMBERSHIP',
+        durationLabel: '(per 6 months)',
+        price: 15000,
+        credits: 15000,
+        image: '/memberships/card_eternal_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
+        tagline: 'Elevated care for your evolving beauty journey.',
+        benefits: JSON.stringify([
+          'Free advanced skin analysis (worth ₹1500–₹2000)',
+          '1 Free express facial / peel quarterly or 2 per year',
+          'Priority booking + peak hour preference',
+          'Birthday: ₹2500 Voucher / Complimentary Services',
+          'Exclusive pricing on laser packages',
+          'Early access to new treatments & offers'
+        ])
+      },
+      {
+        id: 'infini',
+        tier: 'Infini',
+        tierNumber: '03 — SERVICE',
+        validity: 'Valid for 1 year',
+        validityBadge: 'VALID FOR 1 YEAR',
+        name: 'INFINI MEMBER',
+        fullName: 'INFINI EXCLUSIVITY MEMBERSHIP',
+        durationLabel: '(per year)',
+        price: 25000,
+        credits: 25000,
+        image: '/memberships/card_infini_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
+        tagline: 'Unmatched luxury and precision-tailored aesthetic care.',
+        benefits: JSON.stringify([
+          'FREE premium skin consultation + AI analysis',
+          '3–4 complimentary treatments / year',
+          'Dedicated skin advisor / therapist priority',
+          'VIP booking (no waiting)',
+          'Special pricing on full programs & packages',
+          'Birthday: Luxury facial / treatment complimentary',
+          'Exclusive invites to private clinic events',
+          'Complimentary aftercare kits (select treatments)'
+        ])
+      },
+      {
+        id: 'lumiere',
+        tier: 'Lumière',
+        tierNumber: '04 — SERVICE',
+        validity: 'Valid for 1 year',
+        validityBadge: 'VALID FOR 1 YEAR',
+        name: 'LUMIERE MEMBER',
+        fullName: 'LUMIERE SIGNATURE MEMBERSHIP',
+        durationLabel: '(per year)',
+        price: 50000,
+        credits: 50000,
+        image: '/memberships/card_lumiere_3d.jpg',
+        color: '#B88B4A',
+        bg: '#FAF6EE',
+        tagline: 'The pinnacle of beauty, exclusivity, and personalized attention.',
+        benefits: JSON.stringify([
+          'Unlimited expert aesthetic consultations',
+          '4 Complimentary premium medi-facials or laser sessions',
+          '20% Off all services & homecare product lines',
+          'Personal aesthetician of choice for all visits',
+          'VIP private lounge booking & companion guest passes',
+          'Birthday: ₹10,000 voucher + luxury wellness package'
+        ])
+      }
+    ];
+
+    const insertStmt = db.prepare(`
+      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, validity, validityBadge, name, fullName, durationLabel, price, credits, image, color, bg, tagline, benefits, is_custom)
+      VALUES (@id, @tier, @tierNumber, @validity, @validityBadge, @name, @fullName, @durationLabel, @price, @credits, @image, @color, @bg, @tagline, @benefits, 0)
+    `);
+    defaultCanonicalPlans.forEach(p => insertStmt.run(p));
+  }
+}
+
 // Studio Membership Intelligence & Roster endpoint
 app.get('/api/memberships', authenticateToken, (req, res) => {
   try {
+    ensureMembershipPlansTable();
     const locId = req.locationId;
     let query = `
       SELECT client_id, name, surname, phone, email, location_id,
@@ -3031,133 +3168,37 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
     query += ' ORDER BY client_id DESC';
     const memberRows = db.prepare(query).all(...params);
 
-    const canonicalPlans = [
-      {
-        id: 'eclat',
-        tier: 'Éclat',
-        tierNumber: '01 — SERVICE',
-        validity: 'Valid for 3 months',
-        validityBadge: 'VALID FOR 3 MONTHS',
-        name: 'ECLAT MEMBER',
-        fullName: 'ECLAT PRIVILEGE MEMBERSHIP',
-        durationLabel: '(per 3 months)',
-        price: 6000,
-        priceFormatted: '₹6,000',
-        credits: 6000,
-        image: '/memberships/card_eclat_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Your introduction to thoughtful skincare.',
-        benefits: [
-          'Complimentary skin analysis (basic)',
-          'Priority booking on weekends',
-          'Birthday month: ₹1000 voucher / free add-on',
-          'Access to member-only packages',
-          'Free consultation during tenure'
-        ]
-      },
-      {
-        id: 'eternal',
-        tier: 'Eternal',
-        tierNumber: '02 — SERVICE',
-        validity: 'Valid for 6 months',
-        validityBadge: 'VALID FOR 6 MONTHS',
-        name: 'ETERNAL MEMBER',
-        fullName: 'ETERNAL ELEVATION MEMBERSHIP',
-        durationLabel: '(per 6 months)',
-        price: 15000,
-        priceFormatted: '₹15,000',
-        credits: 15000,
-        image: '/memberships/card_eternal_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Elevated care for your evolving beauty journey.',
-        benefits: [
-          'Free advanced skin analysis (worth ₹1500–₹2000)',
-          '1 Free express facial / peel quarterly or 2 per year',
-          'Priority booking + peak hour preference',
-          'Birthday: ₹2500 Voucher / Complimentary Services',
-          'Exclusive pricing on laser packages',
-          'Early access to new treatments & offers'
-        ]
-      },
-      {
-        id: 'infini',
-        tier: 'Infini',
-        tierNumber: '03 — SERVICE',
-        validity: 'Valid for 1 year',
-        validityBadge: 'VALID FOR 1 YEAR',
-        name: 'INFINI MEMBER',
-        fullName: 'INFINI EXCLUSIVITY MEMBERSHIP',
-        durationLabel: '(per year)',
-        price: 25000,
-        priceFormatted: '₹25,000',
-        credits: 25000,
-        image: '/memberships/card_infini_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Unmatched luxury and precision-tailored aesthetic care.',
-        benefits: [
-          'FREE premium skin consultation + AI analysis',
-          '3–4 complimentary treatments / year',
-          'Dedicated skin advisor / therapist priority',
-          'VIP booking (no waiting)',
-          'Special pricing on full programs & packages',
-          'Birthday: Luxury facial / treatment complimentary',
-          'Exclusive invites to private clinic events',
-          'Complimentary aftercare kits (select treatments)'
-        ]
-      },
-      {
-        id: 'lumiere',
-        tier: 'Lumière',
-        tierNumber: '04 — SERVICE',
-        validity: 'Valid for 1 year',
-        validityBadge: 'VALID FOR 1 YEAR',
-        name: 'LUMIERE MEMBER',
-        fullName: 'LUMIERE SIGNATURE MEMBERSHIP',
-        durationLabel: '(per year)',
-        price: 50000,
-        priceFormatted: '₹50,000',
-        credits: 50000,
-        image: '/memberships/card_lumiere_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'The pinnacle of beauty, exclusivity, and personalized attention.',
-        benefits: [
-          'Unlimited expert aesthetic consultations',
-          '4 Complimentary premium medi-facials or laser sessions',
-          '20% Off all services & homecare product lines',
-          'Personal aesthetician of choice for all visits',
-          'VIP private lounge booking & companion guest passes',
-          'Birthday: ₹10,000 voucher + luxury wellness package'
-        ]
-      }
-    ];
+    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
+    const canonicalPlans = planRows.map(p => ({
+      ...p,
+      priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
+      benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
+    }));
 
-    const standardTierCosts = {
-      'Lumière': 50000,
-      'Infini': 25000,
-      'Eternal': 15000,
-      'Éclat': 6000
-    };
+    const standardTierCosts = {};
+    const tierCounts = {};
+    canonicalPlans.forEach(p => {
+      standardTierCosts[p.tier] = p.price;
+      tierCounts[p.tier] = 0;
+    });
 
     let totalAllocated = 0;
     let totalUsed = 0;
     let totalBalance = 0;
-    const tierCounts = { 'Éclat': 0, 'Eternal': 0, 'Infini': 0, 'Lumière': 0 };
 
     const members = memberRows.map(m => {
       const tierLower = (m.membership_tier || '').toLowerCase();
-      let tierGroup = 'Infini';
-      if (tierLower.includes('lumi')) tierGroup = 'Lumière';
-      else if (tierLower.includes('infin')) tierGroup = 'Infini';
-      else if (tierLower.includes('etern')) tierGroup = 'Eternal';
-      else if (tierLower.includes('eclat') || tierLower.includes('éclat')) tierGroup = 'Éclat';
+      const matchedPlan = canonicalPlans.find(p => 
+        (p.tier && tierLower.includes(p.tier.toLowerCase())) || 
+        (p.name && tierLower.includes(p.name.toLowerCase())) ||
+        (p.id && tierLower.includes(p.id.toLowerCase()))
+      );
+      const tierGroup = matchedPlan ? matchedPlan.tier : 'Infini';
 
       if (tierCounts[tierGroup] !== undefined) tierCounts[tierGroup]++;
+      else tierCounts[tierGroup] = 1;
 
-      const cost = Number(m.membership_cost) || standardTierCosts[tierGroup] || 25000;
+      const cost = Number(m.membership_cost) || standardTierCosts[tierGroup] || (matchedPlan ? matchedPlan.price : 25000);
       const balance = Number(m.membership_balance) !== undefined && !isNaN(Number(m.membership_balance))
         ? Number(m.membership_balance)
         : cost;
@@ -3205,6 +3246,72 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('Memberships error:', error);
     res.status(500).json({ error: 'Failed to load memberships' });
+  }
+});
+
+// Master & Main Admin: Add New Membership Plan endpoint
+app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    ensureMembershipPlansTable();
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits } = req.body;
+    if (!name || !price) {
+      return res.status(400).json({ error: 'Membership tier name and price are required' });
+    }
+    const cleanId = (tier || name).toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
+    const benefitsList = Array.isArray(benefits) 
+      ? benefits 
+      : (typeof benefits === 'string' ? benefits.split('\n').map(s => s.trim()).filter(Boolean) : []);
+    const benefitsJson = JSON.stringify(benefitsList.length > 0 ? benefitsList : ['Exclusive tailored beauty treatment privileges']);
+    const cardImg = image || '/memberships/card_infini_3d.jpg';
+    const tierVal = tier ? tier.trim() : name.trim();
+    const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
+
+    const insert = db.prepare(`
+      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, is_custom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+    `).run(
+      cleanId,
+      tierVal,
+      tierNumber || `0${count + 1} — SERVICE`,
+      name.toUpperCase().trim(),
+      fullName ? fullName.toUpperCase().trim() : `${name.toUpperCase().trim()} MEMBERSHIP`,
+      Number(price) || 0,
+      Number(credits) || Number(price) || 0,
+      validity || 'Valid for 1 year',
+      validityBadge || (validity ? validity.toUpperCase() : 'VALID FOR 1 YEAR'),
+      durationLabel || `(${validity || 'per year'})`,
+      cardImg,
+      '#B88B4A',
+      '#FAF6EE',
+      tagline || 'Exclusive personalized aesthetic luxury membership.',
+      benefitsJson
+    );
+
+    const createdPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE plan_id = ?').get(insert.lastInsertRowid);
+    res.json({
+      success: true,
+      plan: {
+        ...createdPlan,
+        priceFormatted: `₹${Number(createdPlan.price).toLocaleString('en-IN')}`,
+        benefits: JSON.parse(createdPlan.benefits || '[]')
+      }
+    });
+  } catch (err) {
+    console.error('Create membership plan error:', err);
+    res.status(500).json({ error: 'Failed to create membership plan: ' + err.message });
+  }
+});
+
+// Master & Main Admin: Delete Custom Membership Plan endpoint
+app.delete('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    ensureMembershipPlansTable();
+    const { id } = req.params;
+    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Membership plan deleted successfully' });
+  } catch (err) {
+    console.error('Delete membership plan error:', err);
+    res.status(500).json({ error: 'Failed to delete membership plan' });
   }
 });
 

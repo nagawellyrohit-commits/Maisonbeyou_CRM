@@ -3,12 +3,16 @@ import {
   Crown, Sparkles, Users, Search, Filter, Plus, Calendar, Clock,
   ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RotateCw,
   ChevronRight, Edit2, ExternalLink, X, DollarSign, Wallet,
-  CreditCard, Gift, Star, Check, UserPlus
+  CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Image as ImageIcon
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import { MEMBERSHIP_PLANS } from './NewVisitWizard';
 
 export default function MembershipManagement({ onOpenClient, activeLocation, currentUser }) {
+  const user = currentUser || JSON.parse(localStorage.getItem('crm_user') || '{}');
+  const effectiveRole = user?.original_role || user?.role;
+  const canManagePlans = effectiveRole === 'master_admin' || effectiveRole === 'admin';
+
   const [plans, setPlans] = useState(MEMBERSHIP_PLANS);
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({
@@ -41,6 +45,28 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   const [newClientName, setNewClientName] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
+
+  // Add Membership Plan Modal (Master Admin & Main Admin only)
+  const [showAddPlanModal, setShowAddPlanModal] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [newPlanForm, setNewPlanForm] = useState({
+    name: '',
+    fullName: '',
+    tier: '',
+    tierNumber: '',
+    price: '',
+    validity: 'Valid for 1 year',
+    validityBadge: 'VALID FOR 1 YEAR',
+    durationLabel: '(per year)',
+    image: '/memberships/card_infini_3d.jpg',
+    tagline: 'Exclusive personalized aesthetic luxury membership.',
+    benefitInput: '',
+    benefits: [
+      'Complimentary skin consultation + AI analysis',
+      'Priority booking on peak hours',
+      'Special member discount on all treatments'
+    ]
+  });
 
   // Quick Action Modals
   const [adjustBalanceModal, setAdjustBalanceModal] = useState({ open: false, member: null, amount: '' });
@@ -209,6 +235,102 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     }
   };
 
+  const handleAddBenefit = () => {
+    if (!newPlanForm.benefitInput.trim()) return;
+    setNewPlanForm(prev => ({
+      ...prev,
+      benefits: [...prev.benefits, prev.benefitInput.trim()],
+      benefitInput: ''
+    }));
+  };
+
+  const handleRemoveBenefit = (idx) => {
+    setNewPlanForm(prev => ({
+      ...prev,
+      benefits: prev.benefits.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const handleCreatePlan = async (e) => {
+    e.preventDefault();
+    if (!newPlanForm.name.trim() || !newPlanForm.price) {
+      alert('Please enter a tier name and price.');
+      return;
+    }
+    try {
+      setSavingPlan(true);
+      const tierVal = newPlanForm.tier.trim() || newPlanForm.name.trim();
+      const payload = {
+        name: newPlanForm.name.trim(),
+        fullName: newPlanForm.fullName.trim() || `${newPlanForm.name.trim().toUpperCase()} MEMBERSHIP`,
+        tier: tierVal,
+        tierNumber: newPlanForm.tierNumber.trim() || `0${plans.length + 1} — SERVICE`,
+        price: Number(newPlanForm.price),
+        credits: Number(newPlanForm.price),
+        validity: newPlanForm.validity,
+        validityBadge: newPlanForm.validityBadge || newPlanForm.validity.toUpperCase(),
+        durationLabel: newPlanForm.durationLabel || `(${newPlanForm.validity.toLowerCase()})`,
+        image: newPlanForm.image,
+        tagline: newPlanForm.tagline,
+        benefits: newPlanForm.benefits.length > 0 ? newPlanForm.benefits : ['Exclusive tailored beauty treatment privileges']
+      };
+
+      const res = await apiRequest('/memberships/plans', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      if (res && res.success) {
+        setShowAddPlanModal(false);
+        setNewPlanForm({
+          name: '',
+          fullName: '',
+          tier: '',
+          tierNumber: '',
+          price: '',
+          validity: 'Valid for 1 year',
+          validityBadge: 'VALID FOR 1 YEAR',
+          durationLabel: '(per year)',
+          image: '/memberships/card_infini_3d.jpg',
+          tagline: 'Exclusive personalized aesthetic luxury membership.',
+          benefitInput: '',
+          benefits: [
+            'Complimentary skin consultation + AI analysis',
+            'Priority booking on peak hours',
+            'Special member discount on all treatments'
+          ]
+        });
+        await fetchMemberships();
+      } else {
+        alert(res?.error || 'Failed to save membership tier');
+      }
+    } catch (err) {
+      console.error('Create plan error:', err);
+      alert('Error creating plan: ' + err.message);
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
+  const handleDeletePlan = async (planId, planName) => {
+    if (!window.confirm(`Are you sure you want to delete the "${planName}" membership plan?`)) {
+      return;
+    }
+    try {
+      const res = await apiRequest(`/memberships/plans/${planId}`, {
+        method: 'DELETE'
+      });
+      if (res && res.success) {
+        await fetchMemberships();
+      } else {
+        alert(res?.error || 'Failed to delete plan');
+      }
+    } catch (err) {
+      console.error('Delete plan error:', err);
+      alert('Error deleting plan: ' + err.message);
+    }
+  };
+
   // Filter members list
   const filteredMembers = members.filter(m => {
     if (tierFilter !== 'all' && m.tier_group !== tierFilter) return false;
@@ -262,13 +384,39 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             Refresh
           </button>
 
+          {canManagePlans && (
+            <button
+              type="button"
+              onClick={() => setShowAddPlanModal(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '7px',
+                padding: '9px 18px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #B88B4A 0%, #8E633A 100%)',
+                color: '#FFFFFF',
+                fontSize: '13.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(184, 139, 74, 0.28)',
+                letterSpacing: '0.02em',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Plus size={16} />
+              Add Membership Plan
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleOpenEnrollModal}
             className="btn-primary"
             style={{ padding: '9px 18px', fontSize: '13.5px', display: 'inline-flex', alignItems: 'center', gap: '7px' }}
           >
-            <Plus size={16} />
+            <UserPlus size={16} />
             Enroll Client into Membership
           </button>
         </div>
@@ -503,18 +651,18 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     ))}
                   </ul>
 
-                  {/* Direct Action Buttons */}
+                  {/* Direct Action Buttons (Matching Image 2) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
                     <button
                       type="button"
-                      onClick={() => handleOpenEnrollModal(p)}
+                      onClick={() => setTierFilter(isSelected ? 'all' : p.tier)}
                       style={{
                         width: '100%',
-                        padding: '9px 12px',
+                        padding: '10px 12px',
                         borderRadius: '8px',
-                        border: '1px solid #DAC493',
-                        background: '#FAF6EE',
-                        color: '#8E633A',
+                        border: isSelected ? '1.5px solid #B88B4A' : '1px solid #DAC493',
+                        background: isSelected ? 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)' : '#FAF6EE',
+                        color: isSelected ? '#FFFFFF' : '#8E633A',
                         fontSize: '11px',
                         fontWeight: '800',
                         letterSpacing: '0.06em',
@@ -524,21 +672,32 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                         alignItems: 'center',
                         justifyContent: 'center',
                         gap: '6px',
-                        transition: 'all 0.15s ease'
+                        transition: 'all 0.15s ease',
+                        boxShadow: isSelected ? '0 3px 10px rgba(184, 139, 74, 0.25)' : 'none'
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)';
-                        e.currentTarget.style.color = '#FFFFFF';
-                        e.currentTarget.style.borderColor = '#B88B4A';
+                        if (!isSelected) {
+                          e.currentTarget.style.background = 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)';
+                          e.currentTarget.style.color = '#FFFFFF';
+                          e.currentTarget.style.borderColor = '#B88B4A';
+                        }
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.background = '#FAF6EE';
-                        e.currentTarget.style.color = '#8E633A';
-                        e.currentTarget.style.borderColor = '#DAC493';
+                        if (!isSelected) {
+                          e.currentTarget.style.background = '#FAF6EE';
+                          e.currentTarget.style.color = '#8E633A';
+                          e.currentTarget.style.borderColor = '#DAC493';
+                        }
                       }}
                     >
-                      <Plus size={14} />
-                      Enroll Client Into This Tier
+                      {isSelected ? (
+                        <>
+                          <Check size={13} strokeWidth={2.5} />
+                          SELECTED
+                        </>
+                      ) : (
+                        "I'M INTERESTED"
+                      )}
                     </button>
 
                     <button
@@ -563,11 +722,126 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       <span>{isSelected ? '✓ Filter Active on Roster' : `Filter Roster (${memberCount})`}</span>
                       <ChevronRight size={13} />
                     </button>
+
+                    {/* Delete Custom Tier (Master Admin & Main Admin only) */}
+                    {p.is_custom === 1 && canManagePlans && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePlan(p.id, p.name);
+                        }}
+                        style={{
+                          background: '#FEF2F2',
+                          border: '1px solid #FECACA',
+                          borderRadius: '6px',
+                          color: '#DC2626',
+                          fontSize: '10.5px',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '5px',
+                          padding: '5px 8px',
+                          marginTop: '2px',
+                          fontWeight: '700',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Delete custom membership plan"
+                      >
+                        <Trash2 size={12} />
+                        Delete Custom Plan
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
+
+          {/* Add New Membership Card Tile for Master or Main Admin */}
+          {canManagePlans && (
+            <div
+              onClick={() => setShowAddPlanModal(true)}
+              style={{
+                background: 'linear-gradient(180deg, #FFFFFF 0%, #FAF6EE 100%)',
+                borderRadius: '18px',
+                border: '2px dashed #DAC493',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '36px 20px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                minHeight: '440px',
+                transition: 'all 0.22s ease',
+                boxShadow: '0 3px 14px rgba(184, 139, 74, 0.05)',
+                userSelect: 'none'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#B88B4A';
+                e.currentTarget.style.transform = 'translateY(-3px)';
+                e.currentTarget.style.boxShadow = '0 10px 28px rgba(184, 139, 74, 0.18)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#DAC493';
+                e.currentTarget.style.transform = 'none';
+                e.currentTarget.style.boxShadow = '0 3px 14px rgba(184, 139, 74, 0.05)';
+              }}
+            >
+              <div style={{
+                width: '60px',
+                height: '60px',
+                borderRadius: '50%',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#B88B4A',
+                marginBottom: '16px'
+              }}>
+                <Plus size={30} strokeWidth={2.2} />
+              </div>
+
+              <div style={{
+                fontSize: '13px',
+                fontWeight: '800',
+                letterSpacing: '0.06em',
+                color: '#292524',
+                textTransform: 'uppercase',
+                marginBottom: '6px'
+              }}>
+                ADD NEW MEMBERSHIP
+              </div>
+
+              <p style={{
+                fontSize: '11px',
+                color: '#78716C',
+                lineHeight: 1.45,
+                maxWidth: '200px',
+                margin: '0 0 18px 0'
+              }}>
+                Create a custom tier with bespoke privileges, pricing, and 3D metallic card finish.
+              </p>
+
+              <span style={{
+                display: 'inline-block',
+                background: '#FAF6EE',
+                border: '1px solid #DAC493',
+                borderRadius: '9999px',
+                padding: '5px 14px',
+                fontSize: '10px',
+                fontWeight: '800',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: '#8E633A'
+              }}>
+                + Create Tier
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1363,6 +1637,451 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                   style={{ padding: '8px 18px', fontWeight: '700' }}
                 >
                   Update Validity
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE NEW MEMBERSHIP TIER MODAL (MASTER ADMIN & MAIN ADMIN ONLY) */}
+      {showAddPlanModal && canManagePlans && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#FFFFFF',
+            borderRadius: '20px',
+            maxWidth: '680px',
+            width: '100%',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)',
+            border: '1px solid #EADBCC',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #F0E6D8',
+              background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              position: 'relative'
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '4px',
+                background: 'linear-gradient(90deg, #B88B4A 0%, #D4AF37 50%, #8E633A 100%)'
+              }} />
+              <div>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: '#B88B4A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <Crown size={14} color="#B88B4A" />
+                  Admin Privilege • Custom Tier Builder
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', margin: '4px 0 0 0' }}>
+                  Create New Membership Plan
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddPlanModal(false)}
+                style={{
+                  background: '#F5EFE6',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#78716C',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form Body */}
+            <form onSubmit={handleCreatePlan} style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Tier Name <span style={{ color: '#E11D48' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Celestial, Diamond, Solstice"
+                    value={newPlanForm.name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewPlanForm(prev => ({
+                        ...prev,
+                        name: val,
+                        fullName: prev.fullName === '' || prev.fullName === `${prev.name.toUpperCase()} MEMBERSHIP`
+                          ? (val ? `${val.toUpperCase()} MEMBERSHIP` : '')
+                          : prev.fullName,
+                        tier: val
+                      }));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Full Plan Title
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. CELESTIAL ELITE MEMBERSHIP"
+                    value={newPlanForm.fullName}
+                    onChange={(e) => setNewPlanForm({ ...newPlanForm, fullName: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Price / Fee (₹) <span style={{ color: '#E11D48' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '12px', top: '10px', color: '#78716C', fontWeight: '700' }}>₹</span>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      placeholder="e.g. 75000"
+                      value={newPlanForm.price}
+                      onChange={(e) => setNewPlanForm({ ...newPlanForm, price: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px 10px 28px',
+                        borderRadius: '8px',
+                        border: '1px solid #D6D3D1',
+                        fontSize: '13.5px',
+                        fontWeight: '700',
+                        boxSizing: 'border-box',
+                        color: '#B88B4A'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Tier Sequence / Tag
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={`0${plans.length + 1} — SERVICE`}
+                    value={newPlanForm.tierNumber}
+                    onChange={(e) => setNewPlanForm({ ...newPlanForm, tierNumber: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Validity Period
+                  </label>
+                  <select
+                    value={newPlanForm.validity}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      let dur = '(per year)';
+                      if (val.includes('3 months')) dur = '(per 3 months)';
+                      else if (val.includes('6 months')) dur = '(per 6 months)';
+                      else if (val.includes('2 years')) dur = '(per 2 years)';
+                      setNewPlanForm({
+                        ...newPlanForm,
+                        validity: val,
+                        validityBadge: val.toUpperCase(),
+                        durationLabel: dur
+                      });
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                      background: '#FFFFFF'
+                    }}
+                  >
+                    <option value="Valid for 1 year">Valid for 1 year</option>
+                    <option value="Valid for 6 months">Valid for 6 months</option>
+                    <option value="Valid for 3 months">Valid for 3 months</option>
+                    <option value="Valid for 2 years">Valid for 2 years</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 3D Metallic Card Image Finish Selector */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '8px' }}>
+                  Choose 3D Metallic Card Artwork
+                </label>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '10px',
+                  marginBottom: '10px'
+                }}>
+                  {[
+                    { label: 'Royal Gold', path: '/memberships/card_infini_3d.jpg' },
+                    { label: 'Black Onyx', path: '/memberships/card_lumiere_3d.jpg' },
+                    { label: 'Platinum Silver', path: '/memberships/card_eclat_3d.jpg' },
+                    { label: 'Rose Champagne', path: '/memberships/card_eternal_3d.jpg' }
+                  ].map(c => {
+                    const isCardSelected = newPlanForm.image === c.path;
+                    return (
+                      <div
+                        key={c.path}
+                        onClick={() => setNewPlanForm({ ...newPlanForm, image: c.path })}
+                        style={{
+                          borderRadius: '10px',
+                          border: isCardSelected ? '2px solid #B88B4A' : '1px solid #E5E7EB',
+                          padding: '6px',
+                          cursor: 'pointer',
+                          background: isCardSelected ? '#FAF6EE' : '#FFFFFF',
+                          transition: 'all 0.15s ease',
+                          textAlign: 'center',
+                          boxShadow: isCardSelected ? '0 4px 12px rgba(184, 139, 74, 0.2)' : 'none'
+                        }}
+                      >
+                        <div style={{ width: '100%', height: '65px', borderRadius: '6px', overflow: 'hidden', marginBottom: '6px' }}>
+                          <img src={c.path} alt={c.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                        <div style={{ fontSize: '11px', fontWeight: isCardSelected ? '800' : '600', color: isCardSelected ? '#8E633A' : '#57534E' }}>
+                          {isCardSelected ? `✓ ${c.label}` : c.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Or enter custom image URL: https://..."
+                  value={newPlanForm.image}
+                  onChange={(e) => setNewPlanForm({ ...newPlanForm, image: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #E5E7EB',
+                    fontSize: '11.5px',
+                    color: '#78716C',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Tagline */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                  Tagline / Overview
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Unmatched aesthetic brilliance and personalized luxury."
+                  value={newPlanForm.tagline}
+                  onChange={(e) => setNewPlanForm({ ...newPlanForm, tagline: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #D6D3D1',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Privileges & Benefits List */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                  Privileges & Benefits ({newPlanForm.benefits.length})
+                </label>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  maxHeight: '180px',
+                  overflowY: 'auto',
+                  border: '1px solid #E7E5E4',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  background: '#FAFAF9',
+                  marginBottom: '10px'
+                }}>
+                  {newPlanForm.benefits.map((b, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      background: '#FFFFFF',
+                      padding: '7px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #E7E5E4',
+                      fontSize: '12px',
+                      color: '#292524'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                        <span style={{ color: '#E11D48', fontWeight: 'bold' }}>•</span>
+                        <span>{b}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBenefit(idx)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#DC2626',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          display: 'flex'
+                        }}
+                        title="Remove benefit"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {newPlanForm.benefits.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#A8A29E', textAlign: 'center', padding: '10px' }}>
+                      No benefits added yet. Add at least one privilege below.
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Benefit Input */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Type benefit item (e.g. Free 1x medi-facial quarterly)..."
+                    value={newPlanForm.benefitInput}
+                    onChange={(e) => setNewPlanForm({ ...newPlanForm, benefitInput: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddBenefit();
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '12.5px'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddBenefit}
+                    style={{
+                      padding: '9px 16px',
+                      borderRadius: '8px',
+                      border: '1px solid #DAC493',
+                      background: '#FAF6EE',
+                      color: '#8E633A',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer Buttons */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                marginTop: '12px',
+                paddingTop: '16px',
+                borderTop: '1px solid #F0E6D8'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddPlanModal(false)}
+                  className="btn-secondary"
+                  style={{ padding: '10px 18px', fontSize: '13px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPlan}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #B88B4A 0%, #8E633A 100%)',
+                    color: '#FFFFFF',
+                    fontSize: '13.5px',
+                    fontWeight: '700',
+                    cursor: savingPlan ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 14px rgba(184, 139, 74, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <Crown size={15} />
+                  {savingPlan ? 'Publishing Plan...' : 'Publish Membership Tier'}
                 </button>
               </div>
             </form>
