@@ -77,7 +77,10 @@ export function authenticateToken(req, res, next) {
       return res.status(401).json({ error: 'Account is deactivated, deleted, or session revoked.' });
     }
 
-    req.user = dbUser;
+    req.user = {
+      ...dbUser,
+      original_role: decodedUser.original_role || dbUser.role
+    };
 
     // Check for header / query / body tampering for non-master users
     const requestedLoc = req.headers['x-location-id'] || req.query.location_id || (req.body && req.body.location_id);
@@ -326,7 +329,7 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
 
   // 3. Shorthand master admin
   if (!user && (cleanInput === 'master' || cleanInput === 'master_admin' || cleanInput === 'master admin')) {
-    user = db.prepare('SELECT * FROM USERS WHERE role = "master_admin" AND active = 1').get();
+    user = db.prepare('SELECT * FROM USERS WHERE role = ? AND active = 1').get('master_admin');
   }
 
   // 4. Match location code (e.g. "MB-BR-HYD-58", "MB-JH-01", "MB-BW-02", "MB-JU-01")
@@ -707,6 +710,7 @@ app.post('/api/auth/login-otp', (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        original_role: user.role,
         location_id: user.location_id
       },
       JWT_SECRET,
@@ -726,6 +730,7 @@ app.post('/api/auth/login-otp', (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        original_role: user.role,
         location_id: user.location_id
       },
       location
@@ -761,6 +766,7 @@ app.post('/api/auth/login', (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        original_role: user.role,
         location_id: user.location_id
       },
       JWT_SECRET,
@@ -780,6 +786,7 @@ app.post('/api/auth/login', (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        original_role: user.role,
         location_id: user.location_id
       },
       location
@@ -798,8 +805,11 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Role is required to switch' });
     }
 
+    const isOriginalMaster = (req.user.original_role === 'master_admin' || req.user.role === 'master_admin');
+    const isOriginalBranchAdmin = (req.user.original_role === 'admin' || req.user.role === 'admin');
+
     let targetLocId = location_id || req.user.location_id || req.locationId;
-    if (req.user.role !== 'master_admin') {
+    if (!isOriginalMaster) {
       targetLocId = req.user.location_id;
     }
     if (!targetLocId && role !== 'master_admin') {
@@ -808,11 +818,14 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
 
     let targetUser = null;
     if (role === 'master_admin') {
-      if (req.user.role !== 'master_admin') {
+      if (!isOriginalMaster) {
         return res.status(403).json({ error: 'Only master administrators can switch to master admin' });
       }
-      targetUser = db.prepare('SELECT * FROM USERS WHERE role = "master_admin" AND active = 1').get();
+      targetUser = db.prepare('SELECT * FROM USERS WHERE role = ? AND active = 1').get('master_admin');
     } else {
+      if (!isOriginalMaster && !isOriginalBranchAdmin && role === 'admin') {
+        return res.status(403).json({ error: 'Only administrators can switch to admin desk' });
+      }
       targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
       if (!targetUser) {
         const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
@@ -827,6 +840,8 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
       return res.status(404).json({ error: `No active ${role} account found for this location` });
     }
 
+    const effectiveOriginalRole = req.user.original_role || req.user.role;
+
     const token = jwt.sign(
       {
         user_id: targetUser.user_id,
@@ -834,6 +849,7 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
         email: targetUser.email,
         phone: targetUser.phone,
         role: targetUser.role,
+        original_role: effectiveOriginalRole,
         location_id: targetUser.location_id
       },
       JWT_SECRET,
@@ -853,13 +869,14 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
         email: targetUser.email,
         phone: targetUser.phone,
         role: targetUser.role,
+        original_role: effectiveOriginalRole,
         location_id: targetUser.location_id
       },
       location
     });
   } catch (error) {
     console.error('Switch role error:', error);
-    res.status(500).json({ error: 'Failed to switch role' });
+    res.status(500).json({ error: error.message || 'Failed to switch role' });
   }
 });
 
@@ -972,6 +989,7 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
+  user.original_role = req.user.original_role || user.role;
   let location = null;
   if (user.location_id) {
     location = db.prepare('SELECT location_id, name, code, type, city, state, status FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
@@ -2977,6 +2995,8 @@ export function getFullClientRecord(clientId) {
     visit_history: fullVisits,
     treatment_courses: treatmentCourses
   };
+}
+
 // Studio Membership Intelligence & Roster endpoint
 app.get('/api/memberships', authenticateToken, (req, res) => {
   try {

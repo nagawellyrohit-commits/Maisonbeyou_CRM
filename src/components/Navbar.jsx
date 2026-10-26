@@ -146,6 +146,8 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     staff: 'Staff Member'
   };
 
+  const isMasterAdmin = currentUser?.original_role === 'master_admin' || currentUser?.role === 'master_admin';
+  const isBranchAdmin = currentUser?.original_role === 'admin' || currentUser?.role === 'admin';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
 
   const getClientInitials = (name, surname = '') => {
@@ -1185,7 +1187,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     {activeLocation ? `Active Desk (${activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name})` : 'Switch Active Role'}
                   </div>
                   
-                  {(currentUser?.role === 'master_admin' || !activeLocation) && (
+                  {isMasterAdmin && (
                     <button
                       onClick={() => handleQuickSwitchRole('master_admin')}
                       style={{
@@ -1205,25 +1207,27 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     </button>
                   )}
 
-                  <button
-                    onClick={() => handleQuickSwitchRole('admin')}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '13px',
-                      background: currentUser?.role === 'admin' ? 'var(--primary-subtle)' : 'transparent',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                      🏢 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Admin' : 'Studio Admin'}
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Admin • Full Studio Operations & Reports</span>
-                  </button>
+                  {(isMasterAdmin || isBranchAdmin) && (
+                    <button
+                      onClick={() => handleQuickSwitchRole('admin')}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13px',
+                        background: currentUser?.role === 'admin' ? 'var(--primary-subtle)' : 'transparent',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                        🏢 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Admin' : 'Studio Admin'}
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Admin • Full Studio Operations & Reports</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={() => handleQuickSwitchRole('reception')}
