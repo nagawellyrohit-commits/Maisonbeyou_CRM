@@ -4162,7 +4162,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
 });
 
 // Admin: Direct media file upload (video or image)
-app.post('/api/admin/upload', authenticateToken, authorizeRoles('admin'), upload.single('file'), (req, res) => {
+app.post('/api/admin/upload', authenticateToken, authorizeRoles('admin', 'reception'), upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file was uploaded' });
@@ -4186,7 +4186,7 @@ app.post('/api/admin/upload', authenticateToken, authorizeRoles('admin'), upload
 app.get('/api/staff', authenticateToken, (req, res) => {
   try {
     const locId = req.locationId;
-    let query = 'SELECT staff_id, name, role, phone, location_id FROM STAFF WHERE active = 1';
+    let query = 'SELECT staff_id, name, role, phone, location_id, salary_type, salary_amount, incentive_percentage FROM STAFF WHERE active = 1';
     let params = [];
     if (locId) {
       query += ' AND location_id = ?';
@@ -4201,8 +4201,8 @@ app.get('/api/staff', authenticateToken, (req, res) => {
   }
 });
 
-// Admin Staff with performance metrics
-app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin'), (req, res) => {
+// Admin Staff with performance metrics & incentive calculations
+app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
     const locId = req.locationId;
     let query = 'SELECT * FROM STAFF';
@@ -4222,10 +4222,30 @@ app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin'), (req, re
         WHERE vs.staff_id = ?
       `).get(s.staff_id);
 
+      const totalRevenue = Number(stats?.total_revenue) || 0;
+      const totalServices = Number(stats?.total_services) || 0;
+      const salaryType = s.salary_type === 'salary_plus_incentive' ? 'salary_plus_incentive' : 'fixed';
+      const salaryAmount = Number(s.salary_amount) || 0;
+      const incentivePct = Number(s.incentive_percentage) || 0;
+
+      // Incentive is calculated as % of service revenue performed by this staff member
+      const earnedIncentive = (salaryType === 'salary_plus_incentive' && incentivePct > 0)
+        ? Math.round((totalRevenue * incentivePct) / 100)
+        : 0;
+
+      const totalEstimatedPayout = salaryType === 'salary_plus_incentive'
+        ? (salaryAmount + earnedIncentive)
+        : salaryAmount;
+
       return {
         ...s,
-        total_services: stats.total_services,
-        total_revenue: stats.total_revenue
+        total_services: totalServices,
+        total_revenue: totalRevenue,
+        salary_type: salaryType,
+        salary_amount: salaryAmount,
+        incentive_percentage: incentivePct,
+        earned_incentive: earnedIncentive,
+        total_estimated_payout: totalEstimatedPayout
       };
     });
 
@@ -4237,18 +4257,51 @@ app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin'), (req, re
 });
 
 // Admin: Add Staff
-app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin'), (req, res) => {
+app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
-    const { name, role, phone, location_id } = req.body;
+    const {
+      name,
+      role,
+      phone,
+      location_id,
+      aadhaar_number,
+      aadhaar_doc,
+      pan_number,
+      pan_doc,
+      salary_type,
+      salary_amount,
+      incentive_percentage
+    } = req.body;
+
     if (!name || !role) {
       return res.status(400).json({ error: 'Staff name and role are required' });
     }
 
     const targetLocId = req.user.role === 'master_admin' ? (req.locationId || location_id || 1) : req.locationId;
+    const cleanSalaryType = salary_type === 'salary_plus_incentive' ? 'salary_plus_incentive' : 'fixed';
+    const cleanSalaryAmount = Number(salary_amount) || 0;
+    const cleanIncentivePct = cleanSalaryType === 'salary_plus_incentive' ? (Number(incentive_percentage) || 0) : 0;
+
     const info = db.prepare(`
-      INSERT INTO STAFF (name, role, phone, active, location_id)
-      VALUES (?, ?, ?, 1, ?)
-    `).run(name.trim(), role.trim(), phone ? phone.trim() : null, targetLocId);
+      INSERT INTO STAFF (
+        name, role, phone, active, location_id,
+        aadhaar_number, aadhaar_doc, pan_number, pan_doc,
+        salary_type, salary_amount, incentive_percentage
+      )
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      name.trim(),
+      role.trim(),
+      phone ? phone.trim() : null,
+      targetLocId,
+      aadhaar_number ? aadhaar_number.trim() : null,
+      aadhaar_doc || null,
+      pan_number ? pan_number.trim().toUpperCase() : null,
+      pan_doc || null,
+      cleanSalaryType,
+      cleanSalaryAmount,
+      cleanIncentivePct
+    );
 
     const created = db.prepare('SELECT * FROM STAFF WHERE staff_id = ?').get(info.lastInsertRowid);
     res.status(201).json({ staff: created });
@@ -4259,9 +4312,21 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin'), (req, r
 });
 
 // Admin: Update Staff
-app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
+app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
-    const { name, role, phone, active } = req.body;
+    const {
+      name,
+      role,
+      phone,
+      active,
+      aadhaar_number,
+      aadhaar_doc,
+      pan_number,
+      pan_doc,
+      salary_type,
+      salary_amount,
+      incentive_percentage
+    } = req.body;
     const staffId = req.params.id;
 
     if (req.user.role !== 'master_admin') {
@@ -4274,15 +4339,46 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin'), (req
       }
     }
 
+    const cleanSalaryType = salary_type !== undefined
+      ? (salary_type === 'salary_plus_incentive' ? 'salary_plus_incentive' : 'fixed')
+      : undefined;
+
     db.prepare(`
       UPDATE STAFF
       SET name = COALESCE(?, name),
           role = COALESCE(?, role),
           phone = COALESCE(?, phone),
           active = COALESCE(?, active),
+          aadhaar_number = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_number END,
+          aadhaar_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_doc END,
+          pan_number = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_number END,
+          pan_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_doc END,
+          salary_type = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_type END,
+          salary_amount = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_amount END,
+          incentive_percentage = CASE WHEN ? IS NOT NULL THEN ? ELSE incentive_percentage END,
           updated_at = CURRENT_TIMESTAMP
       WHERE staff_id = ?
-    `).run(name, role, phone, active, staffId);
+    `).run(
+      name !== undefined ? (name ? name.trim() : null) : null,
+      role !== undefined ? (role ? role.trim() : null) : null,
+      phone !== undefined ? (phone ? phone.trim() : null) : null,
+      active,
+      aadhaar_number !== undefined ? 1 : null,
+      aadhaar_number ? aadhaar_number.trim() : '',
+      aadhaar_doc !== undefined ? 1 : null,
+      aadhaar_doc || '',
+      pan_number !== undefined ? 1 : null,
+      pan_number ? pan_number.trim().toUpperCase() : '',
+      pan_doc !== undefined ? 1 : null,
+      pan_doc || '',
+      cleanSalaryType !== undefined ? 1 : null,
+      cleanSalaryType || 'fixed',
+      salary_amount !== undefined ? 1 : null,
+      Number(salary_amount) || 0,
+      incentive_percentage !== undefined ? 1 : null,
+      Number(incentive_percentage) || 0,
+      staffId
+    );
 
     const updated = db.prepare('SELECT * FROM STAFF WHERE staff_id = ?').get(staffId);
     res.json({ staff: updated });

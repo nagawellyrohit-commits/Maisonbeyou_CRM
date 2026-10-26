@@ -1,15 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Phone, Award, Sparkles, User, Check, X } from 'lucide-react';
+import {
+  Plus, Edit2, Phone, Award, Sparkles, User, Check, X,
+  Upload, FileText, ExternalLink, Trash2, ShieldCheck,
+  DollarSign, Percent, Calculator, AlertCircle, FileCheck, Landmark
+} from 'lucide-react';
 import { apiRequest, formatCurrency, formatPhone } from '../utils/api';
+
+const ROLE_PRESETS = [
+  'Senior Aesthetician',
+  'Laser Specialist',
+  'Dermatologist',
+  'Cosmetologist',
+  'Trichologist',
+  'Beauty Therapist',
+  'Clinic Consultant'
+];
 
 export default function StaffManagement() {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, mode: 'create', data: null });
 
+  // Form states
   const [name, setName] = useState('');
-  const [role, setRole] = useState('');
+  const [role, setRole] = useState('Senior Aesthetician');
   const [phone, setPhone] = useState('');
+
+  // KYC & ID states
+  const [aadhaarNumber, setAadhaarNumber] = useState('');
+  const [aadhaarDoc, setAadhaarDoc] = useState('');
+  const [aadhaarUploading, setAadhaarUploading] = useState(false);
+
+  const [panNumber, setPanNumber] = useState('');
+  const [panDoc, setPanDoc] = useState('');
+  const [panUploading, setPanUploading] = useState(false);
+
+  // Compensation / Salary Category states
+  const [salaryType, setSalaryType] = useState('fixed'); // 'fixed' | 'salary_plus_incentive'
+  const [salaryAmount, setSalaryAmount] = useState('');
+  const [incentivePercentage, setIncentivePercentage] = useState('');
 
   const fetchStaff = async () => {
     try {
@@ -30,29 +59,101 @@ export default function StaffManagement() {
   const handleOpenModal = (s = null) => {
     if (s) {
       setModal({ open: true, mode: 'edit', data: s });
-      setName(s.name);
-      setRole(s.role);
+      setName(s.name || '');
+      setRole(s.role || '');
       setPhone(s.phone || '');
+      setAadhaarNumber(s.aadhaar_number || '');
+      setAadhaarDoc(s.aadhaar_doc || '');
+      setPanNumber(s.pan_number || '');
+      setPanDoc(s.pan_doc || '');
+      setSalaryType(s.salary_type || 'fixed');
+      setSalaryAmount(s.salary_amount !== undefined && s.salary_amount !== null ? String(s.salary_amount) : '');
+      setIncentivePercentage(s.incentive_percentage !== undefined && s.incentive_percentage !== null ? String(s.incentive_percentage) : '');
     } else {
       setModal({ open: true, mode: 'create', data: null });
       setName('');
       setRole('Senior Aesthetician');
       setPhone('');
+      setAadhaarNumber('');
+      setAadhaarDoc('');
+      setPanNumber('');
+      setPanDoc('');
+      setSalaryType('fixed');
+      setSalaryAmount('');
+      setIncentivePercentage('');
     }
+  };
+
+  const handleFileUpload = async (e, docType) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const isAadhaar = docType === 'aadhaar';
+    if (isAadhaar) setAadhaarUploading(true);
+    else setPanUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiRequest('/admin/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (res.url) {
+        if (isAadhaar) {
+          setAadhaarDoc(res.url);
+        } else {
+          setPanDoc(res.url);
+        }
+      }
+    } catch (err) {
+      console.error('File upload failed:', err);
+      alert('Upload failed: ' + (err.message || 'Please check file format/size'));
+    } finally {
+      if (isAadhaar) setAadhaarUploading(false);
+      else setPanUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  // Format Aadhaar: 12 digits formatted as XXXX XXXX XXXX
+  const handleAadhaarChange = (e) => {
+    const digits = e.target.value.replace(/\D/g, '').slice(0, 12);
+    const formatted = digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+    setAadhaarNumber(formatted);
+  };
+
+  // Format PAN: 10 chars uppercase alphanumeric
+  const handlePanChange = (e) => {
+    const cleaned = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+    setPanNumber(cleaned);
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        name: name.trim(),
+        role: role.trim(),
+        phone: phone.trim(),
+        aadhaar_number: aadhaarNumber.trim(),
+        aadhaar_doc: aadhaarDoc,
+        pan_number: panNumber.trim().toUpperCase(),
+        pan_doc: panDoc,
+        salary_type: salaryType,
+        salary_amount: Number(salaryAmount) || 0,
+        incentive_percentage: salaryType === 'salary_plus_incentive' ? (Number(incentivePercentage) || 0) : 0
+      };
+
       if (modal.mode === 'create') {
         await apiRequest('/admin/staff', {
           method: 'POST',
-          body: JSON.stringify({ name, role, phone })
+          body: JSON.stringify(payload)
         });
       } else {
         await apiRequest(`/admin/staff/${modal.data.staff_id}`, {
           method: 'PUT',
-          body: JSON.stringify({ name, role, phone })
+          body: JSON.stringify(payload)
         });
       }
       setModal({ open: false, mode: 'create', data: null });
@@ -79,23 +180,23 @@ export default function StaffManagement() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#B88B4A', fontWeight: '700' }}>
-            Team Management
+            Team Management & KYC
           </div>
           <h1 style={{ fontSize: '28px', color: '#1C1917' }}>
             STUDIO PRACTITIONERS & STAFF
           </h1>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Service providers assigned during visit reception with treatment performance metrics.
+            Service providers with KYC verification, Aadhaar/PAN compliance, and automated service incentive calculations.
           </p>
         </div>
 
         <button
           onClick={() => handleOpenModal()}
           className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px' }}
+          style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
         >
           <Plus size={16} />
-          + Add Staff Member
+          Add Staff Member
         </button>
       </div>
 
@@ -105,121 +206,294 @@ export default function StaffManagement() {
           Loading staff directory...
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '20px' }}>
-          {staff.map(s => (
-            <div
-              key={s.staff_id}
-              className="card"
-              style={{
-                padding: '24px',
-                opacity: s.active === 1 ? 1 : 0.65,
-                border: s.active === 1 ? '1px solid var(--border-color)' : '1px dashed var(--border-color)'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
-                  <div style={{
-                    width: '46px',
-                    height: '46px',
-                    borderRadius: '50%',
-                    background: 'var(--primary-subtle)',
-                    color: '#B88B4A',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: '700',
-                    fontSize: '18px'
-                  }}>
-                    {s.name.charAt(0)}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '20px' }}>
+          {staff.map(s => {
+            const hasSalaryPlusIncentive = s.salary_type === 'salary_plus_incentive';
+            const incentivePct = Number(s.incentive_percentage) || 0;
+            const salaryAmt = Number(s.salary_amount) || 0;
+            const totalRevenue = Number(s.total_revenue) || 0;
+            const earnedIncentive = Number(s.earned_incentive) || (hasSalaryPlusIncentive ? Math.round((totalRevenue * incentivePct) / 100) : 0);
+            const totalPayout = Number(s.total_estimated_payout) || (hasSalaryPlusIncentive ? (salaryAmt + earnedIncentive) : salaryAmt);
+
+            const hasKyc = !!(s.aadhaar_number || s.aadhaar_doc || s.pan_number || s.pan_doc);
+
+            return (
+              <div
+                key={s.staff_id}
+                className="card"
+                style={{
+                  padding: '24px',
+                  opacity: s.active === 1 ? 1 : 0.65,
+                  border: s.active === 1 ? '1px solid #EADBBE' : '1px dashed #D6D3D1',
+                  background: '#FFFFFF',
+                  borderRadius: '14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '16px',
+                  transition: 'box-shadow 0.2s ease'
+                }}
+              >
+                <div>
+                  {/* Card Header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                      <div style={{
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '50%',
+                        background: 'linear-gradient(135deg, #FAF6EE 0%, #EEDBBE 100%)',
+                        color: '#8C6228',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: '700',
+                        fontSize: '18px',
+                        border: '1px solid #DAC493'
+                      }}>
+                        {s.name.charAt(0)}
+                      </div>
+                      <div>
+                        <h2 style={{ fontSize: '17px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
+                          {s.name}
+                        </h2>
+                        <div style={{ fontSize: '12.5px', color: '#9F7335', fontWeight: '600' }}>
+                          {s.role}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className={`badge ${s.active === 1 ? 'badge-paid' : 'badge-neutral'}`} style={{ fontSize: '11px' }}>
+                      {s.active === 1 ? 'Active' : 'Inactive'}
+                    </span>
                   </div>
-                  <div>
-                    <h2 style={{ fontSize: '18px', color: '#1C1917' }}>
-                      {s.name}
-                    </h2>
-                    <div style={{ fontSize: '13px', color: '#B88B4A', fontWeight: '600' }}>
-                      {s.role}
+
+                  {/* Phone & Compensation Model Badge */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '14px' }}>
+                    {s.phone && (
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#57534E',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        background: '#F5F5F4',
+                        padding: '4px 8px',
+                        borderRadius: '6px'
+                      }}>
+                        <Phone size={12} color="#B88B4A" />
+                        <span>{formatPhone(s.phone)}</span>
+                      </div>
+                    )}
+
+                    {/* Compensation Badge */}
+                    <div style={{
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      padding: '4px 9px',
+                      borderRadius: '6px',
+                      background: hasSalaryPlusIncentive ? '#FEF3C7' : '#EFF6FF',
+                      color: hasSalaryPlusIncentive ? '#92400E' : '#1E40AF',
+                      border: `1px solid ${hasSalaryPlusIncentive ? '#FCD34D' : '#BFDBFE'}`,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      {hasSalaryPlusIncentive ? (
+                        <>
+                          <Sparkles size={11} />
+                          <span>Base {formatCurrency(salaryAmt)} + {incentivePct}% Inc.</span>
+                        </>
+                      ) : (
+                        <>
+                          <DollarSign size={11} />
+                          <span>Fixed Salary: {formatCurrency(salaryAmt)}/mo</span>
+                        </>
+                      )}
                     </div>
                   </div>
+
+                  {/* KYC Details Strip */}
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#FAFAF9',
+                    border: '1px solid #E7E5E4',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', color: '#78716C' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <ShieldCheck size={12} color="#8C6228" />
+                        KYC & IDENTIFICATION
+                      </span>
+                      {hasKyc ? (
+                        <span style={{ color: '#166534', fontWeight: '600' }}>✓ Verified</span>
+                      ) : (
+                        <span style={{ color: '#DC2626', fontWeight: '600' }}>Pending</span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '11.5px', color: '#44403C' }}>
+                      {/* Aadhaar */}
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ color: '#78716C', fontWeight: '600' }}>Aadhaar:</span>
+                        <span>{s.aadhaar_number ? s.aadhaar_number : 'Not added'}</span>
+                        {s.aadhaar_doc && (
+                          <a
+                            href={s.aadhaar_doc}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              marginLeft: '2px',
+                              color: '#8C6228',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              textDecoration: 'underline'
+                            }}
+                          >
+                            <FileText size={11} />
+                            Doc
+                          </a>
+                        )}
+                      </div>
+
+                      {/* PAN */}
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ color: '#78716C', fontWeight: '600' }}>PAN:</span>
+                        <span>{s.pan_number ? s.pan_number : 'Not added'}</span>
+                        {s.pan_doc && (
+                          <a
+                            href={s.pan_doc}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              marginLeft: '2px',
+                              color: '#8C6228',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              textDecoration: 'underline'
+                            }}
+                          >
+                            <FileText size={11} />
+                            Doc
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Performance & Payout Stats */}
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px 14px',
+                    background: '#FAF6EE',
+                    border: '1px solid #EADBBE',
+                    borderRadius: '8px',
+                    display: 'grid',
+                    gridTemplateColumns: hasSalaryPlusIncentive ? '1fr 1fr' : '1fr 1fr 1fr',
+                    gap: '10px'
+                  }}>
+                    <div>
+                      <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                        Services Done
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: '700', color: '#1C1917', marginTop: '2px' }}>
+                        {s.total_services || 0}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                        Revenue Handled
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: '700', color: '#166534', marginTop: '2px' }}>
+                        {formatCurrency(totalRevenue)}
+                      </div>
+                    </div>
+
+                    {hasSalaryPlusIncentive ? (
+                      <>
+                        <div style={{ borderTop: '1px solid #EADBBE', paddingTop: '8px', marginTop: '4px' }}>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                            Earned Inc. ({incentivePct}%)
+                          </div>
+                          <div style={{ fontSize: '15px', fontWeight: '700', color: '#B45309', marginTop: '2px' }}>
+                            +{formatCurrency(earnedIncentive)}
+                          </div>
+                        </div>
+
+                        <div style={{ borderTop: '1px solid #EADBBE', paddingTop: '8px', marginTop: '4px' }}>
+                          <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                            Est. Total Payout
+                          </div>
+                          <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                            {formatCurrency(totalPayout)}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#8C6228', fontWeight: '700' }}>
+                          Monthly Salary
+                        </div>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                          {formatCurrency(salaryAmt)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                <span className={`badge ${s.active === 1 ? 'badge-paid' : 'badge-neutral'}`} style={{ fontSize: '11px' }}>
-                  {s.active === 1 ? 'Active' : 'Inactive'}
-                </span>
+                {/* Actions */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '12px', borderTop: '1px solid #F5F5F4' }}>
+                  <button
+                    onClick={() => handleToggleActive(s)}
+                    style={{
+                      fontSize: '12px',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #E7E5E4',
+                      background: '#FFFFFF',
+                      color: s.active === 1 ? '#DC2626' : '#166534',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {s.active === 1 ? 'Set Inactive' : 'Set Active'}
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenModal(s)}
+                    style={{
+                      fontSize: '12px',
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      border: '1px solid #DAC493',
+                      background: '#FAF6EE',
+                      color: '#8C6228',
+                      fontWeight: '700',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Edit2 size={13} />
+                    Edit Details
+                  </button>
+                </div>
               </div>
-
-              {s.phone && (
-                <div style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '16px' }}>
-                  <Phone size={14} color="#B88B4A" />
-                  <span>{formatPhone(s.phone)}</span>
-                </div>
-              )}
-
-              {/* Performance Stats */}
-              <div style={{
-                marginTop: '16px',
-                padding: '12px 14px',
-                background: 'var(--bg-surface)',
-                borderRadius: 'var(--radius-md)',
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '10px'
-              }}>
-                <div>
-                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600' }}>
-                    Services Done
-                  </div>
-                  <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-main)', marginTop: '2px' }}>
-                    {s.total_services || 0}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '600' }}>
-                    Revenue Handled
-                  </div>
-                  <div style={{ fontSize: '16px', fontWeight: '700', color: '#166534', marginTop: '2px' }}>
-                    {formatCurrency(s.total_revenue || 0)}
-                  </div>
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '18px', paddingTop: '14px', borderTop: '1px solid var(--border-light)' }}>
-                <button
-                  onClick={() => handleToggleActive(s)}
-                  style={{
-                    fontSize: '12px',
-                    padding: '6px 12px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border-color)',
-                    background: '#FFFFFF',
-                    color: s.active === 1 ? '#DC2626' : '#166534',
-                    fontWeight: '600'
-                  }}
-                >
-                  {s.active === 1 ? 'Set Inactive' : 'Set Active'}
-                </button>
-
-                <button
-                  onClick={() => handleOpenModal(s)}
-                  style={{
-                    fontSize: '12px',
-                    padding: '6px 12px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid var(--border-color)',
-                    background: '#FFFFFF',
-                    color: 'var(--text-main)',
-                    fontWeight: '600',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <Edit2 size={13} />
-                  Edit
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -228,73 +502,606 @@ export default function StaffManagement() {
         <div style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(28,25,23,0.5)',
+          background: 'rgba(28,25,23,0.65)',
+          backdropFilter: 'blur(4px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           zIndex: 1000,
           padding: '20px'
         }}>
-          <div className="card animate-fade-in" style={{ maxWidth: '440px', width: '100%', padding: '28px' }}>
-            <h2 style={{ fontSize: '20px', color: '#1C1917', marginBottom: '4px' }}>
-              {modal.mode === 'create' ? 'Add Staff Member' : 'Edit Staff Details'}
-            </h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              Staff members are selectable during service provider assignment.
-            </p>
-
-            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div
+            className="animate-fade-in"
+            style={{
+              maxWidth: '620px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#FFFDF9',
+              borderRadius: '16px',
+              border: '1px solid #EADBBE',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.18)',
+              padding: '28px 32px'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Dr. Ananya Sharma"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none' }}
-                />
+                <h2 style={{ fontSize: '21px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
+                  {modal.mode === 'create' ? 'Add Staff Member' : 'Edit Staff Details'}
+                </h2>
+                <p style={{ fontSize: '13px', color: '#78716C', marginTop: '4px', margin: 0 }}>
+                  Enter practitioner profile, Aadhaar & PAN KYC documents, and compensation model.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModal({ open: false, mode: 'create', data: null })}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  color: '#78716C',
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* SECTION 1: Personal & Role Details */}
+              <div style={{
+                background: '#FFFFFF',
+                borderRadius: '12px',
+                padding: '18px',
+                border: '1px solid #EADBBE',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8C6228', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <User size={14} />
+                  Basic Profile
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Dr. Ananya Sharma"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      background: '#FFFDF9',
+                      fontSize: '13.5px',
+                      outline: 'none',
+                      color: '#1C1917'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                    Designation / Role *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={role}
+                    onChange={(e) => setRole(e.target.value)}
+                    placeholder="e.g. Senior Aesthetician"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      background: '#FFFDF9',
+                      fontSize: '13.5px',
+                      outline: 'none',
+                      color: '#1C1917',
+                      marginBottom: '8px'
+                    }}
+                  />
+                  {/* Quick role preset pills */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {ROLE_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setRole(preset)}
+                        style={{
+                          fontSize: '11px',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          border: role === preset ? '1px solid #B88B4A' : '1px solid #E7E5E4',
+                          background: role === preset ? '#FAF6EE' : '#F5F5F4',
+                          color: role === preset ? '#8C6228' : '#78716C',
+                          fontWeight: role === preset ? '700' : '500',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                    Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+91 98201 11223"
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      background: '#FFFDF9',
+                      fontSize: '13.5px',
+                      outline: 'none',
+                      color: '#1C1917'
+                    }}
+                  />
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                  Designation / Role *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  placeholder="e.g. Senior Aesthetician / Laser Specialist"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none' }}
-                />
+              {/* SECTION 2: Aadhaar & PAN KYC Identification */}
+              <div style={{
+                background: '#FFFFFF',
+                borderRadius: '12px',
+                padding: '18px',
+                border: '1px solid #EADBBE',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8C6228', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <ShieldCheck size={14} />
+                  KYC & Identification Details
+                </div>
+
+                {/* Aadhaar Details Row */}
+                <div style={{
+                  padding: '14px',
+                  borderRadius: '10px',
+                  background: '#FAFAF9',
+                  border: '1px solid #E7E5E4',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '700', color: '#292524', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Landmark size={14} color="#8C6228" />
+                      Aadhaar Card Details
+                    </label>
+                    {aadhaarDoc && (
+                      <span style={{ fontSize: '11px', color: '#166534', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        <FileCheck size={12} />
+                        Document Attached
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={aadhaarNumber}
+                      onChange={handleAadhaarChange}
+                      placeholder="Aadhaar No. (e.g. 5412 8765 4321)"
+                      maxLength={14}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid #D6D3D1',
+                        background: '#FFFFFF',
+                        fontSize: '13.5px',
+                        outline: 'none',
+                        letterSpacing: '0.04em'
+                      }}
+                    />
+
+                    {/* Aadhaar Upload Button */}
+                    <div>
+                      <input
+                        type="file"
+                        id="aadhaar-file-input"
+                        accept="image/*,.pdf"
+                        style={{ display: 'none' }}
+                        onChange={(e) => handleFileUpload(e, 'aadhaar')}
+                      />
+                      <label
+                        htmlFor="aadhaar-file-input"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #DAC493',
+                          background: aadhaarDoc ? '#F0FDF4' : '#FAF6EE',
+                          color: aadhaarDoc ? '#166534' : '#8C6228',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: aadhaarUploading ? 'wait' : 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        <Upload size={14} />
+                        {aadhaarUploading ? 'Uploading...' : (aadhaarDoc ? 'Replace Doc' : 'Upload Aadhaar')}
+                      </label>
+                    </div>
+                  </div>
+
+                  {aadhaarDoc && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', padding: '6px 10px', background: '#FFFFFF', borderRadius: '6px', border: '1px solid #E7E5E4' }}>
+                      <a
+                        href={aadhaarDoc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#8C6228', fontWeight: '600', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <ExternalLink size={12} />
+                        View Uploaded Aadhaar File
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setAadhaarDoc('')}
+                        style={{ border: 'none', background: 'transparent', color: '#DC2626', fontSize: '11px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                      >
+                        <Trash2 size={11} />
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* PAN Details Row */}
+                <div style={{
+                  padding: '14px',
+                  borderRadius: '10px',
+                  background: '#FAFAF9',
+                  border: '1px solid #E7E5E4',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '700', color: '#292524', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FileText size={14} color="#8C6228" />
+                      PAN Card Details
+                    </label>
+                    {panDoc && (
+                      <span style={{ fontSize: '11px', color: '#166534', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                        <FileCheck size={12} />
+                        Document Attached
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={panNumber}
+                      onChange={handlePanChange}
+                      placeholder="PAN Card No. (e.g. ABCDE1234F)"
+                      maxLength={10}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1px solid #D6D3D1',
+                        background: '#FFFFFF',
+                        fontSize: '13.5px',
+                        outline: 'none',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase'
+                      }}
+                    />
+
+                    {/* PAN Upload Button */}
+                    <div>
+                      <input
+                        type="file"
+                        id="pan-file-input"
+                        accept="image/*,.pdf"
+                        style={{ display: 'none' }}
+                        onChange={(e) => handleFileUpload(e, 'pan')}
+                      />
+                      <label
+                        htmlFor="pan-file-input"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #DAC493',
+                          background: panDoc ? '#F0FDF4' : '#FAF6EE',
+                          color: panDoc ? '#166534' : '#8C6228',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: panUploading ? 'wait' : 'pointer',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        <Upload size={14} />
+                        {panUploading ? 'Uploading...' : (panDoc ? 'Replace Doc' : 'Upload PAN')}
+                      </label>
+                    </div>
+                  </div>
+
+                  {panDoc && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', padding: '6px 10px', background: '#FFFFFF', borderRadius: '6px', border: '1px solid #E7E5E4' }}>
+                      <a
+                        href={panDoc}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#8C6228', fontWeight: '600', textDecoration: 'underline', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <ExternalLink size={12} />
+                        View Uploaded PAN File
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setPanDoc('')}
+                        style={{ border: 'none', background: 'transparent', color: '#DC2626', fontSize: '11px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                      >
+                        <Trash2 size={11} />
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                  Phone Number
-                </label>
-                <input
-                  type="text"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+91 98201 11223"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none' }}
-                />
+              {/* SECTION 3: Compensation Category & Service Incentive */}
+              <div style={{
+                background: '#FFFFFF',
+                borderRadius: '12px',
+                padding: '18px',
+                border: '1px solid #EADBBE',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8C6228', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Award size={14} />
+                  Salary & Service Incentive Category
+                </div>
+
+                {/* Category Selection Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  {/* Option 1: Fixed Salary */}
+                  <div
+                    onClick={() => setSalaryType('fixed')}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      border: salaryType === 'fixed' ? '2px solid #B88B4A' : '1px solid #E7E5E4',
+                      background: salaryType === 'fixed' ? '#FAF6EE' : '#FFFFFF',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        border: salaryType === 'fixed' ? '5px solid #8C6228' : '2px solid #D6D3D1',
+                        background: '#FFFFFF'
+                      }} />
+                      <div style={{ fontSize: '13.5px', fontWeight: '700', color: salaryType === 'fixed' ? '#8C6228' : '#292524' }}>
+                        Fixed Salary
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#78716C', marginTop: '6px', paddingLeft: '26px' }}>
+                      Flat fixed monthly compensation regardless of service count.
+                    </div>
+                  </div>
+
+                  {/* Option 2: Salary + Incentive */}
+                  <div
+                    onClick={() => setSalaryType('salary_plus_incentive')}
+                    style={{
+                      padding: '14px',
+                      borderRadius: '10px',
+                      border: salaryType === 'salary_plus_incentive' ? '2px solid #B88B4A' : '1px solid #E7E5E4',
+                      background: salaryType === 'salary_plus_incentive' ? '#FAF6EE' : '#FFFFFF',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{
+                        width: '18px',
+                        height: '18px',
+                        borderRadius: '50%',
+                        border: salaryType === 'salary_plus_incentive' ? '5px solid #8C6228' : '2px solid #D6D3D1',
+                        background: '#FFFFFF'
+                      }} />
+                      <div style={{ fontSize: '13.5px', fontWeight: '700', color: salaryType === 'salary_plus_incentive' ? '#8C6228' : '#292524' }}>
+                        Salary + Incentive
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#78716C', marginTop: '6px', paddingLeft: '26px' }}>
+                      Base monthly salary plus percentage commission on performed services.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conditional Inputs Based on Category */}
+                {salaryType === 'fixed' ? (
+                  /* Fixed Salary Amount Input */
+                  <div>
+                    <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                      Fixed Monthly Salary (₹) *
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <span style={{ position: 'absolute', left: '12px', color: '#8C6228', fontWeight: '700', fontSize: '14px' }}>
+                        ₹
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="100"
+                        value={salaryAmount}
+                        onChange={(e) => setSalaryAmount(e.target.value)}
+                        placeholder="e.g. 35000"
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px 10px 28px',
+                          borderRadius: '8px',
+                          border: '1px solid #D6D3D1',
+                          background: '#FFFDF9',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          outline: 'none',
+                          color: '#1C1917'
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#78716C', marginTop: '6px' }}>
+                      Staff member will receive a flat compensation of {formatCurrency(Number(salaryAmount) || 0)} per month.
+                    </div>
+                  </div>
+                ) : (
+                  /* Salary + Incentive Row */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '10px', alignItems: 'flex-end' }}>
+                      {/* Base Salary Input */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                          Base Salary (₹)
+                        </label>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <span style={{ position: 'absolute', left: '12px', color: '#8C6228', fontWeight: '700', fontSize: '14px' }}>
+                            ₹
+                          </span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="100"
+                            value={salaryAmount}
+                            onChange={(e) => setSalaryAmount(e.target.value)}
+                            placeholder="e.g. 20000"
+                            style={{
+                              width: '100%',
+                              padding: '10px 12px 10px 28px',
+                              borderRadius: '8px',
+                              border: '1px solid #D6D3D1',
+                              background: '#FFFDF9',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              outline: 'none',
+                              color: '#1C1917'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Plus sign */}
+                      <div style={{
+                        height: '42px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '18px',
+                        fontWeight: '800',
+                        color: '#B88B4A',
+                        padding: '0 4px'
+                      }}>
+                        +
+                      </div>
+
+                      {/* Incentive Percentage Input */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', color: '#292524', marginBottom: '6px' }}>
+                          Service Incentive (%)
+                        </label>
+                        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.5"
+                            value={incentivePercentage}
+                            onChange={(e) => setIncentivePercentage(e.target.value)}
+                            placeholder="e.g. 10"
+                            style={{
+                              width: '100%',
+                              padding: '10px 28px 10px 14px',
+                              borderRadius: '8px',
+                              border: '1px solid #D6D3D1',
+                              background: '#FFFDF9',
+                              fontSize: '14px',
+                              fontWeight: '600',
+                              outline: 'none',
+                              color: '#1C1917'
+                            }}
+                          />
+                          <span style={{ position: 'absolute', right: '12px', color: '#8C6228', fontWeight: '700', fontSize: '14px' }}>
+                            %
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Interactive Calculation Formula & Live Preview */}
+                    <div style={{
+                      padding: '12px 14px',
+                      borderRadius: '8px',
+                      background: '#FAF6EE',
+                      border: '1px solid #EADBBE',
+                      fontSize: '12px',
+                      color: '#44403C',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}>
+                      <div style={{ fontWeight: '700', color: '#8C6228', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Calculator size={13} />
+                        Automated Service Incentive Formula:
+                      </div>
+                      <div style={{ fontWeight: '600', color: '#1C1917', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                        Total Payout = {formatCurrency(Number(salaryAmount) || 0)} Base + ({Number(incentivePercentage) || 0}% × Total Service Revenue Performed)
+                      </div>
+                      <div style={{ color: '#78716C', marginTop: '2px' }}>
+                        Example: If this practitioner performs ₹1,00,000 in clinical services, their incentive is ₹{formatCurrency(100000 * (Number(incentivePercentage) || 0) / 100)}, totaling {formatCurrency((Number(salaryAmount) || 0) + (100000 * (Number(incentivePercentage) || 0) / 100))}.
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '6px' }}>
                 <button
                   type="button"
                   onClick={() => setModal({ open: false, mode: 'create', data: null })}
                   className="btn-secondary"
+                  style={{ padding: '10px 20px', borderRadius: '8px' }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary">
-                  Save Staff Member
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ padding: '10px 24px', borderRadius: '8px', fontWeight: '700' }}
+                >
+                  {modal.mode === 'create' ? 'Save Staff Member' : 'Update Staff Member'}
                 </button>
               </div>
             </form>

@@ -120,6 +120,13 @@ export function initDatabase() {
       phone TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       location_id INTEGER REFERENCES LOCATIONS(location_id),
+      aadhaar_number TEXT,
+      aadhaar_doc TEXT,
+      pan_number TEXT,
+      pan_doc TEXT,
+      salary_type TEXT DEFAULT 'fixed',
+      salary_amount REAL DEFAULT 0.0,
+      incentive_percentage REAL DEFAULT 0.0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -423,6 +430,13 @@ export function initDatabase() {
   // Safe migrations for location_id columns
   try { db.exec(`ALTER TABLE USERS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_number TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_doc TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_number TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_doc TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_type TEXT DEFAULT 'fixed';`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_amount REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN incentive_percentage REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_type TEXT;`); } catch(e) {}
