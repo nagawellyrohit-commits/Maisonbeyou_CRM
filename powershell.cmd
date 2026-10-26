@@ -1,2 +1,2 @@
 @echo off
-node scratch/push.cjs
+node scratch/runner.cjs %*

@@ -1234,22 +1234,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Clients Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'clients' && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
-            border: '1.5px solid #DAC493',
-            borderRadius: '12px',
-            padding: '12px 20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Users size={18} color="#B88B4A" />
-              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                CLIENTS DIRECTORY
-              </span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1289,22 +1274,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Services Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'services' && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
-            border: '1.5px solid #DAC493',
-            borderRadius: '12px',
-            padding: '12px 20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Scissors size={18} color="#B88B4A" />
-              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                SERVICE & PRICING MANAGEMENT
-              </span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1341,22 +1311,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'staff' && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
-            border: '1.5px solid #DAC493',
-            borderRadius: '12px',
-            padding: '12px 20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Award size={18} color="#B88B4A" />
-              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                STAFF & PRACTITIONERS MANAGEMENT
-              </span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1393,22 +1348,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'reports' && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
-            border: '1.5px solid #DAC493',
-            borderRadius: '12px',
-            padding: '12px 20px',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <BarChart3 size={18} color="#B88B4A" />
-              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                STUDIO REPORTS & ANALYTICS
-              </span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
