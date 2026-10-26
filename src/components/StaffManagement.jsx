@@ -182,12 +182,9 @@ export default function StaffManagement() {
           <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#B88B4A', fontWeight: '700' }}>
             Team Management & KYC
           </div>
-          <h1 style={{ fontSize: '28px', color: '#1C1917' }}>
+          <h1 style={{ fontSize: '28px', color: '#1C1917', margin: 0 }}>
             STUDIO PRACTITIONERS & STAFF
           </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Service providers with KYC verification, Aadhaar/PAN compliance, and automated service incentive calculations.
-          </p>
         </div>
 
         <button
