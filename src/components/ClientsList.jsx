@@ -38,10 +38,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: '0 0 6px 0' }}>Client Directory</h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-            Search registered clients, review treatment dossiers, and track 90-day engagement status.
-          </p>
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0 }}>Client Directory</h1>
         </div>
 
         {/* 90-Day Policy Badge */}

@@ -611,11 +611,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
                 New Clients
               </div>
-              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <UserPlus size={19} color="#166534" />
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <UserPlus size={19} color="#B88B4A" />
               </div>
             </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#166534', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+            <div style={{ fontSize: '32px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
               {summary.new_clients}
             </div>
           </div>
@@ -636,11 +636,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
                     Regular Clients
                   </div>
-                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <UserCheck size={19} color="#1E40AF" />
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <UserCheck size={19} color="#B88B4A" />
                   </div>
                 </div>
-                <div style={{ fontSize: '32px', fontWeight: '800', color: '#1E40AF', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                <div style={{ fontSize: '32px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
                   {summary.regular_clients}
                 </div>
               </div>
@@ -658,11 +658,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
                     Membership Redeemed
                   </div>
-                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: '#FAF5FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Crown size={19} color="#7E22CE" />
+                  <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Crown size={19} color="#B88B4A" />
                   </div>
                 </div>
-                <div style={{ fontSize: '30px', fontWeight: '800', color: '#7E22CE', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                <div style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
                   {formatCurrency(summary.membership_revenue || 0)}
                 </div>
               </div>
@@ -674,19 +674,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 flexDirection: 'column',
                 justifyContent: 'space-between',
                 minHeight: '124px',
-                boxSizing: 'border-box',
-                background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)',
-                border: '1.5px solid var(--primary-border)'
+                boxSizing: 'border-box'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
-                  <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: '#B88B4A', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                  <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
                     Revenue Today
                   </div>
                   <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <IndianRupee size={19} color="#B88B4A" />
                   </div>
                 </div>
-                <div style={{ fontSize: '30px', fontWeight: '800', color: '#1C1917', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+                <div style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
                   {formatCurrency(summary.total_revenue)}
                 </div>
               </div>
@@ -706,11 +704,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
                 Pending Balance
               </div>
-              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: summary.pending_balance > 0 ? 'var(--danger-bg)' : 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <AlertCircle size={19} color={summary.pending_balance > 0 ? '#DC2626' : 'var(--text-muted)'} />
+              <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertCircle size={19} color="#B88B4A" />
               </div>
             </div>
-            <div style={{ fontSize: '30px', fontWeight: '800', color: summary.pending_balance > 0 ? '#DC2626' : 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
+            <div style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
               {formatCurrency(summary.pending_balance)}
             </div>
           </div>
