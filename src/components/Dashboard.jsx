@@ -786,79 +786,85 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       {/* Client Name */}
-                      <td style={{ padding: '14px 20px', verticalAlign: 'middle' }}>
-                        {isAdmin ? (
-                          <div
-                            onClick={() => onOpenClient(v.client_id)}
-                            style={{ fontWeight: '600', color: '#1C1917', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s' }}
-                            onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
-                            onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
-                          >
-                            {v.client_name}
-                          </div>
-                        ) : (
-                          <div style={{ fontWeight: '600', color: '#1C1917' }}>
-                            {v.client_name}
-                          </div>
-                        )}
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      <td style={{ padding: '14px 20px', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                          {isAdmin ? (
+                            <div
+                              onClick={() => onOpenClient(v.client_id)}
+                              style={{ fontWeight: '600', color: '#1C1917', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.2s', lineHeight: '20px' }}
+                              onMouseEnter={(e) => e.currentTarget.style.textDecorationColor = '#B88B4A'}
+                              onMouseLeave={(e) => e.currentTarget.style.textDecorationColor = 'transparent'}
+                            >
+                              {v.client_name}
+                            </div>
+                          ) : (
+                            <div style={{ fontWeight: '600', color: '#1C1917', lineHeight: '20px' }}>
+                              {v.client_name}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: '16px' }}>
                           {formatPhone(v.client_phone)}
                         </div>
                       </td>
 
                       {/* New / Regular */}
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        {v.is_new_client ? (
-                          <span className="badge badge-paid" style={{ fontSize: '11px' }}>
-                            New Client
-                          </span>
-                        ) : (
-                          <span className="badge badge-neutral" style={{ fontSize: '11px' }}>
-                            Regular Client
-                          </span>
-                        )}
+                      <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                          {v.is_new_client ? (
+                            <span className="badge badge-paid" style={{ fontSize: '11px', lineHeight: '16px' }}>
+                              New Client
+                            </span>
+                          ) : (
+                            <span className="badge badge-neutral" style={{ fontSize: '11px', lineHeight: '16px' }}>
+                              Regular Client
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Services */}
-                      <td style={{ padding: '14px 16px', maxWidth: '320px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '14px 16px', maxWidth: '320px', verticalAlign: 'top' }}>
                         {v.services && v.services.length > 1 ? (
                           <div
                             style={{ position: 'relative', display: 'inline-block' }}
                             onMouseEnter={() => setHoveredServicesVisitId(v.visit_id)}
                             onMouseLeave={() => setHoveredServicesVisitId(null)}
                           >
-                            <div
-                              onClick={() => setHoveredServicesVisitId(prev => prev === v.visit_id ? null : v.visit_id)}
-                              title="Hover or click to view all services"
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                padding: '5px 12px',
-                                borderRadius: '9999px',
-                                background: hoveredServicesVisitId === v.visit_id ? '#F5ECE0' : 'var(--bg-card-subtle)',
-                                border: `1.5px solid ${hoveredServicesVisitId === v.visit_id ? '#B88B4A' : 'rgba(218, 196, 147, 0.65)'}`,
-                                color: '#B88B4A',
-                                fontWeight: '700',
-                                fontSize: '12px',
-                                cursor: 'pointer',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
-                                transition: 'all 0.15s ease'
-                              }}
-                            >
-                              <Scissors size={13} color="#B88B4A" />
-                              <span>{v.services.length} Services</span>
-                              <ChevronDown
-                                size={13}
-                                color="#B88B4A"
+                            <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                              <div
+                                onClick={() => setHoveredServicesVisitId(prev => prev === v.visit_id ? null : v.visit_id)}
+                                title="Hover or click to view all services"
                                 style={{
-                                  transform: hoveredServicesVisitId === v.visit_id ? 'rotate(180deg)' : 'none',
-                                  transition: 'transform 0.15s ease'
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  padding: '4px 10px',
+                                  borderRadius: '9999px',
+                                  background: hoveredServicesVisitId === v.visit_id ? '#F5ECE0' : 'var(--bg-card-subtle)',
+                                  border: `1.5px solid ${hoveredServicesVisitId === v.visit_id ? '#B88B4A' : 'rgba(218, 196, 147, 0.65)'}`,
+                                  color: '#B88B4A',
+                                  fontWeight: '700',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                                  transition: 'all 0.15s ease'
                                 }}
-                              />
+                              >
+                                <Scissors size={13} color="#B88B4A" />
+                                <span>{v.services.length} Services</span>
+                                <ChevronDown
+                                  size={13}
+                                  color="#B88B4A"
+                                  style={{
+                                    transform: hoveredServicesVisitId === v.visit_id ? 'rotate(180deg)' : 'none',
+                                    transition: 'transform 0.15s ease'
+                                  }}
+                                />
+                              </div>
                             </div>
 
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', paddingLeft: '4px' }}>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '2px', lineHeight: '16px' }}>
                               {v.services[0]?.service_name_snapshot} + {v.services.length - 1} more
                             </div>
 
@@ -941,10 +947,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           </div>
                         ) : (
                           <div>
-                            <div style={{ fontWeight: '500', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {v.service_names || 'General Service'}
+                            <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                              <div style={{ fontWeight: '500', color: 'var(--text-main)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '20px' }}>
+                                {v.service_names || 'General Service'}
+                              </div>
                             </div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: '16px' }}>
                               1 service
                             </div>
                           </div>
@@ -952,27 +960,31 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Amount */}
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>
-                          {formatCurrency(v.total_amount)}
+                      <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                          <div style={{ fontWeight: '700', color: 'var(--text-main)', lineHeight: '20px' }}>
+                            {formatCurrency(v.total_amount)}
+                          </div>
                         </div>
                         {v.balance > 0 && (
-                          <div style={{ fontSize: '11px', color: '#DC2626', fontWeight: '500' }}>
+                          <div style={{ fontSize: '12px', color: '#DC2626', fontWeight: '500', marginTop: '4px', lineHeight: '16px' }}>
                             Bal: {formatCurrency(v.balance)}
                           </div>
                         )}
                       </td>
 
                       {/* Payment Status */}
-                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span
                             onClick={() => handleCheckPayment(v)}
                             className={`badge ${statusBadgeClass}`}
                             title={v.payment_status === 'Paid' && v.payment_method === 'UPI' ? "Click to view UPI Reference ID & Amount" : "Click to check & collect payment"}
                             style={{
                               cursor: 'pointer',
-                              transition: 'transform 0.1s ease'
+                              transition: 'transform 0.1s ease',
+                              fontSize: '11px',
+                              lineHeight: '16px'
                             }}
                           >
                             {v.payment_status}
@@ -1006,7 +1018,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             intendedLabel = `Prefers: Credits (${formatCurrency(usedCredits)}) + ${methodLabel} (${formatCurrency(v.balance)})`;
                           }
                           return (
-                            <div style={{ fontSize: '11px', color: '#92400E', fontWeight: '600', marginTop: '3px' }}>
+                            <div style={{ fontSize: '12px', color: '#92400E', fontWeight: '600', marginTop: '4px', lineHeight: '16px' }}>
                               {intendedLabel}
                             </div>
                           );
@@ -1024,7 +1036,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           }
 
                           return (
-                            <div style={{ fontSize: '11px', color: '#166534', fontWeight: '600', marginTop: '3px' }}>
+                            <div style={{ fontSize: '12px', color: '#166534', fontWeight: '600', marginTop: '4px', lineHeight: '16px' }}>
                               {displayMethod}
                             </div>
                           );
@@ -1032,15 +1044,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Staff */}
-                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', fontSize: '13px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', fontSize: '13px', verticalAlign: 'top' }}>
                         {(() => {
                           const unassignedCount = (v.services || []).filter(s => !s.staff_id).length;
                           const totalServices = v.services?.length || 1;
 
                           if (unassignedCount === 0 && v.staff_summary && v.staff_summary !== 'Unassigned') {
                             return (
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                <span style={{ fontWeight: '600', color: '#166534' }}>{v.staff_summary}</span>
+                              <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: '600', color: '#166534', lineHeight: '20px' }}>{v.staff_summary}</span>
                                 {!isAdmin && (
                                   <button
                                     onClick={() => handleOpenStaffModal(v)}
@@ -1064,103 +1076,111 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
                           if (unassignedCount > 0 && unassignedCount < totalServices) {
                             return (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <span style={{ fontWeight: '600', color: '#166534', fontSize: '12px' }}>
-                                  {v.staff_summary}
-                                </span>
-                                <button
-                                  onClick={() => handleOpenStaffModal(v)}
-                                  style={{
-                                    padding: '3px 9px',
-                                    borderRadius: '9999px',
-                                    background: '#FEF3C7',
-                                    border: '1px solid #F59E0B',
-                                    color: '#92400E',
-                                    fontSize: '11px',
-                                    fontWeight: '700',
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    width: 'fit-content'
-                                  }}
-                                >
-                                  <Award size={12} />
-                                  Assign Staff
-                                </button>
+                              <div>
+                                <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: '600', color: '#166534', fontSize: '12px', lineHeight: '18px' }}>
+                                    {v.staff_summary}
+                                  </span>
+                                </div>
+                                <div style={{ marginTop: '4px' }}>
+                                  <button
+                                    onClick={() => handleOpenStaffModal(v)}
+                                    style={{
+                                      padding: '3px 9px',
+                                      borderRadius: '9999px',
+                                      background: '#FEF3C7',
+                                      border: '1px solid #F59E0B',
+                                      color: '#92400E',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      width: 'fit-content'
+                                    }}
+                                  >
+                                    <Award size={12} />
+                                    Assign Staff
+                                  </button>
+                                </div>
                               </div>
                             );
                           }
 
                           return (
-                            <button
-                              onClick={() => handleOpenStaffModal(v)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: '9999px',
-                                background: '#FEF2F2',
-                                border: '1px solid #FCA5A5',
-                                color: '#DC2626',
-                                fontSize: '11px',
-                                fontWeight: '700',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
-                              }}
-                            >
-                              <Award size={12} />
-                              Assign Staff
-                            </button>
+                            <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                              <button
+                                onClick={() => handleOpenStaffModal(v)}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: '9999px',
+                                  background: '#FEF2F2',
+                                  border: '1px solid #FCA5A5',
+                                  color: '#DC2626',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Award size={12} />
+                                Assign Staff
+                              </button>
+                            </div>
                           );
                         })()}
                       </td>
 
                       {/* Service Timing (Editable) */}
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenTimeModal(v)}
-                          title="Click to edit assigned service timing"
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '5px 11px',
-                            borderRadius: '9999px',
-                            background: '#FAF6EE',
-                            border: '1.5px solid #DAC493',
-                            color: '#855E17',
-                            fontWeight: '700',
-                            fontSize: '12.5px',
-                            cursor: 'pointer',
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = '#F5ECCE';
-                            e.currentTarget.style.borderColor = '#B88B4A';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = '#FAF6EE';
-                            e.currentTarget.style.borderColor = '#DAC493';
-                          }}
-                        >
-                          <Clock size={13} color="#B88B4A" />
-                          <span>{v.service_time || visitTime}</span>
-                          <Edit2 size={11} color="#B88B4A" style={{ marginLeft: '1px', opacity: 0.85 }} />
-                        </button>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenTimeModal(v)}
+                            title="Click to edit assigned service timing"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '4px 11px',
+                              borderRadius: '9999px',
+                              background: '#FAF6EE',
+                              border: '1.5px solid #DAC493',
+                              color: '#855E17',
+                              fontWeight: '700',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = '#F5ECCE';
+                              e.currentTarget.style.borderColor = '#B88B4A';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = '#FAF6EE';
+                              e.currentTarget.style.borderColor = '#DAC493';
+                            }}
+                          >
+                            <Clock size={13} color="#B88B4A" />
+                            <span>{v.service_time || visitTime}</span>
+                            <Edit2 size={11} color="#B88B4A" style={{ marginLeft: '1px', opacity: 0.85 }} />
+                          </button>
+                        </div>
                       </td>
 
                       {/* Actions */}
-                      <td style={{ padding: '14px 20px', textAlign: 'right', verticalAlign: 'middle' }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                        <div style={{ minHeight: '26px', display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
 
                           <button
                             onClick={() => onOpenReceipt(v.visit_id)}
                             title="View / Print Receipt"
                             style={{
-                              padding: '6px 10px',
+                              padding: '4px 10px',
                               borderRadius: 'var(--radius-sm)',
                               background: 'var(--bg-surface)',
                               border: '1px solid var(--border-color)',
@@ -1182,7 +1202,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               onClick={() => onOpenClient(v.client_id)}
                               title="Open Client Profile"
                               style={{
-                                padding: '6px 10px',
+                                padding: '4px 10px',
                                 borderRadius: 'var(--radius-sm)',
                                 background: 'var(--primary-subtle)',
                                 border: '1px solid var(--primary-border)',
