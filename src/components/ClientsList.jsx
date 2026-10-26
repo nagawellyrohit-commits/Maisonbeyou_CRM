@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, UserCheck, Eye, ArrowRight, Clock, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
+import { Search, UserCheck, Eye, ArrowRight, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
 export default function ClientsList({ onOpenClient, onBackToDashboard }) {
@@ -39,23 +39,6 @@ export default function ClientsList({ onOpenClient, onBackToDashboard }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>Client Directory</h1>
-        </div>
-
-        {/* 90-Day Policy Badge */}
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: '#FAF6EE',
-          border: '1px solid #DAC493',
-          padding: '6px 14px',
-          borderRadius: '9999px',
-          fontSize: '12px',
-          color: '#8C6228',
-          fontWeight: '600'
-        }}>
-          <Clock size={14} color="#B88B4A" />
-          <span>90-Day Inactivity Rule: Clients with no visit in &gt;90 days are marked Inactive</span>
         </div>
       </div>
 
