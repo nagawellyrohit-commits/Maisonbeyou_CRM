@@ -88,12 +88,19 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     window.dispatchEvent(new Event('auth_change'));
   };
 
-  const handleQuickSwitch = async (roleEmail, rolePass) => {
+  const handleQuickSwitchRole = async (targetRole) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const activeLocId = activeLocation?.location_id || currentUser?.location_id;
+      const res = await fetch('/api/auth/switch-role', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: roleEmail, password: rolePass })
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {})
+        },
+        body: JSON.stringify({
+          role: targetRole,
+          location_id: activeLocId
+        })
       });
       const data = await res.json();
       if (res.ok) {
@@ -107,23 +114,29 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
           // Master Admin sees all branches first, so clear any pre-selected location
           setStoredLocation(null);
           if (onSwitchLocation) onSwitchLocation();
-        } else if (data.user?.role === 'visitor') {
-          const defaultLoc = { location_id: 1, name: 'Maison BeYou — Jubilee Hills Flagship', code: 'MB-JH-01', type: 'branch' };
-          setStoredLocation(defaultLoc);
-          setActiveTab('new-visit');
         } else {
-          // Regular branch admin / reception: locked to their location (default 1)
-          const locId = data.user.location_id || 1;
-          const defaultLoc = { location_id: locId, name: 'Maison BeYou — Jubilee Hills Flagship', code: 'MB-JH-01', type: 'branch' };
-          setStoredLocation(defaultLoc);
-          setActiveTab('dashboard');
+          // Branch accounts are locked to their branch assignment
+          const targetLoc = data.location || activeLocation || null;
+          if (targetLoc) {
+            setStoredLocation(targetLoc);
+          }
+          if (data.user?.role === 'visitor') {
+            setActiveTab('new-visit');
+          } else {
+            setActiveTab('dashboard');
+          }
         }
         window.dispatchEvent(new Event('auth_change'));
+      } else {
+        alert(data.error || 'Failed to switch desk role');
       }
     } catch (e) {
-      console.error(e);
+      console.error('Quick switch error:', e);
+      alert('Network error switching desk role');
     }
   };
+
+  const handleQuickSwitch = handleQuickSwitchRole;
 
   const roleLabels = {
     master_admin: 'Master Administrator',
@@ -1169,29 +1182,31 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   zIndex: 100
                 }}>
                   <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-light)', padding: '6px 8px' }}>
-                    Switch Active Role (Demo)
+                    {activeLocation ? `Active Desk (${activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name})` : 'Switch Active Role'}
                   </div>
                   
-                  <button
-                    onClick={() => handleQuickSwitch('master@maisonbeyou.com', 'master123')}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      fontSize: '13px',
-                      background: currentUser?.role === 'master_admin' ? 'var(--primary-subtle)' : 'transparent',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ fontWeight: '700', color: '#9F7335' }}>Master Admin</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Multi-Studio Governance & Control</span>
-                  </button>
+                  {(currentUser?.role === 'master_admin' || !activeLocation) && (
+                    <button
+                      onClick={() => handleQuickSwitchRole('master_admin')}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13px',
+                        background: currentUser?.role === 'master_admin' ? 'var(--primary-subtle)' : 'transparent',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <span style={{ fontWeight: '700', color: '#9F7335' }}>👑 Master Admin</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Multi-Studio Governance & Control</span>
+                    </button>
+                  )}
 
                   <button
-                    onClick={() => handleQuickSwitch('admin@maisonbeyou.com', 'admin123')}
+                    onClick={() => handleQuickSwitchRole('admin')}
                     style={{
                       width: '100%',
                       textAlign: 'left',
@@ -1204,12 +1219,14 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       cursor: 'pointer'
                     }}
                   >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Maison Admin</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Admin • Full System & Edit Access</span>
+                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                      🏢 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Admin' : 'Studio Admin'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Admin • Full Studio Operations & Reports</span>
                   </button>
 
                   <button
-                    onClick={() => handleQuickSwitch('reception@maisonbeyou.com', 'reception123')}
+                    onClick={() => handleQuickSwitchRole('reception')}
                     style={{
                       width: '100%',
                       textAlign: 'left',
@@ -1222,12 +1239,14 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       cursor: 'pointer'
                     }}
                   >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Reception Desk</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard & Client Intake</span>
+                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                      🛎️ {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Reception' : 'Reception Desk'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard, Billing & Visits</span>
                   </button>
 
                   <button
-                    onClick={() => handleQuickSwitch('visitor@maisonbeyou.com', 'visitor123')}
+                    onClick={() => handleQuickSwitchRole('visitor')}
                     style={{
                       width: '100%',
                       textAlign: 'left',
@@ -1240,8 +1259,10 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       cursor: 'pointer'
                     }}
                   >
-                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Visitor Desk</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Direct Client Intake Flow</span>
+                    <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                      📋 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Visitor Desk' : 'Visitor Desk'}
+                    </span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Client Check-in & Intake Flow</span>
                   </button>
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />

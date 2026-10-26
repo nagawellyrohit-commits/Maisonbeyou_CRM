@@ -1,2 +1,2 @@
 @echo off
-node "c:\Projects\MaisonBeyouCRM\scratch\push.cjs"
+node scratch/push.cjs

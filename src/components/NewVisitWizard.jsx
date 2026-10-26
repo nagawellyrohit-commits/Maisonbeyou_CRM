@@ -145,7 +145,7 @@ export const getTodayDateStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-export default function NewVisitWizard({ preSelectedClient, initialType, onCancel, onComplete, onClientChange, onCartChange, currentUser }) {
+export default function NewVisitWizard({ preSelectedClient, initialType, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation }) {
   // Wizard Steps:
   // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'billing-payment' -> 'confirmation'
   const [step, setStep] = useState(() => {
@@ -1696,6 +1696,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       }
 
       const payload = {
+        location_id: selectedLocation?.location_id || currentUser?.location_id || undefined,
         client_type: clientType,
         client_id: clientType === 'regular' ? selectedRegularClient?.client_id : null,
         name: clientType === 'new' ? clientName : selectedRegularClient?.name,
@@ -1894,6 +1895,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           primary_login_email: primaryLoginEmail,
           mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
           email_ids: clientEmails.filter(e => e.trim().length > 0),
+          location_id: selectedLocation?.location_id || currentUser?.location_id || undefined,
           notes: ''
         })
       });
@@ -1994,6 +1996,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           primary_login_email: primaryLoginEmail,
           mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
           email_ids: clientEmails.filter(e => e.trim().length > 0),
+          location_id: selectedLocation?.location_id || currentUser?.location_id || undefined,
           notes: ''
         })
       });

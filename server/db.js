@@ -1110,8 +1110,9 @@ export function ensureLocationAccounts(location) {
   const salt = bcrypt.genSaltSync(10);
   const defaultPass = `${cleanCode}123`;
   const defaultHash = bcrypt.hashSync(defaultPass, salt);
+  const phone = (location.primary_login_phone || location.phone || '').trim() || null;
 
-  const existingUsers = db.prepare('SELECT role FROM USERS WHERE location_id = ?').all(locId);
+  const existingUsers = db.prepare('SELECT role, user_id, phone FROM USERS WHERE location_id = ?').all(locId);
   const existingRoles = new Set(existingUsers.map(u => u.role));
 
   const created = [];
@@ -1131,7 +1132,7 @@ export function ensureLocationAccounts(location) {
       const res = db.prepare(`
         INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
         VALUES (?, ?, ?, ?, ?, 1, ?)
-      `).run(r.title, targetEmail, null, defaultHash, r.role, locId);
+      `).run(r.title, targetEmail, phone, defaultHash, r.role, locId);
 
       created.push({
         user_id: res.lastInsertRowid,
@@ -1139,6 +1140,12 @@ export function ensureLocationAccounts(location) {
         email: targetEmail,
         location_id: locId
       });
+    } else {
+      // Sync phone number if missing
+      const existing = existingUsers.find(u => u.role === r.role);
+      if (existing && !existing.phone && phone) {
+        db.prepare('UPDATE USERS SET phone = ? WHERE user_id = ?').run(phone, existing.user_id);
+      }
     }
   }
   return created;

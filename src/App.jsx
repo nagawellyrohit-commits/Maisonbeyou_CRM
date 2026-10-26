@@ -86,11 +86,17 @@ export default function App() {
             } else {
               setActiveTab('dashboard');
             }
-          } else if (res.user?.role === 'visitor') {
-            setActiveTab('new-visit');
           } else {
-            setActiveTab('dashboard');
-            setActiveVisitClient(null);
+            if (res.location) {
+              setSelectedLocation(res.location);
+              setStoredLocation(res.location);
+            }
+            if (res.user?.role === 'visitor') {
+              setActiveTab('new-visit');
+            } else {
+              setActiveTab('dashboard');
+              setActiveVisitClient(null);
+            }
           }
         })
         .catch(() => {
@@ -163,7 +169,7 @@ export default function App() {
   if (!currentUser) {
     return (
       <Login
-        onLoginSuccess={(user) => {
+        onLoginSuccess={(user, location) => {
           setCurrentUser(user);
           setActiveVisitClient(null);
           setPreSelectedVisitClient(null);
@@ -173,11 +179,18 @@ export default function App() {
             setSelectedLocation(null);
             setStoredLocation(null);
             setMasterAdminView('types');
-          } else if (user?.role === 'visitor') {
-            setActiveTab('new-visit');
-            setWizardResetKey(k => k + 1);
           } else {
-            setActiveTab('dashboard');
+            const locToSet = location || user?.location || null;
+            if (locToSet) {
+              setSelectedLocation(locToSet);
+              setStoredLocation(locToSet);
+            }
+            if (user?.role === 'visitor') {
+              setActiveTab('new-visit');
+              setWizardResetKey(k => k + 1);
+            } else {
+              setActiveTab('dashboard');
+            }
           }
         }}
       />
@@ -291,6 +304,7 @@ export default function App() {
             preSelectedClient={preSelectedVisitClient}
             initialType={initialVisitType}
             currentUser={currentUser}
+            selectedLocation={selectedLocation}
             onClientChange={(client) => setActiveVisitClient(client)}
             onCartChange={setCartInfo}
             onCancel={() => {
