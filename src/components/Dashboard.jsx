@@ -757,18 +757,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           </div>
         ) : (
           <div className="horizontal-scroller" style={{ overflowX: 'auto', minHeight: '260px' }}>
-            <table style={{ width: '100%', minWidth: '960px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+            <table style={{ width: '100%', minWidth: '880px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
               <thead>
                 <tr style={{ background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  <th style={{ padding: '14px 20px', fontWeight: '600' }}>Client Name</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Type</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Services</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Amount</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Payment Status</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Staff</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Service Timing</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Form Filled</th>
-                  <th style={{ padding: '14px 20px', fontWeight: '600', textAlign: 'right' }}>Actions</th>
+                  <th style={{ padding: '14px 20px', fontWeight: '600', verticalAlign: 'middle' }}>Client Name</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Type</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Services</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Amount</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Payment Status</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Staff</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Service Timing</th>
+                  <th style={{ padding: '14px 20px', fontWeight: '600', textAlign: 'right', verticalAlign: 'middle' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -787,7 +786,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       {/* Client Name */}
-                      <td style={{ padding: '14px 20px' }}>
+                      <td style={{ padding: '14px 20px', verticalAlign: 'middle' }}>
                         {isAdmin ? (
                           <div
                             onClick={() => onOpenClient(v.client_id)}
@@ -808,7 +807,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* New / Regular */}
-                      <td style={{ padding: '14px 16px' }}>
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                         {v.is_new_client ? (
                           <span className="badge badge-paid" style={{ fontSize: '11px' }}>
                             New Client
@@ -821,7 +820,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Services */}
-                      <td style={{ padding: '14px 16px', maxWidth: '320px' }}>
+                      <td style={{ padding: '14px 16px', maxWidth: '320px', verticalAlign: 'middle' }}>
                         {v.services && v.services.length > 1 ? (
                           <div
                             style={{ position: 'relative', display: 'inline-block' }}
@@ -953,7 +952,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Amount */}
-                      <td style={{ padding: '14px 16px' }}>
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                         <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>
                           {formatCurrency(v.total_amount)}
                         </div>
@@ -965,7 +964,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Payment Status */}
-                      <td style={{ padding: '14px 16px' }}>
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span
                             onClick={() => handleCheckPayment(v)}
@@ -1033,7 +1032,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Staff */}
-                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', fontSize: '13px' }}>
+                      <td style={{ padding: '14px 16px', color: 'var(--text-main)', fontSize: '13px', verticalAlign: 'middle' }}>
                         {(() => {
                           const unassignedCount = (v.services || []).filter(s => !s.staff_id).length;
                           const totalServices = v.services?.length || 1;
@@ -1118,7 +1117,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </td>
 
                       {/* Service Timing (Editable) */}
-                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
                         <button
                           type="button"
                           onClick={() => handleOpenTimeModal(v)}
@@ -1153,16 +1152,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         </button>
                       </td>
 
-                      {/* Form Filled */}
-                      <td style={{ padding: '14px 16px', color: 'var(--text-muted)', fontSize: '13px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--text-main)', fontWeight: '500' }}>
-                          <FileText size={13} color="var(--text-light)" />
-                          <span>{visitTime}</span>
-                        </div>
-                      </td>
-
                       {/* Actions */}
-                      <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', verticalAlign: 'middle' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
 
                           <button
