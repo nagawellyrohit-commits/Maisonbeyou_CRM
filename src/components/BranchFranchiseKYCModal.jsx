@@ -3,9 +3,10 @@ import {
   Building2, Handshake, X, ArrowLeft, ArrowRight, Plus, Trash2,
   Upload, FileText, CheckCircle2, AlertCircle, Eye, RefreshCw,
   Phone, Mail, Calendar, MapPin, ShieldCheck, User, ExternalLink,
-  Key, Lock, EyeOff, Copy, Check
+  Key, Lock, EyeOff, Copy, Check, HelpCircle
 } from 'lucide-react';
 import LuxuryDatePicker from './LuxuryDatePicker';
+import LoginPreferenceSelector from './LoginPreferenceSelector';
 import { apiRequest } from '../utils/api';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
@@ -61,6 +62,27 @@ export default function BranchFranchiseKYCModal({
     return [locationToEdit?.email || ''];
   });
 
+  // Primary Login Preferences
+  const [primaryLoginPhone, setPrimaryLoginPhone] = useState(() => {
+    return (
+      locationToEdit?.primary_login_phone ||
+      locationToEdit?.kyc?.primary_login_phone ||
+      (locationToEdit?.kyc?.mobile_numbers?.length > 0 ? locationToEdit.kyc.mobile_numbers[0] : '') ||
+      locationToEdit?.phone ||
+      ''
+    );
+  });
+
+  const [primaryLoginEmail, setPrimaryLoginEmail] = useState(() => {
+    return (
+      locationToEdit?.primary_login_email ||
+      locationToEdit?.kyc?.primary_login_email ||
+      (locationToEdit?.kyc?.email_ids?.length > 0 ? locationToEdit.kyc.email_ids[0] : '') ||
+      locationToEdit?.email ||
+      ''
+    );
+  });
+
   // Helper to ensure multi-item lists (arrays or JSON strings)
   const ensureList = (val, fallback = '') => {
     if (Array.isArray(val) && val.length > 0) return val;
@@ -82,8 +104,10 @@ export default function BranchFranchiseKYCModal({
     name: '',
     mobile: '',
     mobile_numbers: [''],
+    primary_login_phone: '',
     email: '',
     email_ids: [''],
+    primary_login_email: '',
     gender: 'Female',
     dob: '',
     marital_status: 'Unmarried',
@@ -110,8 +134,10 @@ export default function BranchFranchiseKYCModal({
           name: s.name || '',
           mobile: mList[0] || s.mobile || '',
           mobile_numbers: mList,
+          primary_login_phone: s.primary_login_phone || mList[0] || s.mobile || '',
           email: eList[0] || s.email || '',
           email_ids: eList,
+          primary_login_email: s.primary_login_email || eList[0] || s.email || '',
           gender: s.gender || 'Female',
           dob: s.dob || '',
           marital_status: s.marital_status || 'Unmarried',
@@ -215,6 +241,10 @@ export default function BranchFranchiseKYCModal({
           items.push(createEmptyStakeholder(targetRole));
         }
         setStakeholders(items);
+        setMobileNumbers(['']);
+        setEmailIds(['']);
+        setPrimaryLoginPhone('');
+        setPrimaryLoginEmail('');
         setValidationErrors({});
         setFirmPan('');
         setFirmPanDoc('');
@@ -231,6 +261,31 @@ export default function BranchFranchiseKYCModal({
         setBankAccountNumber('');
         setBankIfscCode('');
       } else {
+        const initMobiles = locationToEdit.kyc?.mobile_numbers?.length > 0
+          ? locationToEdit.kyc.mobile_numbers
+          : ensureList(locationToEdit.phone, '');
+        setMobileNumbers(initMobiles);
+
+        const initEmails = locationToEdit.kyc?.email_ids?.length > 0
+          ? locationToEdit.kyc.email_ids
+          : ensureList(locationToEdit.email, '');
+        setEmailIds(initEmails);
+
+        setPrimaryLoginPhone(
+          locationToEdit.primary_login_phone ||
+          locationToEdit.kyc?.primary_login_phone ||
+          initMobiles[0] ||
+          locationToEdit.phone ||
+          ''
+        );
+        setPrimaryLoginEmail(
+          locationToEdit.primary_login_email ||
+          locationToEdit.kyc?.primary_login_email ||
+          initEmails[0] ||
+          locationToEdit.email ||
+          ''
+        );
+
         const targetRole = initialFirm === 'Proprietor' ? 'Proprietor' : (initialFirm === 'Partnership' ? 'Partner' : 'Director');
         const minRequired = (initialFirm === 'Pvt. Ltd.' || initialFirm === 'LLP') ? 3 : (initialFirm === 'Partnership' ? 2 : 1);
         if (locationToEdit.stakeholders && locationToEdit.stakeholders.length > 0) {
@@ -242,8 +297,10 @@ export default function BranchFranchiseKYCModal({
               name: s.name || '',
               mobile: mList[0] || s.mobile || '',
               mobile_numbers: mList,
+              primary_login_phone: s.primary_login_phone || mList[0] || s.mobile || '',
               email: eList[0] || s.email || '',
               email_ids: eList,
+              primary_login_email: s.primary_login_email || eList[0] || s.email || '',
               gender: s.gender || 'Female',
               dob: s.dob || '',
               marital_status: s.marital_status || 'Unmarried',
@@ -285,16 +342,45 @@ export default function BranchFranchiseKYCModal({
 
   const handleMobileChange = (idx, val) => {
     const clean = val.replace(/\D/g, '').slice(0, 10);
+    const oldVal = mobileNumbers[idx];
     setMobileNumbers(prev => {
       const copy = [...prev];
       copy[idx] = clean;
       return copy;
     });
+
+    if (primaryLoginPhone && primaryLoginPhone === oldVal) {
+      setPrimaryLoginPhone(clean);
+    }
   };
 
   const handleRemoveMobile = (idx) => {
     if (mobileNumbers.length <= 1) return;
+    const removedVal = mobileNumbers[idx];
     setMobileNumbers(prev => prev.filter((_, i) => i !== idx));
+    if (primaryLoginPhone && primaryLoginPhone === removedVal) {
+      setPrimaryLoginPhone('');
+    }
+  };
+
+  const handleSelectPrimaryPhone = (mob) => {
+    const clean = (mob || '').replace(/\D/g, '').slice(0, 10);
+    if (!clean || clean.length < 10) {
+      alert('Please enter a valid 10-digit mobile number before setting it as login preference');
+      return;
+    }
+    setPrimaryLoginPhone(clean);
+    if (validationErrors.primaryLoginPhone) {
+      setValidationErrors(prev => {
+        const copy = { ...prev };
+        delete copy.primaryLoginPhone;
+        return copy;
+      });
+    }
+  };
+
+  const handleChangePrimaryPhonePreference = () => {
+    setPrimaryLoginPhone('');
   };
 
   // Multiple Emails Handlers
@@ -303,16 +389,45 @@ export default function BranchFranchiseKYCModal({
   };
 
   const handleEmailChange = (idx, val) => {
+    const oldVal = emailIds[idx];
     setEmailIds(prev => {
       const copy = [...prev];
       copy[idx] = val;
       return copy;
     });
+
+    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === oldVal.trim().toLowerCase()) {
+      setPrimaryLoginEmail(val.trim().toLowerCase());
+    }
   };
 
   const handleRemoveEmail = (idx) => {
     if (emailIds.length <= 1) return;
+    const removedVal = emailIds[idx];
     setEmailIds(prev => prev.filter((_, i) => i !== idx));
+    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === removedVal.trim().toLowerCase()) {
+      setPrimaryLoginEmail('');
+    }
+  };
+
+  const handleSelectPrimaryEmail = (em) => {
+    const clean = (em || '').trim().toLowerCase();
+    if (!clean || !/^\S+@\S+\.\S+$/.test(clean)) {
+      alert('Please enter a valid email address before setting it as login preference');
+      return;
+    }
+    setPrimaryLoginEmail(clean);
+    if (validationErrors.primaryLoginEmail) {
+      setValidationErrors(prev => {
+        const copy = { ...prev };
+        delete copy.primaryLoginEmail;
+        return copy;
+      });
+    }
+  };
+
+  const handleChangePrimaryEmailPreference = () => {
+    setPrimaryLoginEmail('');
   };
 
   // Stakeholder Multiple Mobiles Handlers
@@ -339,11 +454,17 @@ export default function BranchFranchiseKYCModal({
       const cur = Array.isArray(copy[stkIdx]?.mobile_numbers) && copy[stkIdx].mobile_numbers.length > 0
         ? [...copy[stkIdx].mobile_numbers]
         : [copy[stkIdx]?.mobile || ''];
+      const oldVal = cur[mobIdx];
       cur[mobIdx] = clean;
+      let newPrimary = copy[stkIdx]?.primary_login_phone || '';
+      if (newPrimary && newPrimary === oldVal) {
+        newPrimary = clean;
+      }
       copy[stkIdx] = {
         ...copy[stkIdx],
         mobile_numbers: cur,
-        mobile: cur[0] || ''
+        mobile: cur[0] || '',
+        primary_login_phone: newPrimary
       };
       return copy;
     });
@@ -362,12 +483,54 @@ export default function BranchFranchiseKYCModal({
   const handleRemoveStakeholderMobile = (stkIdx, mobIdx) => {
     setStakeholders(prev => {
       const copy = [...prev];
-      let cur = (copy[stkIdx]?.mobile_numbers || [copy[stkIdx]?.mobile || '']).filter((_, i) => i !== mobIdx);
+      const curList = copy[stkIdx]?.mobile_numbers || [copy[stkIdx]?.mobile || ''];
+      const removedVal = curList[mobIdx];
+      let cur = curList.filter((_, i) => i !== mobIdx);
       if (cur.length === 0) cur = [''];
+      let newPrimary = copy[stkIdx]?.primary_login_phone || '';
+      if (newPrimary && newPrimary === removedVal) {
+        newPrimary = '';
+      }
       copy[stkIdx] = {
         ...copy[stkIdx],
         mobile_numbers: cur,
-        mobile: cur[0] || ''
+        mobile: cur[0] || '',
+        primary_login_phone: newPrimary
+      };
+      return copy;
+    });
+  };
+
+  const handleSelectStakeholderPrimaryPhone = (stkIdx, mob) => {
+    const clean = (mob || '').replace(/\D/g, '').slice(0, 10);
+    if (!clean || clean.length < 10) {
+      alert('Please enter a valid 10-digit mobile number before setting it as login preference');
+      return;
+    }
+    setStakeholders(prev => {
+      const copy = [...prev];
+      copy[stkIdx] = {
+        ...copy[stkIdx],
+        primary_login_phone: clean
+      };
+      return copy;
+    });
+    const prefix = `stakeholder_${stkIdx}_primary_phone`;
+    if (validationErrors[prefix]) {
+      setValidationErrors(prev => {
+        const copy = { ...prev };
+        delete copy[prefix];
+        return copy;
+      });
+    }
+  };
+
+  const handleChangeStakeholderPrimaryPhone = (stkIdx) => {
+    setStakeholders(prev => {
+      const copy = [...prev];
+      copy[stkIdx] = {
+        ...copy[stkIdx],
+        primary_login_phone: ''
       };
       return copy;
     });
@@ -396,11 +559,17 @@ export default function BranchFranchiseKYCModal({
       const cur = Array.isArray(copy[stkIdx]?.email_ids) && copy[stkIdx].email_ids.length > 0
         ? [...copy[stkIdx].email_ids]
         : [copy[stkIdx]?.email || ''];
+      const oldVal = cur[emailIdx];
       cur[emailIdx] = val;
+      let newPrimary = copy[stkIdx]?.primary_login_email || '';
+      if (newPrimary && newPrimary.toLowerCase() === oldVal.trim().toLowerCase()) {
+        newPrimary = val.trim().toLowerCase();
+      }
       copy[stkIdx] = {
         ...copy[stkIdx],
         email_ids: cur,
-        email: cur[0] || ''
+        email: cur[0] || '',
+        primary_login_email: newPrimary
       };
       return copy;
     });
@@ -419,12 +588,54 @@ export default function BranchFranchiseKYCModal({
   const handleRemoveStakeholderEmail = (stkIdx, emailIdx) => {
     setStakeholders(prev => {
       const copy = [...prev];
-      let cur = (copy[stkIdx]?.email_ids || [copy[stkIdx]?.email || '']).filter((_, i) => i !== emailIdx);
+      const curList = copy[stkIdx]?.email_ids || [copy[stkIdx]?.email || ''];
+      const removedVal = curList[emailIdx];
+      let cur = curList.filter((_, i) => i !== emailIdx);
       if (cur.length === 0) cur = [''];
+      let newPrimary = copy[stkIdx]?.primary_login_email || '';
+      if (newPrimary && newPrimary.toLowerCase() === (removedVal || '').trim().toLowerCase()) {
+        newPrimary = '';
+      }
       copy[stkIdx] = {
         ...copy[stkIdx],
         email_ids: cur,
-        email: cur[0] || ''
+        email: cur[0] || '',
+        primary_login_email: newPrimary
+      };
+      return copy;
+    });
+  };
+
+  const handleSelectStakeholderPrimaryEmail = (stkIdx, em) => {
+    const clean = (em || '').trim().toLowerCase();
+    if (!clean || !/^\S+@\S+\.\S+$/.test(clean)) {
+      alert('Please enter a valid email address before setting it as login preference');
+      return;
+    }
+    setStakeholders(prev => {
+      const copy = [...prev];
+      copy[stkIdx] = {
+        ...copy[stkIdx],
+        primary_login_email: clean
+      };
+      return copy;
+    });
+    const prefix = `stakeholder_${stkIdx}_primary_email`;
+    if (validationErrors[prefix]) {
+      setValidationErrors(prev => {
+        const copy = { ...prev };
+        delete copy[prefix];
+        return copy;
+      });
+    }
+  };
+
+  const handleChangeStakeholderPrimaryEmail = (stkIdx) => {
+    setStakeholders(prev => {
+      const copy = [...prev];
+      copy[stkIdx] = {
+        ...copy[stkIdx],
+        primary_login_email: ''
       };
       return copy;
     });
@@ -694,6 +905,19 @@ export default function BranchFranchiseKYCModal({
       errors.emailIds = 'At least one valid Email Address is required';
     }
 
+    // Validate primary login preferences
+    if (!primaryLoginPhone) {
+      errors.primaryLoginPhone = 'Please select a Primary Login Number for dashboard access authorization';
+    } else if (!mobileNumbers.includes(primaryLoginPhone)) {
+      errors.primaryLoginPhone = 'Selected Primary Login Number must be one of the entered mobile numbers';
+    }
+
+    if (!primaryLoginEmail) {
+      errors.primaryLoginEmail = 'Please select a Primary Login Email for dashboard access authorization';
+    } else if (!emailIds.map(e => e.trim().toLowerCase()).includes(primaryLoginEmail.toLowerCase())) {
+      errors.primaryLoginEmail = 'Selected Primary Login Email must be one of the entered email addresses';
+    }
+
     // Validate stakeholders
     const minStakeholders = (firmType === 'Pvt. Ltd.' || firmType === 'LLP') ? 3 : (firmType === 'Partnership' ? 2 : 1);
     if (stakeholders.length < minStakeholders) {
@@ -729,6 +953,11 @@ export default function BranchFranchiseKYCModal({
         }
       });
 
+      // Stakeholder primary login phone preference validation
+      if (!s.primary_login_phone) {
+        errors[`${prefix}primary_phone`] = `Please select a Primary Login Number for ${s.role_type} #${idx + 1}`;
+      }
+
       // Primary email is compulsory
       const primaryEmail = (sEmails[0] || '').trim();
       if (!primaryEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(primaryEmail)) {
@@ -741,6 +970,12 @@ export default function BranchFranchiseKYCModal({
           errors[`${prefix}email_${eIdx + 1}`] = `Valid email format required`;
         }
       });
+
+      // Stakeholder primary login email preference validation
+      if (!s.primary_login_email) {
+        errors[`${prefix}primary_email`] = `Please select a Primary Login Email for ${s.role_type} #${idx + 1}`;
+      }
+
       const todayDirect = new Date().toISOString().split('T')[0];
 
       if (!s.dob) {
@@ -843,6 +1078,8 @@ export default function BranchFranchiseKYCModal({
         state: state.trim(),
         mobile_numbers: mobileNumbers.filter(Boolean),
         email_ids: emailIds.filter(Boolean),
+        primary_login_phone: primaryLoginPhone,
+        primary_login_email: primaryLoginEmail,
         firm_pan: firmPan.trim().toUpperCase(),
         firm_pan_doc: firmPanDoc,
         cin_number: (firmType === 'Proprietor' || firmType === 'Partnership') ? '' : cinNumber.trim().toUpperCase(),
@@ -865,13 +1102,17 @@ export default function BranchFranchiseKYCModal({
           const eList = (Array.isArray(s.email_ids) ? s.email_ids : [s.email || ''])
             .map(e => (e || '').trim())
             .filter(Boolean);
+          const sPrimaryPhone = (s.primary_login_phone || mList[0] || (s.mobile || '')).trim();
+          const sPrimaryEmail = (s.primary_login_email || eList[0] || (s.email || '')).trim();
           return {
             ...s,
             name: s.name.trim(),
-            mobile: mList[0] || (s.mobile || '').trim(),
-            mobile_numbers: mList.length > 0 ? mList : [(s.mobile || '').trim()],
-            email: eList[0] || (s.email || '').trim(),
-            email_ids: eList.length > 0 ? eList : [(s.email || '').trim()],
+            mobile: sPrimaryPhone,
+            mobile_numbers: mList.length > 0 ? mList : [sPrimaryPhone],
+            primary_login_phone: sPrimaryPhone,
+            email: sPrimaryEmail,
+            email_ids: eList.length > 0 ? eList : [sPrimaryEmail],
+            primary_login_email: sPrimaryEmail,
             pan_number: s.pan_number.trim().toUpperCase(),
             aadhaar_number: (s.aadhaar_number || '').replace(/\D/g, ''),
             aadhaar_doc: (s.aadhaar_doc || '').trim(),
@@ -912,8 +1153,8 @@ export default function BranchFranchiseKYCModal({
           return {
             id: `stk_${idx}_${Date.now()}`,
             name: s.name || '',
-            email: s.email || '',
-            phone: s.mobile || '',
+            email: s.primary_login_email || s.email || '',
+            phone: s.primary_login_phone || s.mobile || '',
             password: 'Admin@' + Math.floor(100000 + Math.random() * 900000),
             showPassword: false,
             role_type: roleLabel,
@@ -1310,7 +1551,7 @@ export default function BranchFranchiseKYCModal({
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {mobileNumbers.map((mob, mIdx) => (
-                    <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{
                         padding: '11px 12px',
                         background: 'var(--bg-surface)',
@@ -1330,15 +1571,24 @@ export default function BranchFranchiseKYCModal({
                         onChange={(e) => handleMobileChange(mIdx, e.target.value)}
                         placeholder="10-digit mobile number"
                         style={{
-                          flex: 1,
+                          flex: '1 1 180px',
+                          minWidth: '150px',
                           padding: '12px 14px',
                           borderRadius: 'var(--radius-md)',
-                          border: '1.5px solid var(--border-color)',
+                          border: `1.5px solid ${primaryLoginPhone && mob === primaryLoginPhone ? '#B88B4A' : 'var(--border-color)'}`,
                           background: 'var(--bg-card-subtle)',
                           outline: 'none',
                           fontSize: '14px',
                           boxSizing: 'border-box'
                         }}
+                      />
+                      <LoginPreferenceSelector
+                        type="phone"
+                        itemValue={mob}
+                        isSelected={Boolean(primaryLoginPhone && mob && primaryLoginPhone === mob)}
+                        isDisabled={Boolean(primaryLoginPhone && mob !== primaryLoginPhone)}
+                        onSelect={() => handleSelectPrimaryPhone(mob)}
+                        onChangePreference={() => handleChangePrimaryPhonePreference()}
                       />
                       {mobileNumbers.length > 1 && (
                         <button
@@ -1353,7 +1603,8 @@ export default function BranchFranchiseKYCModal({
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center'
+                            justifyContent: 'center',
+                            flexShrink: 0
                           }}
                           title="Remove this mobile number"
                         >
@@ -1363,9 +1614,18 @@ export default function BranchFranchiseKYCModal({
                     </div>
                   ))}
                 </div>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <HelpCircle size={12} color="#B88B4A" />
+                  <span>Only one phone number can be authorized as the primary credential for dashboard access.</span>
+                </div>
                 {validationErrors.mobileNumbers && (
                   <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
                     {validationErrors.mobileNumbers}
+                  </div>
+                )}
+                {validationErrors.primaryLoginPhone && (
+                  <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
+                    {validationErrors.primaryLoginPhone}
                   </div>
                 )}
               </div>
@@ -1397,8 +1657,8 @@ export default function BranchFranchiseKYCModal({
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {emailIds.map((em, eIdx) => (
-                    <div key={eIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ position: 'relative', flex: 1 }}>
+                    <div key={eIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <div style={{ position: 'relative', flex: '1 1 200px', minWidth: '170px' }}>
                         <input
                           type="email"
                           value={em}
@@ -1409,7 +1669,7 @@ export default function BranchFranchiseKYCModal({
                             boxSizing: 'border-box',
                             padding: '11px 14px 11px 36px',
                             borderRadius: 'var(--radius-md)',
-                            border: '1.5px solid var(--border-color)',
+                            border: `1.5px solid ${primaryLoginEmail && em.trim().toLowerCase() === primaryLoginEmail.toLowerCase() ? '#B88B4A' : 'var(--border-color)'}`,
                             background: 'var(--bg-card-subtle)',
                             outline: 'none',
                             fontSize: '14px'
@@ -1417,6 +1677,14 @@ export default function BranchFranchiseKYCModal({
                         />
                         <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '13px' }} />
                       </div>
+                      <LoginPreferenceSelector
+                        type="email"
+                        itemValue={em}
+                        isSelected={Boolean(primaryLoginEmail && em && primaryLoginEmail.toLowerCase() === em.trim().toLowerCase())}
+                        isDisabled={Boolean(primaryLoginEmail && em.trim().toLowerCase() !== primaryLoginEmail.toLowerCase())}
+                        onSelect={() => handleSelectPrimaryEmail(em)}
+                        onChangePreference={() => handleChangePrimaryEmailPreference()}
+                      />
                       {emailIds.length > 1 && (
                         <button
                           type="button"
@@ -1430,7 +1698,8 @@ export default function BranchFranchiseKYCModal({
                             cursor: 'pointer',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center'
+                            justifyContent: 'center',
+                            flexShrink: 0
                           }}
                           title="Remove this email"
                         >
@@ -1440,9 +1709,18 @@ export default function BranchFranchiseKYCModal({
                     </div>
                   ))}
                 </div>
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <HelpCircle size={12} color="#B88B4A" />
+                  <span>Only one email address can be authorized as the primary credential for dashboard access.</span>
+                </div>
                 {validationErrors.emailIds && (
                   <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
                     {validationErrors.emailIds}
+                  </div>
+                )}
+                {validationErrors.primaryLoginEmail && (
+                  <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
+                    {validationErrors.primaryLoginEmail}
                   </div>
                 )}
               </div>
@@ -1745,7 +2023,7 @@ export default function BranchFranchiseKYCModal({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             {(Array.isArray(sh.mobile_numbers) && sh.mobile_numbers.length > 0 ? sh.mobile_numbers : [sh.mobile || '']).map((mob, mIdx) => (
                               <div key={mIdx}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                                   <span style={{
                                     padding: '11px 12px',
                                     background: 'var(--bg-surface)',
@@ -1766,17 +2044,24 @@ export default function BranchFranchiseKYCModal({
                                     onChange={(e) => handleStakeholderMobileChange(shIdx, mIdx, e.target.value)}
                                     placeholder="10-digit mobile"
                                     style={{
-                                      flex: 1,
-                                      width: '100%',
-                                      minWidth: 0,
+                                      flex: '1 1 140px',
+                                      minWidth: '130px',
                                       boxSizing: 'border-box',
                                       padding: '12px 14px',
                                       borderRadius: 'var(--radius-md)',
-                                      border: `1.5px solid ${(validationErrors[`${prefix}mobile_${mIdx}`] || (mIdx === 0 && validationErrors[`${prefix}mobile`])) ? '#DC2626' : 'var(--border-color)'}`,
+                                      border: `1.5px solid ${sh.primary_login_phone && mob === sh.primary_login_phone ? '#B88B4A' : ((validationErrors[`${prefix}mobile_${mIdx}`] || (mIdx === 0 && validationErrors[`${prefix}mobile`])) ? '#DC2626' : 'var(--border-color)')}`,
                                       background: '#FFFFFF',
                                       outline: 'none',
                                       fontSize: '14px'
                                     }}
+                                  />
+                                  <LoginPreferenceSelector
+                                    type="phone"
+                                    itemValue={mob}
+                                    isSelected={Boolean(sh.primary_login_phone && mob && sh.primary_login_phone === mob)}
+                                    isDisabled={Boolean(sh.primary_login_phone && mob !== sh.primary_login_phone)}
+                                    onSelect={() => handleSelectStakeholderPrimaryPhone(shIdx, mob)}
+                                    onChangePreference={() => handleChangeStakeholderPrimaryPhone(shIdx)}
                                   />
                                   {(Array.isArray(sh.mobile_numbers) ? sh.mobile_numbers.length : 1) > 1 && (
                                     <button
@@ -1808,6 +2093,11 @@ export default function BranchFranchiseKYCModal({
                               </div>
                             ))}
                           </div>
+                          {validationErrors[`${prefix}primary_phone`] && (
+                            <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
+                              {validationErrors[`${prefix}primary_phone`]}
+                            </div>
+                          )}
                         </div>
 
                         {/* Stakeholder Emails */}
@@ -1838,8 +2128,8 @@ export default function BranchFranchiseKYCModal({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             {(Array.isArray(sh.email_ids) && sh.email_ids.length > 0 ? sh.email_ids : [sh.email || '']).map((em, eIdx) => (
                               <div key={eIdx}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <div style={{ position: 'relative', flex: '1 1 160px', minWidth: '150px' }}>
                                     <input
                                       type="email"
                                       required={eIdx === 0}
@@ -1852,7 +2142,7 @@ export default function BranchFranchiseKYCModal({
                                         boxSizing: 'border-box',
                                         padding: '11px 14px 11px 36px',
                                         borderRadius: 'var(--radius-md)',
-                                        border: `1.5px solid ${(validationErrors[`${prefix}email_${eIdx}`] || (eIdx === 0 && validationErrors[`${prefix}email`])) ? '#DC2626' : 'var(--border-color)'}`,
+                                        border: `1.5px solid ${sh.primary_login_email && em.trim().toLowerCase() === sh.primary_login_email.toLowerCase() ? '#B88B4A' : ((validationErrors[`${prefix}email_${eIdx}`] || (eIdx === 0 && validationErrors[`${prefix}email`])) ? '#DC2626' : 'var(--border-color)')}`,
                                         background: '#FFFFFF',
                                         outline: 'none',
                                         fontSize: '14px'
@@ -1860,6 +2150,14 @@ export default function BranchFranchiseKYCModal({
                                     />
                                     <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '13px' }} />
                                   </div>
+                                  <LoginPreferenceSelector
+                                    type="email"
+                                    itemValue={em}
+                                    isSelected={Boolean(sh.primary_login_email && em && sh.primary_login_email.toLowerCase() === em.trim().toLowerCase())}
+                                    isDisabled={Boolean(sh.primary_login_email && em.trim().toLowerCase() !== sh.primary_login_email.toLowerCase())}
+                                    onSelect={() => handleSelectStakeholderPrimaryEmail(shIdx, em)}
+                                    onChangePreference={() => handleChangeStakeholderPrimaryEmail(shIdx)}
+                                  />
                                   {(Array.isArray(sh.email_ids) ? sh.email_ids.length : 1) > 1 && (
                                     <button
                                       type="button"
@@ -1890,6 +2188,11 @@ export default function BranchFranchiseKYCModal({
                               </div>
                             ))}
                           </div>
+                          {validationErrors[`${prefix}primary_email`] && (
+                            <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
+                              {validationErrors[`${prefix}primary_email`]}
+                            </div>
+                          )}
                         </div>
                       </div>
 

@@ -131,11 +131,168 @@ const passwordResetStore = new Map();
 // In-memory store for OTP login requests: userId -> { otp, expiresAt, identifier }
 const loginOtpStore = new Map();
 
+// Helper to identify non-preferred contact details across LOCATIONS, KYC, STAKEHOLDERS, and CLIENTS
+function isNonPreferredContact(rawInput) {
+  if (!rawInput) return false;
+  const clean = rawInput.trim().toLowerCase();
+  const digits = rawInput.replace(/\D/g, '');
+
+  if (digits && digits.length >= 7) {
+    // 0. Check LOCATIONS
+    const locRows = db.prepare('SELECT phone, primary_login_phone FROM LOCATIONS WHERE phone IS NOT NULL OR primary_login_phone IS NOT NULL').all();
+    for (const r of locRows) {
+      const locPhoneDigits = (r.phone || '').replace(/\D/g, '');
+      const pDigits = (r.primary_login_phone || '').replace(/\D/g, '');
+      if (locPhoneDigits && (locPhoneDigits === digits || locPhoneDigits.endsWith(digits) || digits.endsWith(locPhoneDigits))) {
+        if (pDigits && !(pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits))) {
+          return true; // Non-preferred location contact!
+        }
+      }
+    }
+
+    // 1. Check LOCATION_KYC
+    const kycRows = db.prepare('SELECT mobile_numbers, primary_login_phone FROM LOCATION_KYC WHERE mobile_numbers IS NOT NULL').all();
+    for (const r of kycRows) {
+      try {
+        const list = JSON.parse(r.mobile_numbers);
+        const pDigits = (r.primary_login_phone || '').replace(/\D/g, '');
+        if (Array.isArray(list)) {
+          for (const m of list) {
+            const mDigits = String(m).replace(/\D/g, '');
+            if (mDigits && (mDigits === digits || mDigits.endsWith(digits) || digits.endsWith(mDigits))) {
+              if (!pDigits || !(pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits))) {
+                return true; // Non-preferred contact!
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Check LOCATION_STAKEHOLDERS
+    const stkRows = db.prepare('SELECT mobile_numbers, primary_login_phone FROM LOCATION_STAKEHOLDERS WHERE mobile_numbers IS NOT NULL').all();
+    for (const r of stkRows) {
+      try {
+        const list = JSON.parse(r.mobile_numbers);
+        const pDigits = (r.primary_login_phone || '').replace(/\D/g, '');
+        if (Array.isArray(list)) {
+          for (const m of list) {
+            const mDigits = String(m).replace(/\D/g, '');
+            if (mDigits && (mDigits === digits || mDigits.endsWith(digits) || digits.endsWith(mDigits))) {
+              if (!pDigits || !(pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits))) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Check CLIENTS
+    const clientRows = db.prepare('SELECT mobile_numbers, primary_login_phone FROM CLIENTS WHERE mobile_numbers IS NOT NULL').all();
+    for (const r of clientRows) {
+      try {
+        const list = JSON.parse(r.mobile_numbers);
+        const pDigits = (r.primary_login_phone || '').replace(/\D/g, '');
+        if (Array.isArray(list)) {
+          for (const m of list) {
+            const mDigits = String(m).replace(/\D/g, '');
+            if (mDigits && (mDigits === digits || mDigits.endsWith(digits) || digits.endsWith(mDigits))) {
+              if (!pDigits || !(pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits))) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  if (clean.includes('@')) {
+    // 0. Check LOCATIONS
+    const locRows = db.prepare('SELECT email, primary_login_email FROM LOCATIONS WHERE email IS NOT NULL OR primary_login_email IS NOT NULL').all();
+    for (const r of locRows) {
+      const locEmail = (r.email || '').trim().toLowerCase();
+      const pEmail = (r.primary_login_email || '').trim().toLowerCase();
+      if (locEmail && locEmail === clean) {
+        if (pEmail && pEmail !== clean) {
+          return true; // Non-preferred location email!
+        }
+      }
+    }
+
+    // 1. Check LOCATION_KYC
+    const kycRows = db.prepare('SELECT email_ids, primary_login_email FROM LOCATION_KYC WHERE email_ids IS NOT NULL').all();
+    for (const r of kycRows) {
+      try {
+        const list = JSON.parse(r.email_ids);
+        const pEmail = (r.primary_login_email || '').trim().toLowerCase();
+        if (Array.isArray(list)) {
+          for (const em of list) {
+            const cEm = String(em).trim().toLowerCase();
+            if (cEm && cEm === clean) {
+              if (!pEmail || pEmail !== clean) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Check LOCATION_STAKEHOLDERS
+    const stkRows = db.prepare('SELECT email_ids, primary_login_email FROM LOCATION_STAKEHOLDERS WHERE email_ids IS NOT NULL').all();
+    for (const r of stkRows) {
+      try {
+        const list = JSON.parse(r.email_ids);
+        const pEmail = (r.primary_login_email || '').trim().toLowerCase();
+        if (Array.isArray(list)) {
+          for (const em of list) {
+            const cEm = String(em).trim().toLowerCase();
+            if (cEm && cEm === clean) {
+              if (!pEmail || pEmail !== clean) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 3. Check CLIENTS
+    const clientRows = db.prepare('SELECT email_ids, primary_login_email FROM CLIENTS WHERE email_ids IS NOT NULL').all();
+    for (const r of clientRows) {
+      try {
+        const list = JSON.parse(r.email_ids);
+        const pEmail = (r.primary_login_email || '').trim().toLowerCase();
+        if (Array.isArray(list)) {
+          for (const em of list) {
+            const cEm = String(em).trim().toLowerCase();
+            if (cEm && cEm === clean) {
+              if (!pEmail || pEmail !== clean) {
+                return true;
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return false;
+}
+
 function findUserByIdentifier(rawInput) {
   if (!rawInput) return null;
+
+  // Strict enforcement: Non-preferred contact details cannot independently grant dashboard access
+  if (isNonPreferredContact(rawInput)) {
+    return null;
+  }
+
   const cleanInput = rawInput.trim().toLowerCase();
 
-  // 1. Direct email lookup
+  // 1. Direct email lookup in active USERS
   let user = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get(cleanInput);
 
   // 2. Handle typo e.g. master@maisonbeyou@gmail.com -> master@maisonbeyou.com
@@ -149,10 +306,29 @@ function findUserByIdentifier(rawInput) {
     user = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get(`${cleanInput}@maisonbeyou.com`);
   }
 
-  // 4. Lookup by phone number (flexible matching on digits)
+  // 4. Primary login email lookup in LOCATIONS or LOCATION_KYC
+  if (!user && cleanInput.includes('@')) {
+    const loc = db.prepare('SELECT location_id FROM LOCATIONS WHERE LOWER(primary_login_email) = ? OR LOWER(email) = ?').get(cleanInput, cleanInput)
+      || db.prepare('SELECT location_id FROM LOCATION_KYC WHERE LOWER(primary_login_email) = ?').get(cleanInput);
+    if (loc) {
+      user = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = "admin" AND active = 1').get(loc.location_id);
+    }
+  }
+
+  // 5. Primary login email lookup in CLIENTS
+  if (!user && cleanInput.includes('@')) {
+    const client = db.prepare('SELECT location_id, phone, name, email FROM CLIENTS WHERE LOWER(primary_login_email) = ? OR LOWER(email) = ?').get(cleanInput, cleanInput);
+    if (client) {
+      user = db.prepare('SELECT * FROM USERS WHERE (LOWER(email) = ? OR phone = ?) AND role = "visitor" AND active = 1').get(cleanInput, client.phone)
+        || db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = "visitor" AND active = 1').get(client.location_id);
+    }
+  }
+
+  // 6. Lookup by phone number (flexible matching on digits)
   if (!user) {
     const digits = rawInput.replace(/\D/g, '');
     if (digits.length >= 7) {
+      // Direct USERS match
       const usersWithPhone = db.prepare('SELECT * FROM USERS WHERE active = 1 AND phone IS NOT NULL').all();
       user = usersWithPhone.find(u => {
         if (!u.phone) return false;
@@ -160,8 +336,33 @@ function findUserByIdentifier(rawInput) {
         return uDigits === digits || uDigits.endsWith(digits) || digits.endsWith(uDigits);
       });
 
-      // Demo & Dev phone number support (e.g. 9876543210 or 10-digit test numbers)
-      if (!user && (digits === '9876543210' || digits.length === 10)) {
+      // Primary login phone lookup in LOCATIONS or LOCATION_KYC
+      if (!user) {
+        const locRows = db.prepare('SELECT location_id, primary_login_phone, phone FROM LOCATIONS WHERE primary_login_phone IS NOT NULL OR phone IS NOT NULL').all();
+        const matchedLoc = locRows.find(l => {
+          const pDigits = (l.primary_login_phone || l.phone || '').replace(/\D/g, '');
+          return pDigits && (pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits));
+        });
+        if (matchedLoc) {
+          user = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = "admin" AND active = 1').get(matchedLoc.location_id);
+        }
+      }
+
+      // Primary login phone lookup in CLIENTS
+      if (!user) {
+        const clientRows = db.prepare('SELECT location_id, primary_login_phone, phone, email, name FROM CLIENTS WHERE primary_login_phone IS NOT NULL OR phone IS NOT NULL').all();
+        const matchedClient = clientRows.find(c => {
+          const pDigits = (c.primary_login_phone || c.phone || '').replace(/\D/g, '');
+          return pDigits && (pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits));
+        });
+        if (matchedClient) {
+          user = db.prepare('SELECT * FROM USERS WHERE (phone = ? OR LOWER(email) = ?) AND role = "visitor" AND active = 1').get(digits, (matchedClient.email || '').toLowerCase())
+            || db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = "visitor" AND active = 1').get(matchedClient.location_id);
+        }
+      }
+
+      // Explicit Demo test numbers support
+      if (!user && (digits === '9876543210' || digits === '9820599000')) {
         const adminUser = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get('admin@maisonbeyou.com');
         if (adminUser) {
           user = { ...adminUser, phone: rawInput };
@@ -327,35 +528,7 @@ app.post('/api/auth/forgot-password', (req, res) => {
       return res.status(400).json({ error: 'Please enter your registered Login ID, Email, or Phone number' });
     }
 
-    let user = null;
-    const cleanInput = rawInput.toLowerCase();
-
-    // 1. Direct email lookup
-    user = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get(cleanInput);
-
-    // 2. Correct typo e.g. master@maisonbeyou@gmail.com
-    if (!user && cleanInput.includes('@maisonbeyou') && cleanInput.includes('@gmail.com')) {
-      const corrected = cleanInput.replace('@gmail.com', '.com').replace('@@', '@');
-      user = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get(corrected);
-    }
-
-    // 3. Shorthand role name
-    if (!user && !cleanInput.includes('@') && !/^\+?\d+$/.test(cleanInput)) {
-      user = db.prepare('SELECT * FROM USERS WHERE LOWER(email) = ? AND active = 1').get(`${cleanInput}@maisonbeyou.com`);
-    }
-
-    // 4. Phone lookup
-    if (!user) {
-      const digits = rawInput.replace(/\D/g, '');
-      if (digits.length >= 7) {
-        const usersWithPhone = db.prepare('SELECT * FROM USERS WHERE active = 1 AND phone IS NOT NULL').all();
-        user = usersWithPhone.find(u => {
-          if (!u.phone) return false;
-          const uDigits = u.phone.replace(/\D/g, '');
-          return uDigits === digits || uDigits.endsWith(digits) || digits.endsWith(uDigits);
-        });
-      }
-    }
+    const user = findUserByIdentifier(rawInput);
 
     if (!user) {
       return res.status(404).json({ error: 'No active studio account found with this Email or Phone number' });
@@ -468,7 +641,9 @@ function parseStakeholders(rows) {
     return {
       ...s,
       mobile_numbers: mList,
-      email_ids: eList
+      email_ids: eList,
+      primary_login_phone: s.primary_login_phone || s.mobile || (mList[0] || ''),
+      primary_login_email: s.primary_login_email || s.email || (eList[0] || '')
     };
   });
 }
@@ -654,7 +829,9 @@ app.get('/api/locations/:id', authenticateToken, (req, res) => {
         kyc = {
           ...kycRow,
           mobile_numbers: kycRow.mobile_numbers ? JSON.parse(kycRow.mobile_numbers) : [],
-          email_ids: kycRow.email_ids ? JSON.parse(kycRow.email_ids) : []
+          email_ids: kycRow.email_ids ? JSON.parse(kycRow.email_ids) : [],
+          primary_login_phone: kycRow.primary_login_phone || location.primary_login_phone || location.phone || '',
+          primary_login_email: kycRow.primary_login_email || location.primary_login_email || location.email || ''
         };
       }
       stakeholders = parseStakeholders(db.prepare('SELECT * FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC, stakeholder_id ASC').all(locId));
@@ -703,13 +880,28 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     }
 
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || '').trim();
-    const primaryPhone = (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || '').trim();
-    const primaryEmail = (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || '').trim();
+    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || '')).trim();
+    const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || '')).trim();
+
+    // Backend validation: Ensure single primary preference matches entered lists
+    if (Array.isArray(mobile_numbers) && mobile_numbers.length > 0 && primaryPhone) {
+      const cleanList = mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10));
+      const cleanPrimary = primaryPhone.replace(/\D/g, '').slice(0, 10);
+      if (!cleanList.includes(cleanPrimary)) {
+        return res.status(400).json({ error: 'Primary Login Number must be one of the entered mobile numbers' });
+      }
+    }
+    if (Array.isArray(email_ids) && email_ids.length > 0 && primaryEmail) {
+      const cleanList = email_ids.map(e => (e || '').trim().toLowerCase());
+      if (!cleanList.includes(primaryEmail.toLowerCase())) {
+        return res.status(400).json({ error: 'Primary Login Email must be one of the entered email addresses' });
+      }
+    }
 
     const insertLocStmt = db.prepare(`
       INSERT INTO LOCATIONS (
-        name, code, type, address, city, state, pincode, phone, email, status, manager_name, firm_type, firm_name
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        name, code, type, address, city, state, pincode, phone, email, status, manager_name, firm_type, firm_name, primary_login_phone, primary_login_email
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = insertLocStmt.run(
@@ -725,7 +917,9 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       status || 'Active',
       (manager_name || '').trim(),
       (firm_type || '').trim() || null,
-      (firm_name || '').trim() || null
+      (firm_name || '').trim() || null,
+      primaryPhone,
+      primaryEmail
     );
 
     const newLocId = result.lastInsertRowid;
@@ -740,10 +934,10 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       const insertKycStmt = db.prepare(`
         INSERT INTO LOCATION_KYC (
           location_id, firm_type, firm_name, address_line1, address_line2, pincode, city, state,
-          mobile_numbers, email_ids, firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
+          mobile_numbers, email_ids, primary_login_phone, primary_login_email, firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
           cin_number, incorporation_doc, aoa_moa_doc, aoa_doc, moa_doc,
           bank_firm_name, bank_name, bank_account_number, bank_ifsc_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       insertKycStmt.run(
@@ -757,6 +951,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
         (state || '').trim(),
         JSON.stringify(Array.isArray(mobile_numbers) ? mobile_numbers.filter(Boolean) : [primaryPhone].filter(Boolean)),
         JSON.stringify(Array.isArray(email_ids) ? email_ids.filter(Boolean) : [primaryEmail].filter(Boolean)),
+        primaryPhone,
+        primaryEmail,
         (firm_pan || '').trim().toUpperCase(),
         (firm_pan_doc || '').trim(),
         (gst_number || '').trim().toUpperCase(),
@@ -779,8 +975,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     if (Array.isArray(stakeholders) && stakeholders.length > 0) {
       const insertStakeholderStmt = db.prepare(`
         INSERT INTO LOCATION_STAKEHOLDERS (
-          location_id, role_type, name, mobile, mobile_numbers, email, email_ids, gender, dob, marital_status, anniversary_date, pan_number, pan_doc, aadhaar_number, aadhaar_doc, din_number, display_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          location_id, role_type, name, mobile, mobile_numbers, email, email_ids, primary_login_phone, primary_login_email, gender, dob, marital_status, anniversary_date, pan_number, pan_doc, aadhaar_number, aadhaar_doc, din_number, display_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       stakeholders.forEach((s, idx) => {
@@ -791,8 +987,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
           const sEmails = Array.isArray(s.email_ids) && s.email_ids.length > 0
             ? s.email_ids.filter(Boolean)
             : (s.email ? [s.email.trim()] : []);
-          const primaryMob = sMobiles[0] || (s.mobile || '').trim();
-          const primaryEmail = sEmails[0] || (s.email || '').trim();
+          const primaryMob = (s.primary_login_phone || sMobiles[0] || (s.mobile || '')).trim();
+          const sPrimaryEmail = (s.primary_login_email || sEmails[0] || (s.email || '')).trim();
 
           insertStakeholderStmt.run(
             newLocId,
@@ -800,8 +996,10 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
             s.name.trim(),
             primaryMob,
             JSON.stringify(sMobiles),
-            primaryEmail,
+            sPrimaryEmail,
             JSON.stringify(sEmails),
+            primaryMob,
+            sPrimaryEmail,
             s.gender || 'Female',
             (s.dob || '').trim(),
             s.marital_status || 'Unmarried',
@@ -823,6 +1021,13 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
 
     // Automatically provision independent accounts for the 3 roles for this new branch or franchise
     ensureLocationAccounts(savedLocation);
+
+    // Synchronize location admin user account with primary login preference
+    try {
+      if (primaryPhone) {
+        db.prepare('UPDATE USERS SET phone = ? WHERE location_id = ? AND role = "admin"').run(primaryPhone, newLocId);
+      }
+    } catch (e) {}
 
     // Record audit log
     recordAuditLog({
@@ -875,8 +1080,23 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
 
     const cleanType = (type || existing.type).trim().toLowerCase();
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || existing.address || '').trim();
-    const primaryPhone = (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || existing.phone || '').trim();
-    const primaryEmail = (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || existing.email || '').trim();
+    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || existing.phone || '')).trim();
+    const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || existing.email || '')).trim();
+
+    // Backend validation: Ensure single primary preference matches entered lists
+    if (Array.isArray(mobile_numbers) && mobile_numbers.length > 0 && primaryPhone) {
+      const cleanList = mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10));
+      const cleanPrimary = primaryPhone.replace(/\D/g, '').slice(0, 10);
+      if (!cleanList.includes(cleanPrimary)) {
+        return res.status(400).json({ error: 'Primary Login Number must be one of the entered mobile numbers' });
+      }
+    }
+    if (Array.isArray(email_ids) && email_ids.length > 0 && primaryEmail) {
+      const cleanList = email_ids.map(e => (e || '').trim().toLowerCase());
+      if (!cleanList.includes(primaryEmail.toLowerCase())) {
+        return res.status(400).json({ error: 'Primary Login Email must be one of the entered email addresses' });
+      }
+    }
 
     const updateLocStmt = db.prepare(`
       UPDATE LOCATIONS SET
@@ -888,6 +1108,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
         pincode = ?,
         phone = ?,
         email = ?,
+        primary_login_phone = ?,
+        primary_login_email = ?,
         status = ?,
         manager_name = ?,
         firm_type = ?,
@@ -903,6 +1125,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       (city !== undefined ? city : existing.city || '').trim(),
       (state !== undefined ? state : existing.state || '').trim(),
       (pincode !== undefined ? pincode : existing.pincode || '').trim(),
+      primaryPhone,
+      primaryEmail,
       primaryPhone,
       primaryEmail,
       status || existing.status || 'Active',
@@ -942,6 +1166,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
             state = ?,
             mobile_numbers = ?,
             email_ids = ?,
+            primary_login_phone = ?,
+            primary_login_email = ?,
             firm_pan = ?,
             firm_pan_doc = ?,
             gst_number = ?,
@@ -969,6 +1195,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
           (state || '').trim(),
           JSON.stringify(Array.isArray(mobile_numbers) ? mobile_numbers.filter(Boolean) : [primaryPhone].filter(Boolean)),
           JSON.stringify(Array.isArray(email_ids) ? email_ids.filter(Boolean) : [primaryEmail].filter(Boolean)),
+          primaryPhone,
+          primaryEmail,
           (firm_pan || '').trim().toUpperCase(),
           (firm_pan_doc || '').trim(),
           (gst_number || '').trim().toUpperCase(),
@@ -990,10 +1218,10 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
         db.prepare(`
           INSERT INTO LOCATION_KYC (
             location_id, firm_type, firm_name, address_line1, address_line2, pincode, city, state,
-            mobile_numbers, email_ids, firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
+            mobile_numbers, email_ids, primary_login_phone, primary_login_email, firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
             cin_number, incorporation_doc, aoa_moa_doc, aoa_doc, moa_doc,
             bank_firm_name, bank_name, bank_account_number, bank_ifsc_code
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           locId,
           firm_type.trim(),
@@ -1005,6 +1233,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
           (state || '').trim(),
           JSON.stringify(Array.isArray(mobile_numbers) ? mobile_numbers.filter(Boolean) : [primaryPhone].filter(Boolean)),
           JSON.stringify(Array.isArray(email_ids) ? email_ids.filter(Boolean) : [primaryEmail].filter(Boolean)),
+          primaryPhone,
+          primaryEmail,
           (firm_pan || '').trim().toUpperCase(),
           (firm_pan_doc || '').trim(),
           (gst_number || '').trim().toUpperCase(),
@@ -1029,8 +1259,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       db.prepare('DELETE FROM LOCATION_STAKEHOLDERS WHERE location_id = ?').run(locId);
       const insertStakeholderStmt = db.prepare(`
         INSERT INTO LOCATION_STAKEHOLDERS (
-          location_id, role_type, name, mobile, mobile_numbers, email, email_ids, gender, dob, marital_status, anniversary_date, pan_number, pan_doc, aadhaar_number, aadhaar_doc, din_number, display_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          location_id, role_type, name, mobile, mobile_numbers, email, email_ids, primary_login_phone, primary_login_email, gender, dob, marital_status, anniversary_date, pan_number, pan_doc, aadhaar_number, aadhaar_doc, din_number, display_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       stakeholders.forEach((s, idx) => {
@@ -1041,8 +1271,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
           const sEmails = Array.isArray(s.email_ids) && s.email_ids.length > 0
             ? s.email_ids.filter(Boolean)
             : (s.email ? [s.email.trim()] : []);
-          const primaryMob = sMobiles[0] || (s.mobile || '').trim();
-          const primaryEmail = sEmails[0] || (s.email || '').trim();
+          const primaryMob = (s.primary_login_phone || sMobiles[0] || (s.mobile || '')).trim();
+          const sPrimaryEmail = (s.primary_login_email || sEmails[0] || (s.email || '')).trim();
 
           insertStakeholderStmt.run(
             locId,
@@ -1050,8 +1280,10 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
             s.name.trim(),
             primaryMob,
             JSON.stringify(sMobiles),
-            primaryEmail,
+            sPrimaryEmail,
             JSON.stringify(sEmails),
+            primaryMob,
+            sPrimaryEmail,
             s.gender || 'Female',
             (s.dob || '').trim(),
             s.marital_status || 'Unmarried',
@@ -1066,6 +1298,13 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
         }
       });
     }
+
+    // Synchronize location admin user account with primary login preference
+    try {
+      if (primaryPhone) {
+        db.prepare('UPDATE USERS SET phone = ? WHERE location_id = ? AND role = "admin"').run(primaryPhone, locId);
+      }
+    } catch (e) {}
 
     const updatedLocation = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(locId);
     const updatedKyc = db.prepare('SELECT * FROM LOCATION_KYC WHERE location_id = ?').get(locId);
@@ -1928,22 +2167,35 @@ app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'recep
       if (cleanPhone.length >= 2) {
         clients = db.prepare(`
           SELECT * FROM CLIENTS
-          ${baseWhere} AND (phone LIKE ? OR phone LIKE ? OR name LIKE ? OR reg_no LIKE ?)
+          ${baseWhere} AND (phone LIKE ? OR phone LIKE ? OR primary_login_phone LIKE ? OR mobile_numbers LIKE ? OR email_ids LIKE ? OR name LIKE ? OR reg_no LIKE ?)
           ORDER BY last_visit_date DESC, name ASC
           LIMIT 60
-        `).all(...baseParams, `%${cleanPhone}%`, `%${rawDigits}%`, `%${q}%`, `%${q}%`);
+        `).all(...baseParams, `%${cleanPhone}%`, `%${rawDigits}%`, `%${cleanPhone}%`, `%"${cleanPhone}"%`, `%${q}%`, `%${q}%`, `%${q}%`);
       } else {
         clients = db.prepare(`
           SELECT * FROM CLIENTS
-          ${baseWhere} AND (name LIKE ? OR reg_no LIKE ?)
+          ${baseWhere} AND (name LIKE ? OR reg_no LIKE ? OR email LIKE ? OR email_ids LIKE ?)
           ORDER BY last_visit_date DESC, name ASC
           LIMIT 60
-        `).all(...baseParams, `%${q}%`, `%${q}%`);
+        `).all(...baseParams, `%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
       }
     }
 
-    // Compute dynamic Active/Inactive status based on 90-day threshold
-    clients = clients.map(computeClientActivity);
+    // Compute dynamic Active/Inactive status and parse JSON contact arrays
+    clients = clients.map(c => {
+      const comp = computeClientActivity(c);
+      try {
+        comp.mobile_numbers = comp.mobile_numbers ? JSON.parse(comp.mobile_numbers) : [comp.phone];
+      } catch(e) {
+        comp.mobile_numbers = [comp.phone];
+      }
+      try {
+        comp.email_ids = comp.email_ids ? JSON.parse(comp.email_ids) : (comp.email ? [comp.email] : []);
+      } catch(e) {
+        comp.email_ids = comp.email ? [comp.email] : [];
+      }
+      return comp;
+    });
 
     const activeCount = clients.filter(c => c.status === 'active').length;
     const inactiveCount = clients.filter(c => c.status === 'inactive').length;
@@ -1982,7 +2234,11 @@ app.get('/api/clients/check-phone', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'Phone parameter required' });
     }
 
-    const client = db.prepare('SELECT client_id, name, surname, phone, location_id FROM CLIENTS WHERE phone = ? OR phone = ?').get(phone, rawPhone.replace(/\D/g, ''));
+    const client = db.prepare(`
+      SELECT client_id, name, surname, phone, primary_login_phone, location_id 
+      FROM CLIENTS 
+      WHERE phone = ? OR phone = ? OR primary_login_phone = ? OR mobile_numbers LIKE ?
+    `).get(phone, rawPhone.replace(/\D/g, ''), phone, `%"${phone}"%`);
     if (client) {
       if (req.user.role !== 'master_admin' && client.location_id !== req.locationId) {
         return res.json({ exists: true, isCrossBranch: true });
@@ -2233,6 +2489,16 @@ export function getFullClientRecord(clientId) {
     return null;
   }
   client = computeClientActivity(client);
+  try {
+    client.mobile_numbers = client.mobile_numbers ? JSON.parse(client.mobile_numbers) : [client.phone];
+  } catch(e) {
+    client.mobile_numbers = [client.phone];
+  }
+  try {
+    client.email_ids = client.email_ids ? JSON.parse(client.email_ids) : (client.email ? [client.email] : []);
+  } catch(e) {
+    client.email_ids = client.email ? [client.email] : [];
+  }
 
   // Last visit
   const lastVisit = db.prepare(`
@@ -2498,12 +2764,19 @@ app.patch('/api/treatment-sessions/:id/status', authenticateToken, authorizeRole
 // Update client notes/info (Admin only)
 app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
-    const { name, email, notes, status, surname, gender, marital_status, dob, anniversary_date } = req.body;
+    const {
+      name, email, notes, status, surname, gender, marital_status, dob, anniversary_date,
+      phone, mobile_numbers, email_ids, primary_login_phone, primary_login_email
+    } = req.body;
     const clientId = req.params.id;
 
+    const existingClient = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(clientId);
+    if (!existingClient) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
     if (req.user.role !== 'master_admin') {
-      const existing = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
-      if (!existing || existing.location_id !== req.locationId) {
+      if (existingClient.location_id !== req.locationId) {
         return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
       }
     }
@@ -2516,6 +2789,22 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
       return res.status(400).json({ error: 'Anniversary date cannot be in the future' });
     }
 
+    let mobListJson = null;
+    if (Array.isArray(mobile_numbers)) {
+      const cleaned = mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10)).filter(Boolean);
+      mobListJson = JSON.stringify(cleaned);
+    }
+
+    let emailListJson = null;
+    if (Array.isArray(email_ids)) {
+      const cleaned = email_ids.map(e => (e || '').trim().toLowerCase()).filter(Boolean);
+      emailListJson = JSON.stringify(cleaned);
+    }
+
+    const cleanPrimaryPhone = primary_login_phone ? primary_login_phone.replace(/\D/g, '').slice(0, 10) : null;
+    const cleanPrimaryEmail = primary_login_email ? primary_login_email.trim().toLowerCase() : null;
+    const cleanPhone = phone ? phone.replace(/\D/g, '').slice(0, 10) : (cleanPrimaryPhone || null);
+
     db.prepare(`
       UPDATE CLIENTS
       SET name = COALESCE(?, name),
@@ -2527,9 +2816,35 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
           marital_status = COALESCE(?, marital_status),
           dob = COALESCE(?, dob),
           anniversary_date = COALESCE(?, anniversary_date),
+          phone = COALESCE(?, phone),
+          mobile_numbers = COALESCE(?, mobile_numbers),
+          email_ids = COALESCE(?, email_ids),
+          primary_login_phone = COALESCE(?, primary_login_phone),
+          primary_login_email = COALESCE(?, primary_login_email),
           updated_at = CURRENT_TIMESTAMP
       WHERE client_id = ?
-    `).run(name, email, notes, status, surname, gender, marital_status, dob, anniversary_date, clientId);
+    `).run(
+      name, email, notes, status, surname, gender, marital_status, dob, anniversary_date,
+      cleanPhone, mobListJson, emailListJson, cleanPrimaryPhone, cleanPrimaryEmail, clientId
+    );
+
+    // Synchronize linked visitor user account in USERS
+    try {
+      const oldPhone = existingClient.primary_login_phone || existingClient.phone;
+      const oldEmail = (existingClient.primary_login_email || existingClient.email || '').toLowerCase();
+      const newPhone = cleanPrimaryPhone || cleanPhone || oldPhone;
+      const newEmail = cleanPrimaryEmail || (email ? email.trim().toLowerCase() : oldEmail);
+
+      if (oldPhone || oldEmail) {
+        db.prepare(`
+          UPDATE USERS
+          SET phone = ?,
+              email = ?,
+              name = COALESCE(?, name)
+          WHERE (phone = ? OR LOWER(email) = ?) AND role = 'visitor'
+        `).run(newPhone, newEmail, name ? `${name} ${surname || existingClient.surname || ''}`.trim() : null, oldPhone, oldEmail);
+      }
+    } catch (e) {}
 
     const updated = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(clientId);
     res.json({ client: updated });
@@ -2681,22 +2996,46 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       state,
       phone,
       email,
+      mobile_numbers,
+      email_ids,
+      primary_login_phone,
+      primary_login_email,
       notes
     } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Client first name is required' });
     }
-    if (!phone) {
+
+    const rawPhone = phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || '';
+    if (!rawPhone) {
       return res.status(400).json({ error: 'Mobile number is required' });
     }
 
-    let cleanPhone = phone.replace(/\D/g, '');
+    let cleanPhone = rawPhone.replace(/\D/g, '');
     if (cleanPhone.startsWith('91') && cleanPhone.length > 10) cleanPhone = cleanPhone.substring(2);
     else if (cleanPhone.startsWith('0') && cleanPhone.length > 10) cleanPhone = cleanPhone.substring(1);
 
     if (cleanPhone.length < 10) {
       return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number' });
+    }
+
+    const mobList = Array.isArray(mobile_numbers) && mobile_numbers.length > 0
+      ? mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10)).filter(Boolean)
+      : [cleanPhone];
+    const emailList = Array.isArray(email_ids) && email_ids.length > 0
+      ? email_ids.map(e => (e || '').trim().toLowerCase()).filter(Boolean)
+      : (email ? [email.trim().toLowerCase()] : []);
+
+    const cleanPrimaryPhone = (primary_login_phone ? primary_login_phone.replace(/\D/g, '').slice(0, 10) : cleanPhone) || mobList[0];
+    const cleanPrimaryEmail = (primary_login_email ? primary_login_email.trim().toLowerCase() : (email ? email.trim().toLowerCase() : emailList[0])) || '';
+
+    // Backend validation: Single selection rule
+    if (mobList.length > 0 && cleanPrimaryPhone && !mobList.includes(cleanPrimaryPhone)) {
+      return res.status(400).json({ error: 'Primary Login Number must be one of the entered mobile numbers' });
+    }
+    if (emailList.length > 0 && cleanPrimaryEmail && !emailList.includes(cleanPrimaryEmail)) {
+      return res.status(400).json({ error: 'Primary Login Email must be one of the entered email addresses' });
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -2724,14 +3063,14 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'A valid 6-digit Pincode is compulsory' });
     }
 
-    if (!email || !String(email).trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
+    if (!cleanPrimaryEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanPrimaryEmail)) {
       return res.status(400).json({ error: 'A valid Email Address is compulsory' });
     }
 
-    const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ?').get(cleanPhone);
+    const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ? OR primary_login_phone = ?').get(cleanPrimaryPhone, cleanPrimaryPhone);
     if (existing) {
       return res.status(400).json({
-        error: `Client already exists with number ${cleanPhone}. Please use Regular Client.`,
+        error: `Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`,
         client: existing
       });
     }
@@ -2741,9 +3080,9 @@ app.post('/api/clients', authenticateToken, (req, res) => {
     const insertRes = db.prepare(`
       INSERT INTO CLIENTS (
         name, surname, gender, marital_status, dob, anniversary_date, address_line1, address_line2, pincode, city, state,
-        phone, email, notes, first_visit_date, last_visit_date, total_visits, total_spend, status, location_id
+        phone, email, mobile_numbers, email_ids, primary_login_phone, primary_login_email, notes, first_visit_date, last_visit_date, total_visits, total_spend, status, location_id
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active', ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active', ?)
     `).run(
       name.trim(),
       (surname || '').trim(),
@@ -2756,8 +3095,12 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       (pincode || '').trim(),
       (city || '').trim(),
       (state || '').trim(),
-      cleanPhone,
-      (email || '').trim(),
+      cleanPrimaryPhone,
+      cleanPrimaryEmail,
+      JSON.stringify(mobList),
+      JSON.stringify(emailList),
+      cleanPrimaryPhone,
+      cleanPrimaryEmail,
       (notes || '').trim(),
       todayDate,
       todayDate,
@@ -2767,6 +3110,19 @@ app.post('/api/clients', authenticateToken, (req, res) => {
     const newClientId = insertRes.lastInsertRowid;
     const regNo = 'MB-REG-' + String(newClientId).padStart(5, '0');
     db.prepare('UPDATE CLIENTS SET reg_no = ? WHERE client_id = ?').run(regNo, newClientId);
+
+    // Synchronize authorized visitor login account in USERS
+    try {
+      const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE phone = ? OR LOWER(email) = ?').get(cleanPrimaryPhone, cleanPrimaryEmail);
+      if (!existingVisitor) {
+        const vSalt = bcrypt.genSaltSync(10);
+        const vHash = bcrypt.hashSync(`Visitor@${cleanPrimaryPhone.slice(-4)}`, vSalt);
+        db.prepare(`
+          INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
+          VALUES (?, ?, ?, ?, 'visitor', 1, ?)
+        `).run(`${name} ${surname || ''}`.trim(), cleanPrimaryEmail, cleanPrimaryPhone, vHash, targetLocId);
+      }
+    } catch (e) {}
 
     const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(newClientId);
     res.status(201).json({
@@ -3601,11 +3957,12 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 
     // 1. Client resolution / creation
     if (client_type === 'new') {
-      if (!name || !phone) {
+      const rawPhone = phone || (Array.isArray(req.body.mobile_numbers) && req.body.mobile_numbers[0]) || '';
+      if (!name || !rawPhone) {
         throw new Error('Client name and mobile number are required for new clients');
       }
 
-      let cleanPhone = phone.replace(/\D/g, '');
+      let cleanPhone = rawPhone.replace(/\D/g, '');
       if (cleanPhone.startsWith('91') && cleanPhone.length > 10) {
         cleanPhone = cleanPhone.substring(2);
       } else if (cleanPhone.startsWith('0') && cleanPhone.length > 10) {
@@ -3615,19 +3972,29 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         throw new Error('Please enter a valid 10-digit mobile number');
       }
 
+      const mobList = Array.isArray(req.body.mobile_numbers) && req.body.mobile_numbers.length > 0
+        ? req.body.mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10)).filter(Boolean)
+        : [cleanPhone];
+      const emailList = Array.isArray(req.body.email_ids) && req.body.email_ids.length > 0
+        ? req.body.email_ids.map(e => (e || '').trim().toLowerCase()).filter(Boolean)
+        : (req.body.email ? [req.body.email.trim().toLowerCase()] : []);
+
+      const cleanPrimaryPhone = (req.body.primary_login_phone ? req.body.primary_login_phone.replace(/\D/g, '').slice(0, 10) : cleanPhone) || mobList[0];
+      const cleanPrimaryEmail = (req.body.primary_login_email ? req.body.primary_login_email.trim().toLowerCase() : (req.body.email ? req.body.email.trim().toLowerCase() : emailList[0])) || '';
+
       // Check duplicate phone
-      const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ?').get(cleanPhone);
+      const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ? OR primary_login_phone = ?').get(cleanPrimaryPhone, cleanPrimaryPhone);
       if (existing) {
-        throw new Error(`Client already exists with number ${cleanPhone}. Please use Regular Client.`);
+        throw new Error(`Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`);
       }
 
       const targetLocId = req.locationId || req.body.location_id || 1;
       const clientInfo = db.prepare(`
         INSERT INTO CLIENTS (
           name, surname, gender, address_line1, address_line2, pincode, city, state,
-          phone, email, reg_no, first_visit_date, last_visit_date, total_visits, total_spend, status, location_id
+          phone, email, mobile_numbers, email_ids, primary_login_phone, primary_login_email, reg_no, first_visit_date, last_visit_date, total_visits, total_spend, status, location_id
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 'active', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 0, 0, 'active', ?)
       `).run(
         name.trim(),
         (req.body.surname || '').trim(),
@@ -3637,9 +4004,12 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         (req.body.pincode || '').trim(),
         (req.body.city || '').trim(),
         (req.body.state || '').trim(),
-        cleanPhone,
-        (req.body.email || '').trim(),
-        '',
+        cleanPrimaryPhone,
+        cleanPrimaryEmail,
+        JSON.stringify(mobList),
+        JSON.stringify(emailList),
+        cleanPrimaryPhone,
+        cleanPrimaryEmail,
         todayDate,
         todayDate,
         targetLocId
@@ -3648,6 +4018,19 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       finalClientId = clientInfo.lastInsertRowid;
       const regNo = 'MB-REG-' + String(finalClientId).padStart(5, '0');
       db.prepare('UPDATE CLIENTS SET reg_no = ? WHERE client_id = ?').run(regNo, finalClientId);
+
+      // Provision visitor user account in USERS
+      try {
+        const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE phone = ? OR LOWER(email) = ?').get(cleanPrimaryPhone, cleanPrimaryEmail);
+        if (!existingVisitor) {
+          const vSalt = bcrypt.genSaltSync(10);
+          const vHash = bcrypt.hashSync(`Visitor@${cleanPrimaryPhone.slice(-4)}`, vSalt);
+          db.prepare(`
+            INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
+            VALUES (?, ?, ?, ?, 'visitor', 1, ?)
+          `).run(`${name} ${(req.body.surname || '')}`.trim(), cleanPrimaryEmail, cleanPrimaryPhone, vHash, targetLocId);
+        }
+      } catch (e) {}
     } else {
       if (!finalClientId) {
         throw new Error('Existing client must be selected');

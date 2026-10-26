@@ -5,7 +5,7 @@ import {
   IndianRupee, ChevronRight, ChevronLeft, Search, Phone, Calendar,
   Mail, MapPin, MessageCircle, MessageSquare, Send, Share2, Copy, ExternalLink, X,
   Play, Pause, Volume2, VolumeX, ShieldCheck, User, LogOut, ChevronDown, Crown,
-  Zap, Maximize2, AlertCircle
+  Zap, Maximize2, AlertCircle, HelpCircle
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import { getServiceMedia } from '../utils/serviceMedia';
@@ -15,6 +15,7 @@ import brandLogoIconImg from '../assets/brand-logo-icon.png';
 import brandLogoTextImg from '../assets/brand-logo-text.png';
 import LuxuryDatePicker from './LuxuryDatePicker';
 import ServiceTermsModal from './ServiceTermsModal';
+import LoginPreferenceSelector from './LoginPreferenceSelector';
 import { renderCategoryIcon } from '../utils/categoryIcons';
 
 export const MEMBERSHIP_PLANS = [
@@ -181,6 +182,113 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   const [clientAnniversaryDate, setClientAnniversaryDate] = useState(preSelectedClient?.anniversary_date || '');
   const [clientPhone, setClientPhone] = useState(preSelectedClient?.phone || '');
   const [clientEmail, setClientEmail] = useState(preSelectedClient?.email || '');
+
+  // Repeatable Contact Details & Login Preferences for New Visitor / Client Registration
+  const [clientMobiles, setClientMobiles] = useState(() => {
+    if (preSelectedClient?.mobile_numbers?.length > 0) return preSelectedClient.mobile_numbers;
+    return [preSelectedClient?.phone || ''];
+  });
+  const [clientEmails, setClientEmails] = useState(() => {
+    if (preSelectedClient?.email_ids?.length > 0) return preSelectedClient.email_ids;
+    return [preSelectedClient?.email || ''];
+  });
+  const [primaryLoginPhone, setPrimaryLoginPhone] = useState(
+    preSelectedClient?.primary_login_phone || preSelectedClient?.phone || ''
+  );
+  const [primaryLoginEmail, setPrimaryLoginEmail] = useState(
+    preSelectedClient?.primary_login_email || preSelectedClient?.email || ''
+  );
+
+  const handleAddClientMobile = () => {
+    setClientMobiles(prev => [...prev, '']);
+  };
+
+  const handleClientMobileChange = (idx, val) => {
+    const clean = val.replace(/\D/g, '').slice(0, 10);
+    const oldVal = clientMobiles[idx];
+    setClientMobiles(prev => {
+      const copy = [...prev];
+      copy[idx] = clean;
+      return copy;
+    });
+
+    if (primaryLoginPhone && primaryLoginPhone === oldVal) {
+      setPrimaryLoginPhone(clean);
+      setClientPhone(clean);
+    } else if (idx === 0 && !primaryLoginPhone) {
+      setClientPhone(clean);
+    }
+  };
+
+  const handleRemoveClientMobile = (idx) => {
+    if (clientMobiles.length <= 1) return;
+    const removedVal = clientMobiles[idx];
+    setClientMobiles(prev => prev.filter((_, i) => i !== idx));
+    if (primaryLoginPhone && primaryLoginPhone === removedVal) {
+      setPrimaryLoginPhone('');
+      setClientPhone('');
+    }
+  };
+
+  const handleSelectClientPrimaryPhone = (mob) => {
+    const clean = (mob || '').replace(/\D/g, '').slice(0, 10);
+    if (!clean || clean.length < 10) {
+      alert('Please enter a valid 10-digit mobile number before setting it as login preference');
+      return;
+    }
+    setPrimaryLoginPhone(clean);
+    setClientPhone(clean);
+  };
+
+  const handleChangeClientPrimaryPhone = () => {
+    setPrimaryLoginPhone('');
+    setClientPhone('');
+  };
+
+  const handleAddClientEmail = () => {
+    setClientEmails(prev => [...prev, '']);
+  };
+
+  const handleClientEmailChange = (idx, val) => {
+    const oldVal = clientEmails[idx];
+    setClientEmails(prev => {
+      const copy = [...prev];
+      copy[idx] = val;
+      return copy;
+    });
+
+    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === oldVal.trim().toLowerCase()) {
+      setPrimaryLoginEmail(val.trim().toLowerCase());
+      setClientEmail(val);
+    } else if (idx === 0 && !primaryLoginEmail) {
+      setClientEmail(val);
+    }
+  };
+
+  const handleRemoveClientEmail = (idx) => {
+    if (clientEmails.length <= 1) return;
+    const removedVal = clientEmails[idx];
+    setClientEmails(prev => prev.filter((_, i) => i !== idx));
+    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === removedVal.trim().toLowerCase()) {
+      setPrimaryLoginEmail('');
+      setClientEmail('');
+    }
+  };
+
+  const handleSelectClientPrimaryEmail = (em) => {
+    const clean = (em || '').trim().toLowerCase();
+    if (!clean || !/^\S+@\S+\.\S+$/.test(clean)) {
+      alert('Please enter a valid email address before setting it as login preference');
+      return;
+    }
+    setPrimaryLoginEmail(clean);
+    setClientEmail(clean);
+  };
+
+  const handleChangeClientPrimaryEmail = () => {
+    setPrimaryLoginEmail('');
+    setClientEmail('');
+  };
   const [clientAddress1, setClientAddress1] = useState(preSelectedClient?.address_line1 || '');
   const [clientAddress2, setClientAddress2] = useState(preSelectedClient?.address_line2 || '');
   const [clientPincode, setClientPincode] = useState(preSelectedClient?.pincode || '');
@@ -1407,6 +1515,11 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
     setClientName('');
     setClientSurname('');
     setClientPhone('');
+    setClientEmail('');
+    setClientMobiles(['']);
+    setClientEmails(['']);
+    setPrimaryLoginPhone('');
+    setPrimaryLoginEmail('');
     setReturningPhone('');
     setReturningFlowStep('mobile');
     setSixDigitOtp(['', '', '', '', '', '']);
@@ -1593,8 +1706,12 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
         pincode: clientType === 'new' ? clientPincode : (selectedRegularClient?.pincode || ''),
         city: clientType === 'new' ? clientCity : (selectedRegularClient?.city || ''),
         state: clientType === 'new' ? clientState : (selectedRegularClient?.state || ''),
-        phone: clientType === 'new' ? clientPhone : selectedRegularClient?.phone,
-        email: clientType === 'new' ? clientEmail : (selectedRegularClient?.email || ''),
+        phone: clientType === 'new' ? (primaryLoginPhone || clientPhone) : selectedRegularClient?.phone,
+        email: clientType === 'new' ? (primaryLoginEmail || clientEmail) : (selectedRegularClient?.email || ''),
+        primary_login_phone: clientType === 'new' ? (primaryLoginPhone || clientPhone) : (selectedRegularClient?.primary_login_phone || selectedRegularClient?.phone),
+        primary_login_email: clientType === 'new' ? (primaryLoginEmail || clientEmail) : (selectedRegularClient?.primary_login_email || selectedRegularClient?.email),
+        mobile_numbers: clientType === 'new' ? clientMobiles.filter(m => m.trim().length >= 10) : (selectedRegularClient?.mobile_numbers || []),
+        email_ids: clientType === 'new' ? clientEmails.filter(e => e.trim().length > 0) : (selectedRegularClient?.email_ids || []),
         visit_date: visitDate,
         submitted_at: new Date().toISOString(),
         service_time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }),
@@ -1705,13 +1822,21 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       alert('Please enter Client Name');
       return;
     }
-    const cleanDigits = clientPhone.replace(/\D/g, '');
+    const cleanDigits = (primaryLoginPhone || clientPhone || '').replace(/\D/g, '');
     if (cleanDigits.length < 10) {
       alert('Please enter a valid 10-digit Mobile Number');
       return;
     }
+    if (!primaryLoginPhone) {
+      alert('Please select one mobile number as the Primary Login Number preference');
+      return;
+    }
     if (!clientEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) {
       alert('Please enter a valid Email Address (compulsory)');
+      return;
+    }
+    if (!primaryLoginEmail) {
+      alert('Please select one email address as the Primary Login Email preference');
       return;
     }
     if (!clientDob) {
@@ -1764,7 +1889,11 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           city: clientCity.trim(),
           state: clientState.trim(),
           phone: cleanDigits,
-          email: clientEmail.trim(),
+          email: (primaryLoginEmail || clientEmail).trim(),
+          primary_login_phone: primaryLoginPhone,
+          primary_login_email: primaryLoginEmail,
+          mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
+          email_ids: clientEmails.filter(e => e.trim().length > 0),
           notes: ''
         })
       });
@@ -1785,13 +1914,21 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       alert('Please enter Client First Name');
       return;
     }
-    const cleanDigits = clientPhone.replace(/\D/g, '');
+    const cleanDigits = (primaryLoginPhone || clientPhone || '').replace(/\D/g, '');
     if (cleanDigits.length < 10) {
       alert('Please enter a valid 10-digit Mobile Number');
       return;
     }
+    if (!primaryLoginPhone) {
+      alert('Please select one mobile number as the Primary Login Number preference');
+      return;
+    }
     if (!clientEmail.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())) {
       alert('Please enter a valid Email Address (compulsory)');
+      return;
+    }
+    if (!primaryLoginEmail) {
+      alert('Please select one email address as the Primary Login Email preference');
       return;
     }
     if (!clientDob) {
@@ -1852,7 +1989,11 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           city: clientCity.trim(),
           state: clientState.trim(),
           phone: cleanDigits,
-          email: clientEmail.trim(),
+          email: (primaryLoginEmail || clientEmail).trim(),
+          primary_login_phone: primaryLoginPhone,
+          primary_login_email: primaryLoginEmail,
+          mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
+          email_ids: clientEmails.filter(e => e.trim().length > 0),
           notes: ''
         })
       });
@@ -1971,6 +2112,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       setClientSurname('');
       setClientPhone('');
       setClientEmail('');
+      setClientMobiles(['']);
+      setClientEmails(['']);
+      setPrimaryLoginPhone('');
+      setPrimaryLoginEmail('');
       setSelectedServices([]);
       setActiveMembership(null);
       setIsClientMenuOpen(false);
@@ -2269,6 +2414,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                 setClientSurname('');
                 setClientPhone('');
                 setClientEmail('');
+                setClientMobiles(['']);
+                setClientEmails(['']);
+                setPrimaryLoginPhone('');
+                setPrimaryLoginEmail('');
                 setClientAddress1('');
                 setClientAddress2('');
                 setClientPincode('');
@@ -2401,9 +2550,9 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   // STEP 2A: NEW CLIENT REGISTRATION
   // ==========================================
   if (step === 'client-info') {
-    const cleanDigits = clientPhone.replace(/\D/g, '');
+    const cleanDigits = (primaryLoginPhone || clientPhone || '').replace(/\D/g, '');
     const isMobileValid = cleanDigits.length >= 10;
-    const isEmailValid = Boolean(clientEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim()));
+    const isEmailValid = Boolean(primaryLoginEmail || (clientEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())));
     const isDuplicate = phoneCheckMessage?.exists;
 
     return (
@@ -2584,73 +2733,242 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                 </div>
               </div>
 
-              {/* Phone & Email */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px', marginBottom: '32px' }}>
-                <div style={{ minWidth: 0 }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    Mobile Number (10 digits) <span style={{ color: '#DC2626' }}>*</span>
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                    <span style={{
-                      padding: '11px 12px',
-                      background: 'var(--bg-surface)',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1px solid var(--border-color)',
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      color: 'var(--text-muted)',
-                      flexShrink: 0
-                    }}>
-                      +91
+              {/* Contact Details & Login Preferences */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '32px' }}>
+                {/* Mobile Numbers Section */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-main)' }}>
+                      Mobile Number(s) (10 digits) <span style={{ color: '#DC2626' }}>*</span>
+                    </label>
+                    <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <HelpCircle size={13} />
+                      Select one as Primary Login Number for dashboard access
                     </span>
-                    <input
-                      type="tel"
-                      maxLength={14}
-                      value={clientPhone}
-                      onChange={(e) => setClientPhone(e.target.value)}
-                      placeholder=""
-                      required
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {clientMobiles.map((mob, idx) => {
+                      const clean = (mob || '').replace(/\D/g, '').slice(0, 10);
+                      const isPref = Boolean(primaryLoginPhone && primaryLoginPhone === clean && clean.length === 10);
+                      const isOtherPrefSelected = Boolean(primaryLoginPhone && primaryLoginPhone !== clean);
+
+                      return (
+                        <div key={idx} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          flexWrap: 'wrap',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--radius-md)',
+                          background: isPref ? 'rgba(197, 154, 88, 0.06)' : 'var(--bg-card-subtle)',
+                          border: `1.5px solid ${isPref ? '#C59A58' : 'var(--border-color)'}`,
+                          transition: 'all 0.2s ease'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 240px', minWidth: '200px' }}>
+                            <span style={{
+                              padding: '10px 12px',
+                              background: 'var(--bg-surface)',
+                              borderRadius: 'var(--radius-sm)',
+                              border: '1px solid var(--border-color)',
+                              fontSize: '13px',
+                              fontWeight: '600',
+                              color: 'var(--text-muted)',
+                              flexShrink: 0
+                            }}>
+                              +91
+                            </span>
+                            <input
+                              type="tel"
+                              maxLength={10}
+                              value={mob}
+                              onChange={(e) => handleClientMobileChange(idx, e.target.value)}
+                              placeholder="Enter 10-digit mobile"
+                              style={{
+                                flex: 1,
+                                width: '100%',
+                                minWidth: 0,
+                                boxSizing: 'border-box',
+                                padding: '10px 12px',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-color)',
+                                background: 'var(--bg-card)',
+                                outline: 'none',
+                                fontSize: '14px',
+                                letterSpacing: '0.04em'
+                              }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                            <LoginPreferenceSelector
+                              isSelected={isPref}
+                              isDisabled={isOtherPrefSelected}
+                              onSelect={() => handleSelectClientPrimaryPhone(mob)}
+                              onChangePreference={handleChangeClientPrimaryPhone}
+                              type="phone"
+                            />
+                            {clientMobiles.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveClientMobile(idx)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  cursor: 'pointer',
+                                  padding: '6px',
+                                  borderRadius: '4px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  transition: 'color 0.15s ease'
+                                }}
+                                title="Remove mobile number"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddClientMobile}
                       style={{
-                        flex: 1,
-                        width: '100%',
-                        minWidth: 0,
-                        boxSizing: 'border-box',
-                        padding: '12px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: `1.5px solid ${isDuplicate ? '#DC2626' : (isMobileValid ? '#16A34A' : 'var(--border-color)')}`,
-                        background: 'var(--bg-card-subtle)',
-                        outline: 'none',
-                        fontSize: '14px',
-                        letterSpacing: '0.04em'
+                        background: 'none',
+                        border: 'none',
+                        color: '#B88B4A',
+                        fontSize: '12.5px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        padding: '4px 0',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
                       }}
-                    />
+                    >
+                      + Add Another Mobile Number
+                    </button>
+                    {!primaryLoginPhone && (
+                      <span style={{ fontSize: '12px', color: '#DC2626', fontWeight: '500' }}>
+                        * Please select one mobile number as Primary Login Number
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <div style={{ minWidth: 0 }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    Email Address <span style={{ color: '#DC2626' }}>*</span>
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="email"
-                      value={clientEmail}
-                      onChange={(e) => setClientEmail(e.target.value)}
-                      placeholder="e.g. john.doe@example.com"
-                      required
+                {/* Email Addresses Section */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-main)' }}>
+                      Email Address(es) <span style={{ color: '#DC2626' }}>*</span>
+                    </label>
+                    <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <HelpCircle size={13} />
+                      Select one as Primary Login Email for dashboard access
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {clientEmails.map((em, idx) => {
+                      const clean = (em || '').trim().toLowerCase();
+                      const isPref = Boolean(primaryLoginEmail && primaryLoginEmail.toLowerCase() === clean && clean.length > 0);
+                      const isOtherPrefSelected = Boolean(primaryLoginEmail && primaryLoginEmail.toLowerCase() !== clean);
+
+                      return (
+                        <div key={idx} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          flexWrap: 'wrap',
+                          padding: '10px 14px',
+                          borderRadius: 'var(--radius-md)',
+                          background: isPref ? 'rgba(197, 154, 88, 0.06)' : 'var(--bg-card-subtle)',
+                          border: `1.5px solid ${isPref ? '#C59A58' : 'var(--border-color)'}`,
+                          transition: 'all 0.2s ease'
+                        }}>
+                          <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px' }}>
+                            <input
+                              type="email"
+                              value={em}
+                              onChange={(e) => handleClientEmailChange(idx, e.target.value)}
+                              placeholder="e.g. client@example.com"
+                              style={{
+                                width: '100%',
+                                boxSizing: 'border-box',
+                                padding: '10px 12px 10px 36px',
+                                borderRadius: 'var(--radius-sm)',
+                                border: '1px solid var(--border-color)',
+                                background: 'var(--bg-card)',
+                                outline: 'none',
+                                fontSize: '14px'
+                              }}
+                            />
+                            <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '11px', top: '12px' }} />
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                            <LoginPreferenceSelector
+                              isSelected={isPref}
+                              isDisabled={isOtherPrefSelected}
+                              onSelect={() => handleSelectClientPrimaryEmail(em)}
+                              onChangePreference={handleChangeClientPrimaryEmail}
+                              type="email"
+                            />
+                            {clientEmails.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveClientEmail(idx)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  cursor: 'pointer',
+                                  padding: '6px',
+                                  borderRadius: '4px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  transition: 'color 0.15s ease'
+                                }}
+                                title="Remove email address"
+                              >
+                                <X size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={handleAddClientEmail}
                       style={{
-                        width: '100%',
-                        maxWidth: '100%',
-                        boxSizing: 'border-box',
-                        padding: '11px 14px 11px 36px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1.5px solid var(--border-color)',
-                        background: 'var(--bg-card-subtle)',
-                        outline: 'none',
-                        fontSize: '14px'
+                        background: 'none',
+                        border: 'none',
+                        color: '#B88B4A',
+                        fontSize: '12.5px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        padding: '4px 0',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
                       }}
-                    />
-                    <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '13px' }} />
+                    >
+                      + Add Another Email Address
+                    </button>
+                    {!primaryLoginEmail && (
+                      <span style={{ fontSize: '12px', color: '#DC2626', fontWeight: '500' }}>
+                        * Please select one email address as Primary Login Email
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -1021,7 +1021,9 @@ function seedData() {
     ['incorporation_doc', 'TEXT'],
     ['aoa_moa_doc', 'TEXT'],
     ['aoa_doc', 'TEXT'],
-    ['moa_doc', 'TEXT']
+    ['moa_doc', 'TEXT'],
+    ['primary_login_phone', 'TEXT'],
+    ['primary_login_email', 'TEXT']
   ];
   for (const [colName, colType] of kycCols) {
     try {
@@ -1030,6 +1032,26 @@ function seedData() {
       // Column already exists
     }
   }
+
+  // Safe migrations for Login Preference columns
+  try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN primary_login_phone TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN primary_login_email TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATION_STAKEHOLDERS ADD COLUMN primary_login_phone TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATION_STAKEHOLDERS ADD COLUMN primary_login_email TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN mobile_numbers TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN email_ids TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN primary_login_phone TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN primary_login_email TEXT;`); } catch(e) {}
+
+  // Backfill existing LOCATIONS and CLIENTS primary login credentials
+  try {
+    db.prepare(`UPDATE LOCATIONS SET primary_login_phone = phone WHERE primary_login_phone IS NULL AND phone IS NOT NULL`).run();
+    db.prepare(`UPDATE LOCATIONS SET primary_login_email = email WHERE primary_login_email IS NULL AND email IS NOT NULL`).run();
+    db.prepare(`UPDATE LOCATION_KYC SET primary_login_phone = (SELECT phone FROM LOCATIONS WHERE LOCATIONS.location_id = LOCATION_KYC.location_id) WHERE primary_login_phone IS NULL`).run();
+    db.prepare(`UPDATE LOCATION_KYC SET primary_login_email = (SELECT email FROM LOCATIONS WHERE LOCATIONS.location_id = LOCATION_KYC.location_id) WHERE primary_login_email IS NULL`).run();
+    db.prepare(`UPDATE CLIENTS SET primary_login_phone = phone WHERE primary_login_phone IS NULL AND phone IS NOT NULL`).run();
+    db.prepare(`UPDATE CLIENTS SET primary_login_email = email WHERE primary_login_email IS NULL AND email IS NOT NULL`).run();
+  } catch(e) {}
 
   // Reset any hardcoded mock daily_income in LOCATIONS table to 0 so values strictly reflect real branch metrics
   try {
