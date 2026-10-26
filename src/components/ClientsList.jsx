@@ -38,7 +38,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0 }}>Client Directory</h1>
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>Client Directory</h1>
         </div>
 
         {/* 90-Day Policy Badge */}

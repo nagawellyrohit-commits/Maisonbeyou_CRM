@@ -1233,7 +1233,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Clients Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'clients' && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
