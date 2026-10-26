@@ -187,9 +187,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           <h1 style={{ fontSize: '28px', color: '#1C1917', margin: '4px 0 0 0', fontWeight: '800' }}>
             MEMBERSHIP TIERS & CLIENT DIRECTORY
           </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-            Exclusive membership tiers, client beauty credits, validity tenure, and privilege redemptions for {activeLocation?.name || 'this studio'}.
-          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -224,97 +221,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             <Plus size={16} />
             Enroll Client into Membership
           </button>
-        </div>
-      </div>
-
-      {/* 4 KPI Statistics Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-        {/* Card 1: Enrolled Members */}
-        <div style={{
-          padding: '18px 20px',
-          background: '#FFFFFF',
-          borderRadius: '12px',
-          border: '1px solid #EADBBE',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Enrolled Members
-            </span>
-            <Users size={18} color="#B88B4A" />
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: '#1C1917', marginTop: '6px' }}>
-            {stats.total_members}
-          </div>
-          <div style={{ fontSize: '11.5px', color: '#78716C', marginTop: '4px' }}>
-            Active club members in {activeLocation?.code || 'this studio'}
-          </div>
-        </div>
-
-        {/* Card 2: Allocated Credits */}
-        <div style={{
-          padding: '18px 20px',
-          background: '#FFFFFF',
-          borderRadius: '12px',
-          border: '1px solid #EADBBE',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Allocated Credits
-            </span>
-            <Wallet size={18} color="#B88B4A" />
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: '#1C1917', marginTop: '6px' }}>
-            {formatCurrency(stats.total_allocated)}
-          </div>
-          <div style={{ fontSize: '11.5px', color: '#78716C', marginTop: '4px' }}>
-            Total membership credit worth issued
-          </div>
-        </div>
-
-        {/* Card 3: Credits Redeemed */}
-        <div style={{
-          padding: '18px 20px',
-          background: '#F0FDF4',
-          borderRadius: '12px',
-          border: '1px solid #BBF7D0',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#166534', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Credits Redeemed
-            </span>
-            <Sparkles size={18} color="#166534" />
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: '#166534', marginTop: '6px' }}>
-            {formatCurrency(stats.total_used)}
-          </div>
-          <div style={{ fontSize: '11.5px', color: '#15803D', marginTop: '4px' }}>
-            {stats.overall_usage_pct}% overall treatment redemption
-          </div>
-        </div>
-
-        {/* Card 4: Active Available Balance */}
-        <div style={{
-          padding: '18px 20px',
-          background: '#EFF6FF',
-          borderRadius: '12px',
-          border: '1px solid #BFDBFE',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#1E40AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Active Client Balance
-            </span>
-            <CreditCard size={18} color="#1E40AF" />
-          </div>
-          <div style={{ fontSize: '28px', fontWeight: '800', color: '#1E40AF', marginTop: '6px' }}>
-            {formatCurrency(stats.total_balance)}
-          </div>
-          <div style={{ fontSize: '11.5px', color: '#2563EB', marginTop: '4px' }}>
-            Available balance for treatments & rituals
-          </div>
         </div>
       </div>
 
