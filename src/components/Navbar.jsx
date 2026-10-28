@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, Check, Building2 } from 'lucide-react';
-import { getStoredUser, setStoredToken, setStoredUser, getStoredLocation, setStoredLocation, formatCurrency, formatDate } from '../utils/api';
+import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, Check, Building2, ArrowLeft } from 'lucide-react';
+import { getStoredToken, getStoredUser, setStoredToken, setStoredUser, getStoredLocation, setStoredLocation, formatCurrency, formatDate, apiRequest } from '../utils/api';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
@@ -91,19 +91,14 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   const handleQuickSwitchRole = async (targetRole) => {
     try {
       const activeLocId = activeLocation?.location_id || currentUser?.location_id;
-      const res = await fetch('/api/auth/switch-role', {
+      const data = await apiRequest('/auth/switch-role', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {})
-        },
         body: JSON.stringify({
           role: targetRole,
           location_id: activeLocId
         })
       });
-      const data = await res.json();
-      if (res.ok) {
+      if (data && data.token) {
         setStoredToken(data.token);
         setStoredUser(data.user);
         setCurrentUser(data.user);
@@ -128,11 +123,11 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
         }
         window.dispatchEvent(new Event('auth_change'));
       } else {
-        alert(data.error || 'Failed to switch desk role');
+        alert(data?.error || 'Failed to switch desk role');
       }
     } catch (e) {
       console.error('Quick switch error:', e);
-      alert('Network error switching desk role');
+      alert(e.message || 'Failed to switch desk role');
     }
   };
 
@@ -783,11 +778,11 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
         {/* Right side info & user controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
           {/* Master Admin: Switch Studio button */}
-          {currentUser?.role === 'master_admin' && onSwitchLocation && (
+          {false && isMasterAdmin && onSwitchLocation && (
             <button
               type="button"
               onClick={onSwitchLocation}
-              title="Return to Studio Management / Switch Location"
+              title="Back"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -813,8 +808,54 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 e.currentTarget.style.borderColor = '#DAC493';
               }}
             >
-              <Building2 size={14} />
-              <span>Switch Studio</span>
+              <ArrowLeft size={14} />
+              <span>Back</span>
+            </button>
+          )}
+
+          {/* Branch Admin / Reception (and Master Admin when on Visitor Desk or sub-page): Dashboard button in place of Switch Studio */}
+          {(isBranchAdmin || isReception || (isMasterAdmin && (currentUser?.role === 'visitor' || activeTab !== 'dashboard'))) && (
+            <button
+              type="button"
+              onClick={() => {
+                if (currentUser?.role === 'visitor') {
+                  handleQuickSwitchRole(isReception ? 'reception' : 'admin');
+                } else {
+                  if (onResetVisit && activeVisitClient) {
+                    onResetVisit();
+                  }
+                  setActiveTab('dashboard');
+                  window.dispatchEvent(new CustomEvent('reset_dashboard_section'));
+                }
+              }}
+              title="Return to Studio Dashboard"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '7px',
+                padding: '7px 15px',
+                borderRadius: '9999px',
+                fontSize: '12.5px',
+                fontWeight: '700',
+                color: '#9F7335',
+                background: '#FAF6EE',
+                border: '1.5px solid #DAC493',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#B88B4A';
+                e.currentTarget.style.color = '#FFFFFF';
+                e.currentTarget.style.borderColor = '#B88B4A';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.color = '#9F7335';
+                e.currentTarget.style.borderColor = '#DAC493';
+              }}
+            >
+              <LayoutDashboard size={14} />
+              <span>Dashboard</span>
             </button>
           )}
           {/* Priority 1: When a Client is Active in the Visit Flow (visitor desk only)
@@ -1141,7 +1182,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 </div>
               )}
             </div>
-          ) : (activeTab === 'dashboard' || currentUser?.role === 'visitor') ? (
+          ) : (
             /* Visitor Desk or Dashboard User Profile pill (Image 3) */
             <div ref={switchMenuRef} style={{ position: 'relative' }}>
               <div 
@@ -1213,7 +1254,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     </button>
                   )}
 
-                  {(isMasterAdmin || isBranchAdmin) && (
+                  {(isMasterAdmin || (isBranchAdmin && currentUser?.role !== 'admin')) && (
                     <button
                       onClick={() => handleQuickSwitchRole('admin')}
                       style={{
@@ -1229,13 +1270,13 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       }}
                     >
                       <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                        🏢 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Admin' : 'Studio Admin'}
+                        🏢 Branch Admin
                       </span>
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Admin • Full Studio Operations & Reports</span>
                     </button>
                   )}
 
-                  {(isMasterAdmin || isBranchAdmin || isReception) && (
+                  {(isMasterAdmin || isBranchAdmin || (isReception && currentUser?.role !== 'reception')) && (
                     <button
                       onClick={() => handleQuickSwitchRole('reception')}
                       style={{
@@ -1251,7 +1292,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       }}
                     >
                       <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                        🛎️ {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Reception' : 'Reception Desk'}
+                        🛎️ Manager
                       </span>
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Staff • Dashboard, Billing & Visits</span>
                     </button>
@@ -1273,7 +1314,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                       }}
                     >
                       <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
-                        📋 {activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) + ' Visitor Desk' : 'Visitor Desk'}
+                        📋 Visitor
                       </span>
                       <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitor • Client Check-in & Intake Flow</span>
                     </button>
@@ -1320,39 +1361,6 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 </div>
               )}
             </div>
-          ) : (
-            /* When on ANY OTHER page: Replace Reception/Admin profile with Dashboard Button */
-            <button
-              type="button"
-              onClick={() => setShowDashboardConfirm(true)}
-              title="Return to Main Dashboard"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '9px 20px',
-                borderRadius: '9999px',
-                fontSize: '13.5px',
-                fontWeight: '600',
-                color: '#B88B4A',
-                background: '#FAF6EE',
-                border: '1.5px solid rgba(218, 196, 147, 0.55)',
-                cursor: 'pointer',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#F5ECE0';
-                e.currentTarget.style.borderColor = '#B88B4A';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.55)';
-              }}
-            >
-              <LayoutDashboard size={16} color="#B88B4A" />
-              <span>Dashboard</span>
-            </button>
           )}
         </div>
       </div>

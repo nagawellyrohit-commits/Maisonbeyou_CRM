@@ -1,18 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BarChart3, IndianRupee, Users, Sparkles, Award,
   TrendingUp, Calendar, ChevronRight, ChevronLeft, Filter, Download,
   Printer, RefreshCw, Clock, AlertCircle, CheckCircle2,
   ArrowUpRight, Search, CreditCard, Flame, Snowflake,
-  X, UserPlus, UserCheck, Repeat, Crown
+  X, UserPlus, UserCheck, Repeat, Crown, GripVertical, RotateCcw
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate } from '../utils/api';
 
-export default function ReportsView() {
+const DEFAULT_KPI_CARD_ORDER = [
+  'revenue',
+  'ticket',
+  'footfall',
+  'memberships',
+  'category',
+  'services',
+  'payment',
+  'staff'
+];
+
+export default function ReportsView({ onOpenClient }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Membership quick management modals in Reports
+  const [adjustBalanceModal, setAdjustBalanceModal] = useState({ open: false, member: null, amount: '' });
+  const [extendValidityModal, setExtendValidityModal] = useState({ open: false, member: null, date: '' });
 
   // Filter states
   const [preset, setPreset] = useState('month'); // 'today' | 'yesterday' | 'week' | 'last_week' | 'month' | 'last_month' | 'year' | 'last_year' | 'all_time' | 'specific_month' | 'specific_year' | 'custom'
@@ -32,6 +47,93 @@ export default function ReportsView() {
 
   // Executive KPI deep-dive popup modal tab state ('revenue' | 'ticket' | 'footfall' | 'memberships' | 'category' | 'payment' | 'staff' | 'services' | null)
   const [activeKpiModal, setActiveKpiModal] = useState(null);
+
+  // Draggable KPI cards state
+  const [kpiCardOrder, setKpiCardOrder] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mb_reports_kpi_card_order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_KPI_CARD_ORDER.length && DEFAULT_KPI_CARD_ORDER.every(id => parsed.includes(id))) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return DEFAULT_KPI_CARD_ORDER;
+  });
+  const [draggedCardId, setDraggedCardId] = useState(null);
+  const [dragOverCardId, setDragOverCardId] = useState(null);
+  const isDraggingRef = useRef(false);
+
+  const handleDragStart = (e, cardId) => {
+    isDraggingRef.current = true;
+    setDraggedCardId(cardId);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', cardId);
+    } catch (err) {}
+  };
+
+  const handleDragOver = (e, cardId) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverCardId !== cardId) {
+      setDragOverCardId(cardId);
+    }
+  };
+
+  const handleDragLeave = (e, cardId) => {
+    if (dragOverCardId === cardId) {
+      setDragOverCardId(null);
+    }
+  };
+
+  const handleDrop = (e, targetCardId) => {
+    e.preventDefault();
+    if (!draggedCardId || draggedCardId === targetCardId) {
+      setDragOverCardId(null);
+      setDraggedCardId(null);
+      setTimeout(() => { isDraggingRef.current = false; }, 120);
+      return;
+    }
+
+    const newOrder = [...kpiCardOrder];
+    const sourceIdx = newOrder.indexOf(draggedCardId);
+    const targetIdx = newOrder.indexOf(targetCardId);
+
+    if (sourceIdx !== -1 && targetIdx !== -1) {
+      newOrder.splice(sourceIdx, 1);
+      newOrder.splice(targetIdx, 0, draggedCardId);
+      setKpiCardOrder(newOrder);
+      try {
+        localStorage.setItem('mb_reports_kpi_card_order', JSON.stringify(newOrder));
+      } catch (err) {}
+    }
+
+    setDragOverCardId(null);
+    setDraggedCardId(null);
+    setTimeout(() => { isDraggingRef.current = false; }, 120);
+  };
+
+  const handleDragEnd = () => {
+    setDragOverCardId(null);
+    setDraggedCardId(null);
+    setTimeout(() => { isDraggingRef.current = false; }, 120);
+  };
+
+  const handleResetCardOrder = () => {
+    setKpiCardOrder(DEFAULT_KPI_CARD_ORDER);
+    try {
+      localStorage.removeItem('mb_reports_kpi_card_order');
+    } catch (err) {}
+  };
+
+  const handleCardClick = (cardId) => {
+    if (isDraggingRef.current) return;
+    setActiveKpiModal(cardId);
+  };
   const [footfallTab, setFootfallTab] = useState('all'); // 'all' | 'new' | 'old'
   const [footfallSearch, setFootfallSearch] = useState('');
 
@@ -96,6 +198,42 @@ export default function ReportsView() {
   useEffect(() => {
     fetchReports();
   }, []);
+
+  const handleSaveBalanceAdjustment = async (e) => {
+    e.preventDefault();
+    const { member, amount } = adjustBalanceModal;
+    if (!member) return;
+    try {
+      await apiRequest(`/clients/${member.client_id}/membership`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          membership_balance: parseFloat(amount) || 0
+        })
+      });
+      setAdjustBalanceModal({ open: false, member: null, amount: '' });
+      fetchReports();
+    } catch (err) {
+      alert('Failed to update balance: ' + err.message);
+    }
+  };
+
+  const handleSaveExtendValidity = async (e) => {
+    e.preventDefault();
+    const { member, date } = extendValidityModal;
+    if (!member || !date) return;
+    try {
+      await apiRequest(`/clients/${member.client_id}/membership-validity`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          membership_expires_at: date
+        })
+      });
+      setExtendValidityModal({ open: false, member: null, date: '' });
+      fetchReports();
+    } catch (err) {
+      alert('Failed to extend validity: ' + err.message);
+    }
+  };
 
   // Handle escape key to close modals
   useEffect(() => {
@@ -272,6 +410,15 @@ export default function ReportsView() {
 
   const payment_methods = paymentMethods;
 
+  // Valid tender payment modes (strictly excludes null and 'Other' non-tender entries as requested)
+  const displayPaymentMethods = useMemo(() => {
+    return (paymentMethods || []).filter(pm => {
+      if (!pm || !pm.payment_method) return false;
+      const method = String(pm.payment_method).trim().toLowerCase();
+      return method !== '' && method !== 'other' && method !== 'null' && method !== 'undefined';
+    });
+  }, [paymentMethods]);
+
   // Unused services filtering
   const filteredUnusedServices = unused_services.filter(s => {
     const matchesSearch = !unusedSearch || s.service_name.toLowerCase().includes(unusedSearch.toLowerCase());
@@ -334,7 +481,7 @@ export default function ReportsView() {
   });
 
   return (
-    <div className="animate-fade-in reports-container" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-fade-in reports-container" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
 
       {/* 1. Header & Executive Controls */}
       <div style={{
@@ -344,16 +491,16 @@ export default function ReportsView() {
         justifyContent: 'space-between',
         gap: '16px',
         borderBottom: '1px solid #E7DFD5',
-        paddingBottom: '20px'
+        paddingBottom: '22px'
       }}>
         <div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '800', letterSpacing: '-0.01em' }}>
-            EXECUTIVE REPORTING & ANALYTICS
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700', paddingLeft: '20px' }}>
+            Executive Reporting & Analytics
           </h1>
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginRight: '20px' }}>
           <button
             type="button"
             onClick={handleExportCSV}
@@ -425,7 +572,8 @@ export default function ReportsView() {
 
       {/* 2. Interactive Period & Date Range Filter Bar */}
       <div className="card" style={{
-        padding: '16px 20px',
+        marginTop: '8px',
+        padding: '18px 22px',
         background: '#FAF6EE',
         border: '1.5px solid #DAC493',
         borderRadius: '14px',
@@ -556,642 +704,546 @@ export default function ReportsView() {
         </div>
       </div>
 
-      {/* 3. Executive KPI Metric Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '16px' }}>
-
-        {/* 1. Period Collected Revenue */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('revenue')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(22, 101, 52, 0.12)';
-            e.currentTarget.style.borderColor = '#86EFAC';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Revenue Breakdown & Invoices"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Period Collected Revenue
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <IndianRupee size={16} color="#B88B4A" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#166534', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(revenue.period_revenue)}
-            </div>
+      {/* 3. Executive KPI Metric Cards (Draggable & Flexible Reordering) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', padding: '0 4px', marginBottom: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#78716C', fontWeight: '600' }}>
+            <GripVertical size={13} color="#B88B4A" />
+            <span>Drag cards to reorder executive metrics to your preferred layout</span>
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#166534',
-            fontWeight: '600',
-            borderTop: '1px dashed #DCFCE7'
-          }}>
-            <span>Tap for Revenue Audit</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#F0FDF4',
-              color: '#166534',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #BBF7D0',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
-        {/* 2. Average Ticket Value */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('ticket')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(37, 99, 235, 0.12)';
-            e.currentTarget.style.borderColor = '#93C5FD';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Average Ticket Size Distribution"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Average Ticket Size
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <TrendingUp size={16} color="#2563EB" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#1E40AF', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(revenue.avg_ticket)}
-            </div>
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#2563EB',
-            fontWeight: '600',
-            borderTop: '1px dashed #DBEAFE'
-          }}>
-            <span>Tap for Ticket Distribution</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#EFF6FF',
-              color: '#2563EB',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #BFDBFE',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
-        {/* 3. Client Footfall & Rate */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('footfall')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(124, 58, 237, 0.12)';
-            e.currentTarget.style.borderColor = '#C4B5FD';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view New vs Old client counts & breakdown"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Client Footfall & Rate
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#F5F3FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Users size={16} color="#7C3AED" />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '14px', height: '36px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1, letterSpacing: '-0.02em' }}>
-                  {clients.period_unique || 0}
-                </span>
-                <span style={{ fontSize: '12px', color: '#78716C', fontWeight: '600', textTransform: 'uppercase' }}>
-                  footfall
-                </span>
-              </div>
-              <div style={{
-                background: '#DCFCE7',
-                color: '#166534',
-                fontWeight: '800',
-                fontSize: '13px',
-                padding: '3px 8px',
-                borderRadius: '6px',
-                display: 'flex',
+          {JSON.stringify(kpiCardOrder) !== JSON.stringify(DEFAULT_KPI_CARD_ORDER) && (
+            <button
+              type="button"
+              onClick={handleResetCardOrder}
+              style={{
+                display: 'inline-flex',
                 alignItems: 'center',
-                gap: '4px',
-                border: '1px solid #BBF7D0'
-              }}>
-                <span>{clients.period_repeat_rate || 0}%</span>
-                <span style={{ fontSize: '11px', fontWeight: '700' }}>Repeat</span>
-              </div>
-            </div>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#7C3AED',
-            fontWeight: '600',
-            borderTop: '1px dashed #EDE9FE'
-          }}>
-            <span>Tap for New & Old counts</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#F5F3FF',
-              color: '#7C3AED',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #DDD6FE',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
-        {/* 4. Studio Memberships & Credits */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('memberships')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(184, 139, 74, 0.15)';
-            e.currentTarget.style.borderColor = '#DAC493';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Studio Memberships & Client Credits Intelligence"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#8C6828', fontWeight: '800', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Studio Memberships & Credits
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Crown size={15} color="#B88B4A" />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '14px', height: '36px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                <span style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1, letterSpacing: '-0.02em' }}>
-                  {memberships.total_members || 0}
-                </span>
-                <span style={{ fontSize: '12px', color: '#78716C', fontWeight: '600', textTransform: 'uppercase' }}>
-                  members
-                </span>
-              </div>
-              <div style={{
-                background: '#FAF6EE',
+                gap: '5px',
+                padding: '3px 10px',
+                fontSize: '11px',
+                fontWeight: '700',
                 color: '#8C6828',
-                fontWeight: '800',
-                fontSize: '12px',
-                padding: '3px 8px',
+                background: '#FAF6EE',
+                border: '1px solid #DAC493',
                 borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                border: '1px solid #DAC493'
-              }}>
-                <span>{memberships.total_plans || 4} Plans</span>
-              </div>
-            </div>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#8C6828',
-            fontWeight: '600',
-            borderTop: '1px dashed #DAC493'
-          }}>
-            <span>Tap for Membership Audit</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#FAF6EE',
-              color: '#8C6828',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #DAC493',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title="Reset to default card layout"
+            >
+              <RotateCcw size={11} color="#8C6828" />
+              Reset Order
+            </button>
+          )}
         </div>
 
-      </div>
+        <div className="reports-kpi-grid">
+          {kpiCardOrder.map((cardId) => {
+            const isDragged = draggedCardId === cardId;
+            const isDragOver = dragOverCardId === cardId && draggedCardId !== cardId;
 
-      {/* 3b. Treatment Category, Catalog, Payment Modes & Staff KPI Cards (Matching Image 2) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '16px' }}>
+            const baseCardStyle = {
+              padding: '20px 22px 18px 22px',
+              borderRadius: '16px',
+              background: '#FFFFFF',
+              border: isDragOver ? '2px dashed #B88B4A' : '1px solid #EFEAE4',
+              position: 'relative',
+              overflow: 'hidden',
+              cursor: 'grab',
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxSizing: 'border-box',
+              opacity: isDragged ? 0.35 : 1,
+              transform: isDragOver ? 'scale(1.02)' : 'none',
+              boxShadow: isDragOver ? '0 8px 24px rgba(184, 139, 74, 0.22)' : ''
+            };
 
-        {/* Card 1: Revenue by Category */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('category')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(184, 139, 74, 0.12)';
-            e.currentTarget.style.borderColor = '#DAC493';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Revenue by Category Insights"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Revenue By Category
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Award size={16} color="#B88B4A" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#B88B4A', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(categories.reduce((acc, c) => acc + (c.total_revenue || 0), 0) || revenue.period_revenue || 0)}
-            </div>
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#8C6828',
-            fontWeight: '600',
-            borderTop: '1px dashed #DAC493'
-          }}>
-            <span>Tap for Category Insights</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#FAF6EE',
-              color: '#8C6828',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #DAC493',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
+            const handleMouseEnter = (e) => {
+              if (!isDraggingRef.current && dragOverCardId !== cardId) {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(184, 139, 74, 0.12)';
+                e.currentTarget.style.borderColor = '#DAC493';
+              }
+            };
+
+            const handleMouseLeave = (e) => {
+              if (!isDraggingRef.current && dragOverCardId !== cardId) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '';
+                e.currentTarget.style.borderColor = '#EFEAE4';
+              }
+            };
+
+            const dragProps = {
+              className: 'card reports-kpi-card',
+              draggable: true,
+              onDragStart: (e) => handleDragStart(e, cardId),
+              onDragOver: (e) => handleDragOver(e, cardId),
+              onDragLeave: (e) => handleDragLeave(e, cardId),
+              onDrop: (e) => handleDrop(e, cardId),
+              onDragEnd: handleDragEnd,
+              onClick: () => handleCardClick(cardId),
+              onMouseEnter: handleMouseEnter,
+              onMouseLeave: handleMouseLeave,
+              style: baseCardStyle
+            };
+
+            if (cardId === 'revenue') {
+              return (
+                <div
+                  key="revenue"
+                  {...dragProps}
+                  title="Click to view Revenue Breakdown & Invoices (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Period Collected Revenue
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <IndianRupee size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(revenue.period_revenue)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Revenue Audit</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'ticket') {
+              return (
+                <div
+                  key="ticket"
+                  {...dragProps}
+                  title="Click to view Average Ticket Size Distribution (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Average Ticket Size
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <TrendingUp size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(revenue.avg_ticket)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Ticket Distribution</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'footfall') {
+              return (
+                <div
+                  key="footfall"
+                  {...dragProps}
+                  title="Click to view New vs Old client counts & breakdown (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Client Footfall & Rate
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Users size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '14px', height: '36px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                        {clients.period_unique || 0}
+                      </span>
+                      <span style={{ fontSize: '12px', color: '#78716C', fontWeight: '600', textTransform: 'uppercase' }}>
+                        footfall
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for New & Old counts</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'memberships') {
+              return (
+                <div
+                  key="memberships"
+                  {...dragProps}
+                  title="Click to view Studio Memberships & Client Credits Intelligence (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Studio Memberships & Credits
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Crown size={15} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '14px', height: '36px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                        {memberships.total_members || 0}
+                      </span>
+                      <span style={{ fontSize: '12px', color: '#78716C', fontWeight: '600', textTransform: 'uppercase' }}>
+                        members
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Membership Audit</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'category') {
+              return (
+                <div
+                  key="category"
+                  {...dragProps}
+                  title="Click to view Revenue by Category Insights (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Revenue By Category
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Award size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(categories.reduce((acc, c) => acc + (c.total_revenue || 0), 0) || revenue.period_revenue || 0)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Category Insights</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'services') {
+              return (
+                <div
+                  key="services"
+                  {...dragProps}
+                  title="Click to view Service Utilization & Catalog Intelligence (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Service Utilization & Catalog
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Flame size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(top_services.reduce((acc, s) => acc + (s.total_revenue || 0), 0) || revenue.period_revenue || 0)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Catalog Intelligence</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'payment') {
+              return (
+                <div
+                  key="payment"
+                  {...dragProps}
+                  title="Click to view Payment Methods Breakdown (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Payment Methods Breakdown
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <CreditCard size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(displayPaymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) || revenue.period_revenue || 0)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Payment Mode Audit</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (cardId === 'staff') {
+              return (
+                <div
+                  key="staff"
+                  {...dragProps}
+                  title="Click to view Staff Productivity Audit (Drag to reorder)"
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
+                        Staff Treatment & Revenue Performance
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <GripVertical size={13} color="#B88B4A" style={{ opacity: 0.45, cursor: 'grab' }} />
+                        <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <Users size={16} color="#B88B4A" />
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
+                      {formatCurrency(staff_performance.reduce((acc, s) => acc + (s.revenue_generated || 0), 0) || revenue.period_revenue || 0)}
+                    </div>
+                  </div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginTop: '16px',
+                    paddingTop: '12px',
+                    fontSize: '11.5px',
+                    color: '#8C6828',
+                    fontWeight: '600',
+                    borderTop: '1px dashed #DAC493'
+                  }}>
+                    <span>Tap for Staff Productivity Audit</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '10.5px',
+                      background: '#FAF6EE',
+                      color: '#8C6828',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #DAC493',
+                      fontWeight: '700'
+                    }}>
+                      Breakdown ↗
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            return null;
+          })}
         </div>
-
-        {/* Card 2: Service Utilization & Catalog */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('services')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(234, 88, 12, 0.12)';
-            e.currentTarget.style.borderColor = '#FDBA74';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Service Utilization & Catalog Intelligence"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Service Utilization & Catalog
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FFF7ED', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Flame size={16} color="#EA580C" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#C2410C', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(top_services.reduce((acc, s) => acc + (s.total_revenue || 0), 0) || revenue.period_revenue || 0)}
-            </div>
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#EA580C',
-            fontWeight: '600',
-            borderTop: '1px dashed #FED7AA'
-          }}>
-            <span>Tap for Catalog Intelligence</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#FFF7ED',
-              color: '#EA580C',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #FDBA74',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
-        {/* Card 3: Payment Methods Breakdown */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('payment')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(22, 101, 52, 0.12)';
-            e.currentTarget.style.borderColor = '#86EFAC';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Payment Methods Breakdown"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Payment Methods Breakdown
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <CreditCard size={16} color="#166534" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#166534', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(paymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) || revenue.period_revenue || 0)}
-            </div>
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#166534',
-            fontWeight: '600',
-            borderTop: '1px dashed #DCFCE7'
-          }}>
-            <span>Tap for Payment Mode Audit</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#F0FDF4',
-              color: '#166534',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #BBF7D0',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
-        {/* Card 4: Staff Treatment & Revenue Performance */}
-        <div
-          className="card"
-          onClick={() => setActiveKpiModal('staff')}
-          style={{
-            padding: '20px 22px 18px 22px',
-            borderRadius: '16px',
-            background: '#FFFFFF',
-            border: '1px solid #EFEAE4',
-            position: 'relative',
-            overflow: 'hidden',
-            cursor: 'pointer',
-            transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(184, 139, 74, 0.12)';
-            e.currentTarget.style.borderColor = '#DAC493';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '';
-            e.currentTarget.style.borderColor = '#EFEAE4';
-          }}
-          title="Click to view Staff Productivity Audit"
-        >
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minHeight: '34px', gap: '8px' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Staff Treatment & Revenue Performance
-              </span>
-              <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: '#FAF6EE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Users size={16} color="#B88B4A" />
-              </div>
-            </div>
-            <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', marginTop: '14px', height: '36px', display: 'flex', alignItems: 'center', lineHeight: 1, letterSpacing: '-0.02em' }}>
-              {formatCurrency(staff_performance.reduce((acc, s) => acc + (s.revenue_generated || 0), 0) || revenue.period_revenue || 0)}
-            </div>
-          </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginTop: '16px',
-            paddingTop: '12px',
-            fontSize: '11.5px',
-            color: '#8C6828',
-            fontWeight: '600',
-            borderTop: '1px dashed #DAC493'
-          }}>
-            <span>Tap for Staff Productivity Audit</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '10.5px',
-              background: '#FAF6EE',
-              color: '#8C6828',
-              padding: '2px 8px',
-              borderRadius: '4px',
-              border: '1px solid #DAC493',
-              fontWeight: '700'
-            }}>
-              Breakdown ↗
-            </span>
-          </div>
-        </div>
-
       </div>
 
       {/* 3b. Month-Wise Performance Breakdown (For Yearly, Multi-Month, or All-Time Analytics) */}
       {monthly_breakdown && monthly_breakdown.length > 0 && (
-        <div className="card" style={{ padding: '24px' }}>
+        <div className="card" style={{ padding: '24px', marginTop: '12px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '16px' }}>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1236,12 +1288,13 @@ export default function ReportsView() {
                         display: 'inline-block',
                         padding: '3px 8px',
                         borderRadius: '6px',
-                        background: m.status === 'green' ? '#F0FDF4' : m.status === 'orange' ? '#FFF7ED' : '#FEF2F2',
-                        color: m.status === 'green' ? '#166534' : m.status === 'orange' ? '#EA580C' : '#DC2626',
+                        background: m.status === 'green' ? '#FAF6EE' : '#FAF8F5',
+                        border: m.status === 'green' ? '1px solid #DAC493' : '1px solid #E7DFD5',
+                        color: m.status === 'green' ? '#8C6828' : m.status === 'orange' ? '#78716C' : '#A8A29E',
                         fontWeight: '700',
                         fontSize: '11px'
                       }}>
-                        {m.status === 'green' ? '🟢 Peak Target Met' : m.status === 'orange' ? '🟠 Steady Activity' : '🔴 Inactive'}
+                        {m.status === 'green' ? 'Peak Target Met' : m.status === 'orange' ? 'Steady Activity' : 'Inactive'}
                       </span>
                     </td>
                     <td style={{ padding: '10px 14px', color: '#1C1917', fontWeight: m.visits_count > 0 ? '700' : '400' }}>
@@ -1250,7 +1303,7 @@ export default function ReportsView() {
                     <td style={{ padding: '10px 14px', color: '#57534E' }}>
                       {m.unique_clients} {m.unique_clients === 1 ? 'client' : 'clients'}
                     </td>
-                    <td style={{ padding: '10px 14px', fontWeight: '800', color: m.revenue > 0 ? '#166534' : '#78716C', fontSize: '13px' }}>
+                    <td style={{ padding: '10px 14px', fontWeight: '800', color: m.revenue > 0 ? '#1C1917' : '#78716C', fontSize: '13px' }}>
                       {formatCurrency(m.revenue)}
                     </td>
                     <td style={{ padding: '10px 14px', color: '#57534E' }}>
@@ -1289,6 +1342,7 @@ export default function ReportsView() {
       <div
         className="card"
         style={{
+          marginTop: '12px',
           padding: '24px',
           background: '#FFFFFF',
           borderRadius: '16px',
@@ -1335,7 +1389,7 @@ export default function ReportsView() {
                   fontSize: '11.5px',
                   fontWeight: '700',
                   cursor: 'pointer',
-                  border: dayStatusFilter === 'all' ? '1.5px solid #1C1917' : '1px solid #D6D3D1',
+                  border: dayStatusFilter === 'all' ? '1.5px solid #1C1917' : '1px solid #E7DFD5',
                   background: dayStatusFilter === 'all' ? '#1C1917' : '#FFFFFF',
                   color: dayStatusFilter === 'all' ? '#FFFFFF' : '#44403C',
                   transition: 'all 0.15s ease'
@@ -1353,13 +1407,13 @@ export default function ReportsView() {
                   fontSize: '11.5px',
                   fontWeight: '700',
                   cursor: 'pointer',
-                  border: dayStatusFilter === 'green' ? '1.5px solid #166534' : '1px solid #BBF7D0',
-                  background: dayStatusFilter === 'green' ? '#166534' : '#F0FDF4',
-                  color: dayStatusFilter === 'green' ? '#FFFFFF' : '#166534',
+                  border: dayStatusFilter === 'green' ? '1.5px solid #8C6828' : '1px solid #DAC493',
+                  background: dayStatusFilter === 'green' ? '#8C6828' : '#FAF6EE',
+                  color: dayStatusFilter === 'green' ? '#FFFFFF' : '#8C6828',
                   transition: 'all 0.15s ease'
                 }}
               >
-                🟢 Peak Performance ({day_wise.green_count || 0})
+                Peak Performance ({day_wise.green_count || 0})
               </button>
 
               <button
@@ -1371,13 +1425,13 @@ export default function ReportsView() {
                   fontSize: '11.5px',
                   fontWeight: '700',
                   cursor: 'pointer',
-                  border: dayStatusFilter === 'orange' ? '1.5px solid #EA580C' : '1px solid #FED7AA',
-                  background: dayStatusFilter === 'orange' ? '#EA580C' : '#FFF7ED',
-                  color: dayStatusFilter === 'orange' ? '#FFFFFF' : '#C2410C',
+                  border: dayStatusFilter === 'orange' ? '1.5px solid #78716C' : '1px solid #E7DFD5',
+                  background: dayStatusFilter === 'orange' ? '#78716C' : '#FAF8F5',
+                  color: dayStatusFilter === 'orange' ? '#FFFFFF' : '#78716C',
                   transition: 'all 0.15s ease'
                 }}
               >
-                🟠 Steady ({day_wise.orange_count || 0})
+                Steady ({day_wise.orange_count || 0})
               </button>
 
               <button
@@ -1389,13 +1443,13 @@ export default function ReportsView() {
                   fontSize: '11.5px',
                   fontWeight: '700',
                   cursor: 'pointer',
-                  border: dayStatusFilter === 'red' ? '1.5px solid #DC2626' : '1px solid #FECACA',
-                  background: dayStatusFilter === 'red' ? '#DC2626' : '#FEF2F2',
-                  color: dayStatusFilter === 'red' ? '#FFFFFF' : '#B91C1C',
+                  border: dayStatusFilter === 'red' ? '1.5px solid #A8A29E' : '1px solid #E7DFD5',
+                  background: dayStatusFilter === 'red' ? '#A8A29E' : '#FAF8F5',
+                  color: dayStatusFilter === 'red' ? '#FFFFFF' : '#A8A29E',
                   transition: 'all 0.15s ease'
                 }}
               >
-                🔴 Zero / Inactive ({day_wise.red_count || 0})
+                Zero / Inactive ({day_wise.red_count || 0})
               </button>
             </div>
 
@@ -1435,19 +1489,19 @@ export default function ReportsView() {
                   Daily Client Trajectory Trend (New vs Old Clients)
                 </div>
                 <div style={{ fontSize: '11px', color: '#78716C', marginTop: '2px' }}>
-                  Two bars per day: <strong>Green</strong> = New Clients, <strong>Purple</strong> = Old / Returning Clients • Tap bar for day details
+                  Two bars per day: <strong>Gold</strong> = New Clients, <strong>Champagne</strong> = Old / Returning Clients • Tap bar for day details
                 </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
                 {/* Legend */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: '700' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#166534' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '3px', background: '#166534', display: 'inline-block' }} />
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#8C6828' }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '3px', background: '#B88B4A', display: 'inline-block' }} />
                     New Clients
                   </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#4F46E5' }}>
-                    <span style={{ width: '10px', height: '10px', borderRadius: '3px', background: '#4F46E5', display: 'inline-block' }} />
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#78716C' }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '3px', background: '#DAC493', display: 'inline-block' }} />
                     Old Clients
                   </span>
                 </div>
@@ -1542,25 +1596,25 @@ export default function ReportsView() {
                       width: '100%',
                       height: '84px'
                     }}>
-                      {/* Bar 1: New Client (Green) */}
+                      {/* Bar 1: New Client (Gold) */}
                       <div
                         style={{
                           width: '45%',
                           maxWidth: '12px',
                           height: `${newPct}%`,
-                          background: '#166534',
+                          background: '#B88B4A',
                           borderRadius: '3px 3px 0 0',
                           opacity: newRaw > 0 ? 0.95 : 0.2,
                           transition: 'height 0.25s ease'
                         }}
                       />
-                      {/* Bar 2: Old / Returning Client (Purple) */}
+                      {/* Bar 2: Old / Returning Client (Champagne) */}
                       <div
                         style={{
                           width: '45%',
                           maxWidth: '12px',
                           height: `${oldPct}%`,
-                          background: '#4F46E5',
+                          background: '#DAC493',
                           borderRadius: '3px 3px 0 0',
                           opacity: oldRaw > 0 ? 0.95 : 0.2,
                           transition: 'height 0.25s ease'
@@ -1580,7 +1634,7 @@ export default function ReportsView() {
         )}
 
         {/* Day-wise Table with Image 2 luxury styling */}
-        <div style={{ overflowX: 'auto', border: '1px solid #E7DFD5', borderRadius: '10px' }}>
+        <div style={{ overflowX: 'auto', border: '1px solid #E7DFD5', borderRadius: '10px', marginTop: '16px' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
             <thead>
               <tr style={{ background: '#FAF8F5', borderBottom: '1.5px solid #E2D9CC' }}>
@@ -1612,17 +1666,20 @@ export default function ReportsView() {
                 filteredDays.map((d, idx) => {
                   const avg = d.visits_count > 0 ? Math.round(d.revenue / d.visits_count) : 0;
 
-                  let badgeBg = '#FEF2F2';
-                  let badgeColor = '#DC2626';
-                  let badgeText = '🔴 No Bookings';
+                  let badgeBg = '#FAF8F5';
+                  let badgeColor = '#A8A29E';
+                  let badgeBorder = '#E7DFD5';
+                  let badgeText = 'No Bookings';
                   if (d.status === 'green') {
-                    badgeBg = '#F0FDF4';
-                    badgeColor = '#166534';
-                    badgeText = '🟢 Peak Target Met';
+                    badgeBg = '#FAF6EE';
+                    badgeColor = '#8C6828';
+                    badgeBorder = '#DAC493';
+                    badgeText = 'Peak Target Met';
                   } else if (d.status === 'orange') {
-                    badgeBg = '#FFF7ED';
-                    badgeColor = '#EA580C';
-                    badgeText = '🟠 Steady Activity';
+                    badgeBg = '#FAF8F5';
+                    badgeColor = '#78716C';
+                    badgeBorder = '#E7DFD5';
+                    badgeText = 'Steady Activity';
                   }
 
                   return (
@@ -1647,6 +1704,7 @@ export default function ReportsView() {
                           padding: '3px 8px',
                           borderRadius: '6px',
                           background: badgeBg,
+                          border: `1px solid ${badgeBorder}`,
                           color: badgeColor,
                           fontWeight: '700',
                           fontSize: '11px'
@@ -1658,19 +1716,19 @@ export default function ReportsView() {
                         <div>{d.visits_count} {d.visits_count === 1 ? 'visit' : 'visits'}</div>
                         {d.visits_count > 0 && (
                           <div style={{ fontSize: '11px', marginTop: '2px', display: 'flex', gap: '5px' }}>
-                            <span style={{ color: '#166534', fontWeight: '700' }}>{d.new_clients_count || 0} new</span>
+                            <span style={{ color: '#8C6828', fontWeight: '700' }}>{d.new_clients_count || 0} new</span>
                             <span style={{ color: '#D6D3D1' }}>•</span>
-                            <span style={{ color: '#4F46E5', fontWeight: '700' }}>{d.old_clients_count || 0} old</span>
+                            <span style={{ color: '#78716C', fontWeight: '700' }}>{d.old_clients_count || 0} old</span>
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: '10px 14px', fontWeight: '800', color: d.revenue > 0 ? '#166534' : '#78716C', fontSize: '13px' }}>
+                      <td style={{ padding: '10px 14px', fontWeight: '800', color: d.revenue > 0 ? '#1C1917' : '#78716C', fontSize: '13px' }}>
                         <div>{formatCurrency(d.revenue)}</div>
                         {d.revenue > 0 && (
                           <div style={{ fontSize: '11px', marginTop: '2px', display: 'flex', gap: '5px', fontWeight: '600' }}>
-                            <span style={{ color: '#166534' }}>{formatCurrency(d.new_revenue || 0)}</span>
+                            <span style={{ color: '#8C6828' }}>{formatCurrency(d.new_revenue || 0)}</span>
                             <span style={{ color: '#D6D3D1' }}>|</span>
-                            <span style={{ color: '#4F46E5' }}>{formatCurrency(d.old_revenue || 0)}</span>
+                            <span style={{ color: '#78716C' }}>{formatCurrency(d.old_revenue || 0)}</span>
                           </div>
                         )}
                       </td>
@@ -2004,7 +2062,7 @@ export default function ReportsView() {
                 }}
               >
                 <CreditCard size={13} color={activeKpiModal === 'payment' ? '#166534' : '#78716C'} />
-                Payment Modes ({paymentMethods.length})
+                Payment Modes ({displayPaymentMethods.length})
               </button>
 
               <button
@@ -2087,16 +2145,16 @@ export default function ReportsView() {
                     Payment Mode Collection Breakdown
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
-                    {paymentMethods.length === 0 ? (
+                    {displayPaymentMethods.length === 0 ? (
                       <div style={{ padding: '14px', color: '#78716C', fontSize: '12px' }}>No payments recorded in this period.</div>
                     ) : (
-                      paymentMethods.map((pm, idx) => {
-                        const totalRev = revenue.period_revenue || 1;
+                      displayPaymentMethods.map((pm, idx) => {
+                        const totalRev = displayPaymentMethods.reduce((a, b) => a + (b.amount || 0), 0) || 1;
                         const pct = Math.round((pm.amount / totalRev) * 100);
                         return (
                           <div key={idx} style={{ padding: '12px 14px', background: '#FAF8F5', border: '1px solid #EFEAE2', borderRadius: '8px' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                              <strong style={{ fontSize: '13px', color: '#1C1917' }}>{pm.payment_method || 'Other'}</strong>
+                              <strong style={{ fontSize: '13px', color: '#1C1917' }}>{pm.payment_method}</strong>
                               <span style={{ fontSize: '13px', fontWeight: '800', color: '#166534' }}>{formatCurrency(pm.amount)}</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#78716C', marginBottom: '6px' }}>
@@ -2343,9 +2401,9 @@ export default function ReportsView() {
                         fontSize: '12px',
                         fontWeight: '700',
                         cursor: 'pointer',
-                        border: footfallTab === 'new' ? '1.5px solid #166534' : '1px solid #D6D3D1',
-                        background: footfallTab === 'new' ? '#DCFCE7' : '#FFFFFF',
-                        color: footfallTab === 'new' ? '#166534' : '#44403C'
+                        border: footfallTab === 'new' ? '1.5px solid #8C6828' : '1px solid #D6D3D1',
+                        background: footfallTab === 'new' ? '#FAF6EE' : '#FFFFFF',
+                        color: footfallTab === 'new' ? '#8C6828' : '#44403C'
                       }}
                     >
                       New Clients ({newClientsCount})
@@ -2359,9 +2417,9 @@ export default function ReportsView() {
                         fontSize: '12px',
                         fontWeight: '700',
                         cursor: 'pointer',
-                        border: footfallTab === 'old' ? '1.5px solid #6D28D9' : '1px solid #D6D3D1',
-                        background: footfallTab === 'old' ? '#F5F3FF' : '#FFFFFF',
-                        color: footfallTab === 'old' ? '#6D28D9' : '#44403C'
+                        border: footfallTab === 'old' ? '1.5px solid #78716C' : '1px solid #D6D3D1',
+                        background: footfallTab === 'old' ? '#FAF8F5' : '#FFFFFF',
+                        color: footfallTab === 'old' ? '#78716C' : '#44403C'
                       }}
                     >
                       Old / Returning ({oldClientsCount})
@@ -2429,9 +2487,9 @@ export default function ReportsView() {
                                 borderRadius: '4px',
                                 fontSize: '11px',
                                 fontWeight: '700',
-                                background: c.is_new ? '#DCFCE7' : '#F5F3FF',
-                                color: c.is_new ? '#166534' : '#6D28D9',
-                                border: `1px solid ${c.is_new ? '#BBF7D0' : '#DDD6FE'}`
+                                background: c.is_new ? '#FAF6EE' : '#FAF8F5',
+                                color: c.is_new ? '#8C6828' : '#78716C',
+                                border: `1px solid ${c.is_new ? '#DAC493' : '#E7DFD5'}`
                               }}>
                                 {c.is_new ? 'New Client' : 'Returning Client'}
                               </span>
@@ -2442,7 +2500,7 @@ export default function ReportsView() {
                             <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#1C1917' }}>
                               {c.period_visits || 1}
                             </td>
-                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '800', color: '#166534' }}>
+                            <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '800', color: '#1C1917' }}>
                               {formatCurrency(c.period_spend)}
                             </td>
                           </tr>
@@ -2594,6 +2652,17 @@ export default function ReportsView() {
 
                 {/* Member Roster & Search Table */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        ENROLLED MEMBER ROSTER
+                      </h3>
+                      <div style={{ fontSize: '12px', color: '#78716C', marginTop: '2px' }}>
+                        Showing {filteredMembershipMembers.length} of {memberships.total_members || 0} member clients
+                      </div>
+                    </div>
+                  </div>
+
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'space-between', alignItems: 'center' }}>
                     {/* Tier Filter Pills */}
                     <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
@@ -2660,7 +2729,7 @@ export default function ReportsView() {
                     border: '1px solid #E7DFD5',
                     borderRadius: '10px',
                     overflow: 'hidden',
-                    maxHeight: '320px',
+                    maxHeight: '360px',
                     overflowY: 'auto'
                   }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
@@ -2673,12 +2742,13 @@ export default function ReportsView() {
                           <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Remaining Balance</th>
                           <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Usage %</th>
                           <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Validity</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredMembershipMembers.length === 0 ? (
                           <tr>
-                            <td colSpan="7" style={{ padding: '28px', textAlign: 'center', color: '#78716C' }}>
+                            <td colSpan="8" style={{ padding: '28px', textAlign: 'center', color: '#78716C' }}>
                               No member clients matching the selected criteria.
                             </td>
                           </tr>
@@ -2737,6 +2807,70 @@ export default function ReportsView() {
                                   {m.membership_expires_at && (
                                     <div style={{ fontSize: '10.5px', color: '#78716C' }}>Exp: {formatDate(m.membership_expires_at)}</div>
                                   )}
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setAdjustBalanceModal({ open: true, member: m, amount: String(m.remaining_balance ?? m.membership_balance ?? 0) })}
+                                      style={{
+                                        fontSize: '11px',
+                                        padding: '4px 8px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #DAC493',
+                                        background: '#FAF6EE',
+                                        color: '#8C6228',
+                                        fontWeight: '700',
+                                        cursor: 'pointer'
+                                      }}
+                                      title="Adjust client credit balance"
+                                    >
+                                      Adjust
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setExtendValidityModal({ open: true, member: m, date: m.membership_expires_at || '' })}
+                                      style={{
+                                        fontSize: '11px',
+                                        padding: '4px 8px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #E7E5E4',
+                                        background: '#FFFFFF',
+                                        color: '#57534E',
+                                        fontWeight: '600',
+                                        cursor: 'pointer'
+                                      }}
+                                      title="Extend client membership validity date"
+                                    >
+                                      Extend
+                                    </button>
+                                    {onOpenClient && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveKpiModal(null);
+                                          onOpenClient(m);
+                                        }}
+                                        style={{
+                                          fontSize: '11px',
+                                          padding: '4px 9px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: '#B88B4A',
+                                          color: '#FFFFFF',
+                                          fontWeight: '700',
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px'
+                                        }}
+                                        title="View client profile"
+                                      >
+                                        Profile
+                                        <ChevronRight size={12} />
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -2870,14 +3004,14 @@ export default function ReportsView() {
               </div>
             )}
 
-            {/* TAB 6: PAYMENT METHODS AUDIT */}
+            {/* TAB 6: PAYMENT METHODS AUDIT (Image 1 & Image 2 'Other' entries removed) */}
             {activeKpiModal === 'payment' && (
               <div style={{ padding: '22px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '12px' }}>
                   <div style={{ padding: '14px', background: '#F0FDF4', borderRadius: '10px', border: '1px solid #BBF7D0' }}>
                     <div style={{ fontSize: '11px', color: '#166534', fontWeight: '700', textTransform: 'uppercase' }}>Net Settled Collections</div>
                     <div style={{ fontSize: '24px', fontWeight: '800', color: '#166534', marginTop: '4px' }}>
-                      {formatCurrency(paymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) || revenue.period_revenue || 0)}
+                      {formatCurrency(displayPaymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) || revenue.period_revenue || 0)}
                     </div>
                     <div style={{ fontSize: '11px', color: '#15803D', marginTop: '2px' }}>100% verified & reconciled</div>
                   </div>
@@ -2885,7 +3019,7 @@ export default function ReportsView() {
                   <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '10px', border: '1px solid #DAC493' }}>
                     <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Total Bills Settled</div>
                     <div style={{ fontSize: '24px', fontWeight: '800', color: '#B88B4A', marginTop: '4px' }}>
-                      {paymentMethods.reduce((acc, p) => acc + (p.count || 0), 0)}
+                      {displayPaymentMethods.reduce((acc, p) => acc + (p.count || 0), 0)}
                     </div>
                     <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '2px' }}>Completed payment receipts</div>
                   </div>
@@ -2893,10 +3027,10 @@ export default function ReportsView() {
                   <div style={{ padding: '14px', background: '#EFF6FF', borderRadius: '10px', border: '1px solid #BFDBFE' }}>
                     <div style={{ fontSize: '11px', color: '#1E40AF', fontWeight: '700', textTransform: 'uppercase' }}>Top Tender Mode</div>
                     <div style={{ fontSize: '18px', fontWeight: '800', color: '#1D4ED8', marginTop: '4px' }}>
-                      {paymentMethods[0]?.payment_method || 'UPI'}
+                      {displayPaymentMethods[0]?.payment_method || 'UPI'}
                     </div>
                     <div style={{ fontSize: '11px', color: '#2563EB', marginTop: '2px' }}>
-                      {formatCurrency(paymentMethods[0]?.amount || 0)} ({Math.round(((paymentMethods[0]?.amount || 0) / (revenue.period_revenue || 1)) * 100)}% share)
+                      {formatCurrency(displayPaymentMethods[0]?.amount || 0)} ({Math.round(((displayPaymentMethods[0]?.amount || 0) / Math.max(1, displayPaymentMethods.reduce((a, b) => a + (b.amount || 0), 0))) * 100)}% share)
                     </div>
                   </div>
 
@@ -2904,8 +3038,8 @@ export default function ReportsView() {
                     <div style={{ fontSize: '11px', color: '#78716C', fontWeight: '700', textTransform: 'uppercase' }}>Average Bill Size</div>
                     <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '4px' }}>
                       {formatCurrency(
-                        paymentMethods.reduce((acc, p) => acc + (p.count || 0), 0) > 0
-                          ? Math.round(paymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) / paymentMethods.reduce((acc, p) => acc + (p.count || 0), 0))
+                        displayPaymentMethods.reduce((acc, p) => acc + (p.count || 0), 0) > 0
+                          ? Math.round(displayPaymentMethods.reduce((acc, pm) => acc + (pm.amount || 0), 0) / displayPaymentMethods.reduce((acc, p) => acc + (p.count || 0), 0))
                           : revenue.avg_ticket || 0
                       )}
                     </div>
@@ -2918,13 +3052,13 @@ export default function ReportsView() {
                     Tender Mode Collections Velocity & Volume
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {paymentMethods.length === 0 ? (
+                    {displayPaymentMethods.length === 0 ? (
                       <div style={{ padding: '24px', textAlign: 'center', color: '#78716C', background: '#FAF8F5', borderRadius: '8px' }}>
                         No payments recorded during this period.
                       </div>
                     ) : (
-                      paymentMethods.map((pm, idx) => {
-                        const totalRev = revenue.period_revenue || paymentMethods.reduce((a, b) => a + (b.amount || 0), 0) || 1;
+                      displayPaymentMethods.map((pm, idx) => {
+                        const totalRev = displayPaymentMethods.reduce((a, b) => a + (b.amount || 0), 0) || 1;
                         const sharePct = Math.round((pm.amount / totalRev) * 100);
                         return (
                           <div
@@ -2941,7 +3075,7 @@ export default function ReportsView() {
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <div>
-                                <strong style={{ fontSize: '13.5px', color: '#1C1917' }}>{pm.payment_method || 'Other'}</strong>
+                                <strong style={{ fontSize: '13.5px', color: '#1C1917' }}>{pm.payment_method}</strong>
                                 <span style={{ fontSize: '12px', color: '#78716C', marginLeft: '8px' }}>
                                   ({pm.count} {pm.count === 1 ? 'bill' : 'bills'} processed)
                                 </span>
@@ -3353,7 +3487,7 @@ export default function ReportsView() {
                   <span>Showing <strong>{categories.length}</strong> service categories across <strong>{categories.reduce((acc, c) => acc + (c.total_services || 0), 0)}</strong> treatments</span>
                 )}
                 {activeKpiModal === 'payment' && (
-                  <span>Showing <strong>{paymentMethods.length}</strong> payment tender modes across <strong>{paymentMethods.reduce((acc, p) => acc + (p.count || 0), 0)}</strong> bills</span>
+                  <span>Showing <strong>{displayPaymentMethods.length}</strong> payment tender modes across <strong>{displayPaymentMethods.reduce((acc, p) => acc + (p.count || 0), 0)}</strong> bills</span>
                 )}
                 {activeKpiModal === 'staff' && (
                   <span>Showing <strong>{staff_performance.length}</strong> staff providers across <strong>{staff_performance.reduce((acc, s) => acc + (s.services_count || 0), 0)}</strong> services</span>
@@ -3554,34 +3688,34 @@ export default function ReportsView() {
               {/* 4 Summary Badges */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
                 {/* 1. Collected Revenue */}
-                <div style={{ padding: '14px', background: '#F0FDF4', borderRadius: '12px', border: '1px solid #BBF7D0' }}>
-                  <div style={{ fontSize: '11px', color: '#166534', fontWeight: '700', textTransform: 'uppercase' }}>Collected Revenue</div>
-                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#166534', marginTop: '4px' }}>
+                <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '12px', border: '1px solid #DAC493' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Collected Revenue</div>
+                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '4px' }}>
                     {formatCurrency(activeDayModal.revenue || 0)}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#15803D', marginTop: '3px' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '3px' }}>
                     New: <strong>{formatCurrency(activeDayModal.new_revenue || 0)}</strong> • Old: <strong>{formatCurrency(activeDayModal.old_revenue || 0)}</strong>
                   </div>
                 </div>
 
                 {/* 2. Client Footfall / Visits */}
-                <div style={{ padding: '14px', background: '#F5F3FF', borderRadius: '12px', border: '1px solid #DDD6FE' }}>
-                  <div style={{ fontSize: '11px', color: '#6D28D9', fontWeight: '700', textTransform: 'uppercase' }}>Completed Visits</div>
-                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#6D28D9', marginTop: '4px' }}>
+                <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '12px', border: '1px solid #DAC493' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Completed Visits</div>
+                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '4px' }}>
                     {activeDayModal.visits_count || 0}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#7C3AED', marginTop: '3px' }}>
-                    <span style={{ color: '#166534', fontWeight: '700' }}>{activeDayModal.new_clients_count || 0} New</span> • <span style={{ color: '#4F46E5', fontWeight: '700' }}>{activeDayModal.old_clients_count || 0} Old</span>
+                  <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '3px' }}>
+                    <span style={{ fontWeight: '700' }}>{activeDayModal.new_clients_count || 0} New</span> • <span style={{ fontWeight: '700' }}>{activeDayModal.old_clients_count || 0} Old</span>
                   </div>
                 </div>
 
                 {/* 3. Average Ticket Size */}
-                <div style={{ padding: '14px', background: '#EFF6FF', borderRadius: '12px', border: '1px solid #BFDBFE' }}>
-                  <div style={{ fontSize: '11px', color: '#1D4ED8', fontWeight: '700', textTransform: 'uppercase' }}>Avg Ticket Size</div>
-                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#1D4ED8', marginTop: '4px' }}>
+                <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '12px', border: '1px solid #DAC493' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Avg Ticket Size</div>
+                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '4px' }}>
                     {activeDayModal.visits_count > 0 ? formatCurrency(Math.round(activeDayModal.revenue / activeDayModal.visits_count)) : '₹0'}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#2563EB', marginTop: '3px' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '3px' }}>
                     Average revenue per visit
                   </div>
                 </div>
@@ -3589,10 +3723,10 @@ export default function ReportsView() {
                 {/* 4. Top Performed Service */}
                 <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '12px', border: '1px solid #DAC493' }}>
                   <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Top Performed Service</div>
-                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#8C6828', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {activeDayModal.top_service !== '—' ? activeDayModal.top_service : 'None recorded'}
                   </div>
-                  <div style={{ fontSize: '11px', color: '#A16207', marginTop: '3px' }}>
+                  <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '3px' }}>
                     Primary day contributor
                   </div>
                 </div>
@@ -3825,6 +3959,218 @@ export default function ReportsView() {
                 Close Audit
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ADJUST BALANCE MODAL */}
+      {adjustBalanceModal.open && createPortal(
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(28,25,23,0.7)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000000,
+          padding: '20px'
+        }}>
+          <div style={{
+            maxWidth: '420px',
+            width: '100%',
+            background: '#FFFFFF',
+            borderRadius: '16px',
+            border: '1px solid #EADBBE',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
+            padding: '24px'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
+              Adjust Membership Credit Balance
+            </h3>
+            <p style={{ fontSize: '12.5px', color: '#78716C', margin: '4px 0 16px 0' }}>
+              Client: <strong>{adjustBalanceModal.member?.name}</strong> • Current Plan: {adjustBalanceModal.member?.membership_tier}
+            </p>
+
+            <form onSubmit={handleSaveBalanceAdjustment}>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '6px' }}>
+                New Balance Amount (₹)
+              </label>
+              <input
+                type="number"
+                step="100"
+                min="0"
+                required
+                value={adjustBalanceModal.amount}
+                onChange={(e) => setAdjustBalanceModal({ ...adjustBalanceModal, amount: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #D6D3D1',
+                  fontSize: '15px',
+                  fontWeight: '700',
+                  color: '#1C1917',
+                  marginBottom: '16px',
+                  boxSizing: 'border-box'
+                }}
+              />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setAdjustBalanceModal({ open: false, member: null, amount: '' })}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #D6D3D1',
+                    background: '#FFFFFF',
+                    color: '#57534E',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#B88B4A',
+                    color: '#FFFFFF',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Save Balance
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* EXTEND VALIDITY MODAL */}
+      {extendValidityModal.open && createPortal(
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(28,25,23,0.7)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000000,
+          padding: '20px'
+        }}>
+          <div style={{
+            maxWidth: '420px',
+            width: '100%',
+            background: '#FFFFFF',
+            borderRadius: '16px',
+            border: '1px solid #EADBBE',
+            boxShadow: '0 25px 50px rgba(0,0,0,0.25)',
+            padding: '24px'
+          }}>
+            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
+              Extend Membership Validity
+            </h3>
+            <p style={{ fontSize: '12.5px', color: '#78716C', margin: '4px 0 16px 0' }}>
+              Client: <strong>{extendValidityModal.member?.name}</strong> • Plan: {extendValidityModal.member?.membership_tier}
+            </p>
+
+            <form onSubmit={handleSaveExtendValidity}>
+              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '6px' }}>
+                New Expiration Date
+              </label>
+              <input
+                type="date"
+                required
+                value={extendValidityModal.date}
+                onChange={(e) => setExtendValidityModal({ ...extendValidityModal, date: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #D6D3D1',
+                  fontSize: '14px',
+                  color: '#1C1917',
+                  marginBottom: '12px',
+                  boxSizing: 'border-box'
+                }}
+              />
+
+              {/* Quick extension pills */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                {[
+                  { label: '+30 Days', days: 30 },
+                  { label: '+90 Days', days: 90 },
+                  { label: '+1 Year', days: 365 }
+                ].map(opt => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    onClick={() => {
+                      const baseDate = extendValidityModal.date ? new Date(extendValidityModal.date) : new Date();
+                      const newD = new Date(baseDate.getTime() + opt.days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                      setExtendValidityModal({ ...extendValidityModal, date: newD });
+                    }}
+                    style={{
+                      fontSize: '11px',
+                      padding: '4px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid #DAC493',
+                      background: '#FAF6EE',
+                      color: '#8C6228',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setExtendValidityModal({ open: false, member: null, date: '' })}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #D6D3D1',
+                    background: '#FFFFFF',
+                    color: '#57534E',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#B88B4A',
+                    color: '#FFFFFF',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Update Validity
+                </button>
+              </div>
+            </form>
           </div>
         </div>,
         document.body

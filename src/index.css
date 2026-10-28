@@ -1626,7 +1626,7 @@ textarea {
   height: 100%;
   width: auto;
   max-width: none;
-  object-fit: cover;
+  object-fit: contain;
   object-position: right top;
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -2221,4 +2221,32 @@ textarea {
     max-width: 640px !important;
     margin: 0 auto !important;
   }
+}
+
+/* 11. Reports Executive KPI Draggable Cards Grid */
+.reports-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .reports-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .reports-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.reports-kpi-card {
+  user-select: none;
+  cursor: grab;
+}
+
+.reports-kpi-card:active {
+  cursor: grabbing;
 }

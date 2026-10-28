@@ -179,21 +179,18 @@ export default function StaffManagement() {
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#B88B4A', fontWeight: '700' }}>
-            Team Management & KYC
-          </div>
-          <h1 style={{ fontSize: '28px', color: '#1C1917', margin: 0 }}>
-            STUDIO PRACTITIONERS & STAFF
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>
+            Studio Practitioners & Team
           </h1>
         </div>
 
         <button
           onClick={() => handleOpenModal()}
           className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+          style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px', marginRight: '20px' }}
         >
           <Plus size={16} />
-          Add Staff Member
+          Add Team Member
         </button>
       </div>
 
@@ -501,7 +498,7 @@ export default function StaffManagement() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
               <div>
                 <h2 style={{ fontSize: '21px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
-                  {modal.mode === 'create' ? 'Add Staff Member' : 'Edit Staff Details'}
+                  {modal.mode === 'create' ? 'Add Team Member' : 'Edit Team Member Details'}
                 </h2>
                 <p style={{ fontSize: '13px', color: '#78716C', marginTop: '4px', margin: 0 }}>
                   Enter practitioner profile, Aadhaar & PAN KYC documents, and compensation model.
@@ -1074,7 +1071,7 @@ export default function StaffManagement() {
                   className="btn-primary"
                   style={{ padding: '10px 24px', borderRadius: '8px', fontWeight: '700' }}
                 >
-                  {modal.mode === 'create' ? 'Save Staff Member' : 'Update Staff Member'}
+                  {modal.mode === 'create' ? 'Save Team Member' : 'Update Team Member'}
                 </button>
               </div>
             </form>

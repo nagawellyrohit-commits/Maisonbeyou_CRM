@@ -46,14 +46,14 @@ export const CATEGORY_IMAGE_PRESETS = [
     id: 'signature_facials',
     name: 'Signature Facials',
     num: '01',
-    url: '/services/categories/cat_01_signature_facials.png?v=44',
+    url: '/services/categories/cat_01_signature_facials.png?v=45',
     tag: 'Visitor Card 01'
   },
   {
     id: 'skin_treatments',
     name: 'Skin Treatments',
     num: '02',
-    url: '/services/categories/cat_02_skin_treatments.png?v=42',
+    url: '/services/categories/cat_02_skin_treatments.png?v=45',
     tag: 'Visitor Card 02'
   },
   {
@@ -88,42 +88,42 @@ export const CATEGORY_IMAGE_PRESETS = [
     id: 'laser_precision',
     name: 'Laser Precision',
     num: '07',
-    url: '/services/thumb_underarms.jpg',
+    url: '/services/categories/cat_07_laser_precision.png',
     tag: 'Clinical Aesthetic'
   },
   {
     id: 'glow_rejuvenation',
     name: 'Glow Rejuvenation',
     num: '08',
-    url: '/services/laser_hero.jpg',
+    url: '/services/categories/cat_08_glow_rejuvenation.png',
     tag: 'Laser Glow'
   },
   {
     id: 'nails_hand_couture',
     name: 'Nails & Hands',
     num: '09',
-    url: 'https://images.unsplash.com/photo-1632345031435-8727f6897d53?w=800&auto=format&fit=crop&q=80',
+    url: '/services/categories/cat_09_nails_hands.png',
     tag: 'Manicure & Art'
   },
   {
     id: 'brows_lashes',
     name: 'Brows & Lashes',
     num: '10',
-    url: 'https://images.unsplash.com/photo-1583001931096-959e9a1a6223?w=800&auto=format&fit=crop&q=80',
+    url: '/services/categories/cat_10_brows_lashes.png',
     tag: 'Eye Architecture'
   },
   {
     id: 'spa_wellness',
     name: 'Holistic Spa',
     num: '11',
-    url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=800&auto=format&fit=crop&q=80',
+    url: '/services/categories/cat_11_holistic_spa.png',
     tag: 'Therapeutic Spa'
   },
   {
     id: 'dermal_aesthetics',
     name: 'Dermal Aesthetics',
     num: '12',
-    url: 'https://images.unsplash.com/photo-1512290903671-17adc8104b5b?w=800&auto=format&fit=crop&q=80',
+    url: '/services/categories/cat_12_dermal_aesthetics.png',
     tag: 'Advanced Care'
   }
 ];

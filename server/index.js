@@ -5,8 +5,9 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
+import { PNG } from 'pngjs';
 import { fileURLToPath } from 'url';
-import db, { initDatabase, recordAuditLog, ensureLocationAccounts } from './db.js';
+import db, { initDatabase, recordAuditLog, ensureLocationAccounts, generateLocationCode } from './db.js';
 import {
   calculateNextDueDate,
   formatSessionMessage,
@@ -53,6 +54,98 @@ const upload = multer({
     fileSize: 150 * 1024 * 1024 // 150MB limit
   }
 });
+
+
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+
+function validateTransparentPngBuffer(buf, ext = '.png', mimetype = 'image/png') {
+  if (!buf || buf.length < 8) {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  if (buf.length > 20 * 1024 * 1024) {
+    return {
+      valid: false,
+      reason: 'size_limit',
+      error: 'Image file size exceeds the 20MB maximum limit.'
+    };
+  }
+  const cleanExt = (ext || '').toLowerCase().split('?')[0];
+  const isPngMime = !mimetype || mimetype.toLowerCase() === 'image/png';
+  const hasPngMagic = buf.subarray(0, 8).equals(PNG_MAGIC);
+  if ((cleanExt && cleanExt !== '.png') || !isPngMime || !hasPngMagic) {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  let decoded;
+  try {
+    decoded = PNG.sync.read(buf);
+  } catch (err) {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  if (!decoded || !decoded.width || !decoded.height || decoded.width > 8192 || decoded.height > 8192) {
+    return {
+      valid: false,
+      reason: 'dimensions',
+      error: 'Image dimensions must be between 1x1 and 8192x8192 pixels.'
+    };
+  }
+  let hasTransparentPixel = false;
+  const data = decoded.data;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] < 255) {
+      hasTransparentPixel = true;
+      break;
+    }
+  }
+  if (!hasTransparentPixel) {
+    return {
+      valid: false,
+      reason: 'opaque',
+      error: 'Background detected. Please upload a background-free PNG image.'
+    };
+  }
+  return { valid: true, width: decoded.width, height: decoded.height };
+}
+
+function validateCategoryImageUrlOnDisk(imageUrl) {
+  if (!imageUrl || typeof imageUrl !== 'string') {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  const cleanRel = imageUrl.split('?')[0].replace(/^\/+/, '');
+  const ext = path.extname(cleanRel).toLowerCase();
+  if (ext !== '.png' || /^https?:\/\//i.test(imageUrl)) {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  const fullPath = path.join(__dirname, '../public', cleanRel);
+  if (!fs.existsSync(fullPath)) {
+    return {
+      valid: false,
+      reason: 'not_png',
+      error: 'Only transparent PNG images are supported. Please upload a PNG with a removed background.'
+    };
+  }
+  const buf = fs.readFileSync(fullPath);
+  return validateTransparentPngBuffer(buf, ext, 'image/png');
+}
 
 // Initialize database
 initDatabase();
@@ -1206,7 +1299,7 @@ app.get('/api/locations/summary', authenticateToken, authorizeRoles('master_admi
 app.get('/api/locations/:id', authenticateToken, (req, res) => {
   try {
     const locId = Number(req.params.id);
-    if (req.user.role !== 'master_admin' && (req.user.location_id || 1) !== locId) {
+    if (req.user.role !== 'master_admin' && Number(req.user.location_id) !== locId) {
       return res.status(403).json({ error: 'Access denied to this location' });
     }
     const location = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(locId);
@@ -1261,15 +1354,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
 
     const cleanType = type.trim().toLowerCase();
     let generatedCode = code ? code.trim().toUpperCase() : null;
-    if (!generatedCode) {
-      const prefix = cleanType === 'branch' ? 'MB-BR' : 'MB-FR';
-      const cityCode = (city || 'LOC').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'STU';
-      let candidateCode;
-      do {
-        const randomSuffix = Math.floor(100000 + Math.random() * 900000);
-        candidateCode = `${prefix}-${cityCode}-${randomSuffix}`;
-      } while (db.prepare('SELECT location_id FROM LOCATIONS WHERE code = ?').get(candidateCode));
-      generatedCode = candidateCode;
+    if (!generatedCode || !/^MB-[BF]-[A-Z]{3}-\d{3}$/.test(generatedCode)) {
+      generatedCode = generateLocationCode(db, { type: cleanType, city });
     }
 
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || '').trim();
@@ -1297,6 +1383,12 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    const derivedManager = (
+      manager_name ||
+      (Array.isArray(stakeholders) && stakeholders[0]?.name) ||
+      'Ayesha Khan'
+    ).trim();
+
     const result = insertLocStmt.run(
       name.trim(),
       generatedCode,
@@ -1308,7 +1400,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       primaryPhone,
       primaryEmail,
       status || 'Active',
-      (manager_name || '').trim(),
+      derivedManager,
       (firm_type || '').trim() || null,
       (firm_name || '').trim() || null,
       primaryPhone,
@@ -1491,9 +1583,26 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       }
     }
 
+    const updatedName = (name || existing.name).trim();
+    const updatedCity = (city !== undefined ? city : existing.city || '').trim();
+    let updatedCode = existing.code;
+    if (
+      !updatedCode ||
+      !/^MB-[BF]-[A-Z]{3}-\d{3}$/.test(updatedCode) ||
+      cleanType !== existing.type ||
+      updatedCity !== (existing.city || '')
+    ) {
+      updatedCode = generateLocationCode(db, {
+        type: cleanType,
+        city: updatedCity,
+        excludeLocationId: locId
+      });
+    }
+
     const updateLocStmt = db.prepare(`
       UPDATE LOCATIONS SET
         name = ?,
+        code = ?,
         type = ?,
         address = ?,
         city = ?,
@@ -1511,11 +1620,18 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       WHERE location_id = ?
     `);
 
+    const updatedManager = (
+      manager_name !== undefined && String(manager_name).trim()
+        ? manager_name
+        : existing.manager_name || (Array.isArray(stakeholders) && stakeholders[0]?.name) || 'Ayesha Khan'
+    ).trim();
+
     updateLocStmt.run(
-      (name || existing.name).trim(),
+      updatedName,
+      updatedCode,
       cleanType,
       fullAddress,
-      (city !== undefined ? city : existing.city || '').trim(),
+      updatedCity,
       (state !== undefined ? state : existing.state || '').trim(),
       (pincode !== undefined ? pincode : existing.pincode || '').trim(),
       primaryPhone,
@@ -1523,7 +1639,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       primaryPhone,
       primaryEmail,
       status || existing.status || 'Active',
-      (manager_name !== undefined ? manager_name : existing.manager_name || '').trim(),
+      updatedManager,
       (firm_type !== undefined ? firm_type : existing.firm_type || '').trim() || null,
       (firm_name !== undefined ? firm_name : existing.firm_name || '').trim() || null,
       locId
@@ -1726,7 +1842,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
 app.get('/api/locations/:id/admin-users', authenticateToken, (req, res) => {
   try {
     const locId = Number(req.params.id);
-    if (req.user.role !== 'master_admin' && (req.user.location_id || 1) !== locId) {
+    if (req.user.role !== 'master_admin' && Number(req.user.location_id) !== locId) {
       return res.status(403).json({ error: 'Access denied' });
     }
     const admins = db.prepare("SELECT user_id, name, email, phone, role, location_id, active, created_at FROM USERS WHERE location_id = ? AND role = 'admin' ORDER BY user_id ASC").all(locId);
@@ -2380,13 +2496,12 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
     const todayUTC = now.toISOString().split('T')[0];
     const todayLocal = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const targetLocId = req.locationId;
-
-    let locFilterVisits = '';
-    let locFilterParams = [];
-    if (targetLocId) {
-      locFilterVisits = ' AND v.location_id = ?';
-      locFilterParams = [targetLocId];
+    if (!targetLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view the branch dashboard.' });
     }
+
+    const locFilterVisits = ' AND v.location_id = ?';
+    const locFilterParams = [targetLocId];
 
     // Today's summary metrics - match against todayLocal or todayUTC or SQLite created_at localtime
     const visitsToday = db.prepare(`
@@ -2536,9 +2651,12 @@ app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'recep
     const q = (req.query.q || '').trim();
     const statusFilter = (req.query.status || '').trim().toLowerCase(); // 'active', 'inactive', or ''
     const locId = req.locationId;
+    if (!locId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to search clients.' });
+    }
 
-    let baseWhere = locId ? ' WHERE location_id = ?' : ' WHERE 1=1';
-    let baseParams = locId ? [locId] : [];
+    const baseWhere = ' WHERE location_id = ?';
+    const baseParams = [locId];
 
     let clients = [];
 
@@ -3032,7 +3150,17 @@ function ensureMembershipPlansTable() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS MEMBERSHIP_SETTINGS (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
+
+  const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+  if (!titleRow) {
+    db.prepare('INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES (?, ?)').run('program_title', 'WORLD OF PRIVILEGES');
+  }
 
   const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
   if (count === 0) {
@@ -3149,7 +3277,10 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
   try {
     ensureMembershipPlansTable();
     const locId = req.locationId;
-    let query = `
+    if (!locId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view studio memberships.' });
+    }
+    const query = `
       SELECT client_id, name, surname, phone, email, location_id,
              membership_tier, membership_status, membership_started_at,
              membership_expires_at, membership_balance, membership_cost,
@@ -3159,13 +3290,10 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
       WHERE membership_tier IS NOT NULL 
         AND membership_tier != '' 
         AND LOWER(membership_tier) != 'non-member'
+        AND location_id = ?
+      ORDER BY client_id DESC
     `;
-    const params = [];
-    if (locId) {
-      query += ' AND location_id = ?';
-      params.push(locId);
-    }
-    query += ' ORDER BY client_id DESC';
+    const params = [locId];
     const memberRows = db.prepare(query).all(...params);
 
     const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
@@ -3231,8 +3359,12 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
       };
     });
 
+    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+    const programTitle = titleRow ? titleRow.value : 'WORLD OF PRIVILEGES';
+
     res.json({
       plans: canonicalPlans,
+      program_title: programTitle,
       members,
       stats: {
         total_members: members.length,
@@ -3246,6 +3378,48 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
   } catch (error) {
     console.error('Memberships error:', error);
     res.status(500).json({ error: 'Failed to load memberships' });
+  }
+});
+
+// Public Membership Plans & Program Title (for kiosk / visitor wizard)
+app.get('/api/memberships/public', (req, res) => {
+  try {
+    ensureMembershipPlansTable();
+    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
+    const canonicalPlans = planRows.map(p => ({
+      ...p,
+      priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
+      benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
+    }));
+    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+    const programTitle = titleRow ? titleRow.value : 'WORLD OF PRIVILEGES';
+    res.json({
+      plans: canonicalPlans,
+      program_title: programTitle
+    });
+  } catch (error) {
+    console.error('Public memberships error:', error);
+    res.status(500).json({ error: 'Failed to load plans' });
+  }
+});
+
+// Master & Main Admin: Update Membership Program Title
+app.put('/api/memberships/title', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    ensureMembershipPlansTable();
+    const { title } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ error: 'Program title is required' });
+    }
+    const cleanTitle = title.trim().toUpperCase();
+    db.prepare(`
+      INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES ('program_title', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(cleanTitle);
+    res.json({ success: true, program_title: cleanTitle });
+  } catch (err) {
+    console.error('Update membership title error:', err);
+    res.status(500).json({ error: 'Failed to update title: ' + err.message });
   }
 });
 
@@ -3302,12 +3476,80 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
   }
 });
 
-// Master & Main Admin: Delete Custom Membership Plan endpoint
+// Master & Main Admin: Edit Membership Plan endpoint
+app.put('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    ensureMembershipPlansTable();
+    const { id } = req.params;
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits } = req.body;
+    if (!name || !price) {
+      return res.status(400).json({ error: 'Membership tier name and price are required' });
+    }
+const benefitsList = Array.isArray(benefits)
+      ? benefits
+      : (typeof benefits === 'string' ? benefits.split('\n').map(s => s.trim()).filter(Boolean) : []);
+	    const benefitsJson = JSON.stringify(benefitsList.length > 0 ? benefitsList : ['Exclusive tailored beauty treatment privileges']);
+    const cardImg = image || '/memberships/card_infini_3d.jpg';
+    const tierVal = tier ? tier.trim() : name.trim();
+
+    const planExists = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)').get(id, id, id);
+    if (!planExists) {
+      return res.status(404).json({ error: 'Plan not found' });
+    }
+
+    db.prepare(`
+      UPDATE MEMBERSHIP_PLANS
+      SET tier = ?,
+          tierNumber = COALESCE(?, tierNumber),
+          name = ?,
+          fullName = ?,
+          price = ?,
+          credits = ?,
+          validity = ?,
+          validityBadge = ?,
+          durationLabel = ?,
+          image = ?,
+          tagline = ?,
+          benefits = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      tierVal,
+      tierNumber || planExists.tierNumber,
+      name.toUpperCase().trim(),
+      fullName ? fullName.toUpperCase().trim() : `${name.toUpperCase().trim()} MEMBERSHIP`,
+      Number(price) || 0,
+      Number(credits) || Number(price) || 0,
+      validity || 'Valid for 1 year',
+      validityBadge || (validity ? validity.toUpperCase() : 'VALID FOR 1 YEAR'),
+      durationLabel || `(${validity || 'per year'})`,
+      cardImg,
+      tagline || 'Exclusive personalized aesthetic luxury membership.',
+      benefitsJson,
+      planExists.id
+    );
+
+    const updatedPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE id = ?').get(planExists.id);
+    res.json({
+      success: true,
+      plan: {
+        ...updatedPlan,
+        priceFormatted: `₹${Number(updatedPlan.price).toLocaleString('en-IN')}`,
+        benefits: JSON.parse(updatedPlan.benefits || '[]')
+      }
+    });
+  } catch (err) {
+    console.error('Update membership plan error:', err);
+    res.status(500).json({ error: 'Failed to update membership plan: ' + err.message });
+  }
+});
+
+// Master & Main Admin: Delete Membership Plan endpoint
 app.delete('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     ensureMembershipPlansTable();
     const { id } = req.params;
-    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE id = ?').run(id);
+    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)').run(id, id, id);
     res.json({ success: true, message: 'Membership plan deleted successfully' });
   } catch (err) {
     console.error('Delete membership plan error:', err);
@@ -3319,11 +3561,16 @@ app.delete('/api/memberships/plans/:id', authenticateToken, authorizeRoles('mast
 app.get('/api/clients/:id/membership-privileges', authenticateToken, (req, res) => {
   try {
     const clientId = req.params.id;
-    if (req.user.role !== 'master_admin') {
-      const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
-      if (!client || client.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to access client privileges.' });
+    }
+    const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+    if (Number(client.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
     const data = getClientMembershipPrivileges(clientId);
     res.json(data);
@@ -3337,18 +3584,19 @@ app.get('/api/clients/:id/membership-privileges', authenticateToken, (req, res) 
 app.get('/api/clients/:id', authenticateToken, (req, res) => {
   try {
     const clientId = req.params.id;
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view client details.' });
+    }
     const clientData = getFullClientRecord(clientId);
 
-    if (!clientData) {
+    if (!clientData || !clientData.client) {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      const userLocId = req.locationId;
-      const clientLocId = clientData.client?.location_id;
-      if (clientLocId !== userLocId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const clientLocId = clientData.client.location_id;
+    if (Number(clientLocId) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
 
     res.json(clientData);
@@ -3362,11 +3610,16 @@ app.get('/api/clients/:id', authenticateToken, (req, res) => {
 app.get('/api/clients/:id/treatment-courses', authenticateToken, (req, res) => {
   try {
     const clientId = req.params.id;
-    if (req.user.role !== 'master_admin') {
-      const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
-      if (!client || client.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view treatment courses.' });
+    }
+    const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+    if (Number(client.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
     const courses = getClientTreatmentCourses(db, clientId);
     res.json({ courses });
@@ -3384,11 +3637,13 @@ app.post('/api/treatment-courses', authenticateToken, authorizeRoles('admin', 'r
       return res.status(400).json({ error: 'Client ID and Service ID are required' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(client_id);
-      if (!client || client.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to create a treatment course.' });
+    }
+    const client = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(client_id);
+    if (!client || Number(client.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
 
     const course = createTreatmentCourse(db, client_id, service_id, {
@@ -3412,16 +3667,18 @@ app.patch('/api/treatment-courses/:id/extend', authenticateToken, authorizeRoles
     const courseId = req.params.id;
     const { additional_sessions, interval_value, interval_unit } = req.body;
 
-    if (req.user.role !== 'master_admin') {
-      const course = db.prepare(`
-        SELECT tc.course_id, c.location_id 
-        FROM CLIENT_TREATMENT_COURSES tc
-        JOIN CLIENTS c ON tc.client_id = c.client_id
-        WHERE tc.course_id = ?
-      `).get(courseId);
-      if (!course || course.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Treatment course belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to extend a treatment course.' });
+    }
+    const course = db.prepare(`
+        SELECT tc.course_id, c.location_id
+      FROM CLIENT_TREATMENT_COURSES tc
+      JOIN CLIENTS c ON tc.client_id = c.client_id
+      WHERE tc.course_id = ?
+    `).get(courseId);
+    if (!course || Number(course.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Treatment course belongs to another studio location' });
     }
 
     const updated = extendCourse(db, courseId, additional_sessions, interval_value, interval_unit);
@@ -3441,16 +3698,18 @@ app.patch('/api/treatment-sessions/:id/status', authenticateToken, authorizeRole
       return res.status(400).json({ error: 'Invalid session status' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      const session = db.prepare(`
-        SELECT tcs.session_id, c.location_id
-        FROM TREATMENT_COURSE_SESSIONS tcs
-        JOIN CLIENTS c ON tcs.client_id = c.client_id
-        WHERE tcs.session_id = ?
-      `).get(sessionId);
-      if (!session || session.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Treatment session belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update session status.' });
+    }
+    const session = db.prepare(`
+      SELECT tcs.session_id, c.location_id
+      FROM TREATMENT_COURSE_SESSIONS tcs
+      JOIN CLIENTS c ON tcs.client_id = c.client_id
+      WHERE tcs.session_id = ?
+    `).get(sessionId);
+    if (!session || Number(session.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Treatment session belongs to another studio location' });
     }
 
     const result = updateSessionStatus(db, sessionId, status);
@@ -3475,10 +3734,12 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      if (existingClient.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update a client.' });
+    }
+    if (Number(existingClient.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -3564,10 +3825,12 @@ app.patch('/api/clients/:id/membership', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      if (existing.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update client membership.' });
+    }
+    if (Number(existing.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
 
     const tier = membership_tier !== undefined 
@@ -3618,10 +3881,12 @@ app.put('/api/clients/:id/membership-validity', authenticateToken, (req, res) =>
       return res.status(404).json({ error: 'Client not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      if (client.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update membership validity.' });
+    }
+    if (Number(client.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
 
     let finalExpires = membership_expires_at;
@@ -3777,8 +4042,10 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       });
     }
 
-    const todayDate = new Date().toISOString().split('T')[0];
-    const targetLocId = req.user.role === 'master_admin' ? (req.locationId || req.body.location_id || 1) : req.locationId;
+    const targetLocId = req.locationId;
+    if (!targetLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to register a client.' });
+    }
     const insertRes = db.prepare(`
       INSERT INTO CLIENTS (
         name, surname, gender, marital_status, dob, anniversary_date, address_line1, address_line2, pincode, city, state,
@@ -4319,7 +4586,11 @@ app.post('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (r
     }
 
     const order = display_order || 0;
-    const resolvedImage = image_url || (icon && icon.includes('/') ? icon : null) || '/services/categories/cat_01_signature_facials.png?v=44';
+    const resolvedImage = image_url || (icon && icon.includes('/') ? icon : null) || '/services/categories/cat_01_signature_facials.png?v=45';
+    const imgValidation = validateCategoryImageUrlOnDisk(resolvedImage);
+    if (!imgValidation.valid) {
+      return res.status(400).json({ error: imgValidation.error, reason: imgValidation.reason });
+    }
     const resolvedIcon = icon || 'Sparkles';
     const resolvedPosition = image_position || null;
     const stmt = db.prepare(`
@@ -4341,6 +4612,12 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
   try {
     const { category_name, description, icon, image_url, image_position, display_order, active } = req.body;
     const catId = req.params.id;
+    if (image_url) {
+      const imgValidation = validateCategoryImageUrlOnDisk(image_url);
+      if (!imgValidation.valid) {
+        return res.status(400).json({ error: imgValidation.error, reason: imgValidation.reason });
+      }
+    }
 
     db.prepare(`
       UPDATE SERVICE_CATEGORIES
@@ -4363,6 +4640,66 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
   }
 });
 
+// Admin: Delete Category (and its sub-services)
+app.delete('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
+  try {
+    const catId = req.params.id;
+    const existing = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ?').get(catId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Category not found' });
+    }
+
+    const fkState = db.pragma('foreign_keys', { simple: true });
+    try {
+      db.pragma('foreign_keys = OFF');
+      const deleteTx = db.transaction((id) => {
+        db.prepare('DELETE FROM SERVICES WHERE category_id = ?').run(id);
+        db.prepare('DELETE FROM SERVICE_CATEGORIES WHERE category_id = ?').run(id);
+        const remaining = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES ORDER BY display_order ASC, category_id ASC').all();
+        const reseqStmt = db.prepare('UPDATE SERVICE_CATEGORIES SET display_order = ? WHERE category_id = ?');
+        remaining.forEach((row, idx) => {
+          reseqStmt.run(idx + 1, row.category_id);
+        });
+      });
+      deleteTx(catId);
+    } finally {
+      if (fkState) db.pragma('foreign_keys = ON');
+    }
+
+    res.json({ success: true, deletedCategoryId: Number(catId) });
+  } catch (error) {
+    console.error('Delete category error:', error);
+    res.status(500).json({ error: 'Failed to delete category' });
+  }
+});
+
+// Admin: Reorder Categories (drag-and-drop sequence update)
+app.put('/api/admin/categories-reorder', authenticateToken, authorizeRoles('admin'), (req, res) => {
+  try {
+    const { orderedCategoryIds } = req.body;
+    if (!Array.isArray(orderedCategoryIds) || orderedCategoryIds.length === 0) {
+      return res.status(400).json({ error: 'orderedCategoryIds array is required' });
+    }
+
+    const updateOrderStmt = db.prepare(`
+      UPDATE SERVICE_CATEGORIES
+      SET display_order = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE category_id = ?
+    `);
+    const reorderTx = db.transaction((ids) => {
+      ids.forEach((catId, index) => {
+        updateOrderStmt.run(index + 1, Number(catId));
+      });
+    });
+    reorderTx(orderedCategoryIds);
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Reorder categories error:', error);
+    res.status(500).json({ error: 'Failed to reorder categories' });
+  }
+});
+
 // Admin: Add Sub-Service
 app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
@@ -4376,6 +4713,7 @@ app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req
       subtitle,
       tag,
       downtime,
+      vsp_badges,
       highlights,
       video_url,
       image_url,
@@ -4385,17 +4723,19 @@ app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req
       session_interval,
       session_interval_unit
     } = req.body;
-    if (!category_id || !service_name || price === undefined) {
+    if (!category_id || !service_name || price === undefined) { if (true) {
       return res.status(400).json({ error: 'Category, service name, and price are required' });
+    }
+    try { db.exec('ALTER TABLE SERVICES ADD COLUMN vsp_badges TEXT;'); } catch (e) {}
     }
 
     const stmt = db.prepare(`
       INSERT INTO SERVICES (
         category_id, service_name, price, duration_mins, description, display_order, active,
-        subtitle, tag, downtime, highlights, video_url, image_url, gallery,
+        subtitle, tag, downtime, vsp_badges, highlights, video_url, image_url, gallery,
         has_sessions, total_sessions, session_interval, session_interval_unit
       )
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const info = stmt.run(
       category_id,
@@ -4407,6 +4747,7 @@ app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req
       subtitle !== undefined ? subtitle : '',
       tag !== undefined ? tag : '',
       downtime !== undefined ? downtime : '',
+      vsp_badges !== undefined ? (typeof vsp_badges === 'object' ? JSON.stringify(vsp_badges) : vsp_badges) : '[]',
       highlights !== undefined ? (typeof highlights === 'object' ? JSON.stringify(highlights) : highlights) : '',
       video_url !== undefined ? video_url : '',
       image_url !== undefined ? image_url : '',
@@ -4438,6 +4779,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
       subtitle,
       tag,
       downtime,
+      vsp_badges,
       highlights,
       video_url,
       image_url,
@@ -4448,6 +4790,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
       session_interval_unit
     } = req.body;
     const serviceId = req.params.id;
+    try { db.exec('ALTER TABLE SERVICES ADD COLUMN vsp_badges TEXT;'); } catch (e) {}
 
     db.prepare(`
       UPDATE SERVICES
@@ -4460,6 +4803,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
           subtitle = COALESCE(?, subtitle),
           tag = COALESCE(?, tag),
           downtime = COALESCE(?, downtime),
+          vsp_badges = COALESCE(?, vsp_badges),
           highlights = COALESCE(?, highlights),
           video_url = COALESCE(?, video_url),
           image_url = COALESCE(?, image_url),
@@ -4480,6 +4824,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
       subtitle !== undefined ? subtitle : null,
       tag !== undefined ? tag : null,
       downtime !== undefined ? downtime : null,
+      vsp_badges !== undefined ? (typeof vsp_badges === 'object' ? JSON.stringify(vsp_badges) : vsp_badges) : null,
       highlights !== undefined ? (typeof highlights === 'object' ? JSON.stringify(highlights) : highlights) : null,
       video_url !== undefined ? video_url : null,
       image_url !== undefined ? image_url : null,
@@ -4500,7 +4845,7 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
 });
 
 // Admin: Direct media file upload (video or image)
-app.post('/api/admin/upload', authenticateToken, authorizeRoles('admin', 'reception'), upload.single('file'), (req, res) => {
+app.post('/api/admin/upload', authenticateToken, authorizeRoles('master_admin', 'admin', 'reception', 'staff', 'visitor'), upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file was uploaded' });
@@ -4524,14 +4869,10 @@ app.post('/api/admin/upload', authenticateToken, authorizeRoles('admin', 'recept
 app.get('/api/staff', authenticateToken, (req, res) => {
   try {
     const locId = req.locationId;
-    let query = 'SELECT staff_id, name, role, phone, location_id, salary_type, salary_amount, incentive_percentage FROM STAFF WHERE active = 1';
-    let params = [];
-    if (locId) {
-      query += ' AND location_id = ?';
-      params.push(locId);
+    if (!locId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view staff.' });
     }
-    query += ' ORDER BY name ASC';
-    const staff = db.prepare(query).all(...params);
+    const staff = db.prepare('SELECT staff_id, name, role, phone, location_id, salary_type, salary_amount, incentive_percentage FROM STAFF WHERE active = 1 AND location_id = ? ORDER BY name ASC').all(locId);
     res.json({ staff });
   } catch (error) {
     console.error('Staff error:', error);
@@ -4543,14 +4884,10 @@ app.get('/api/staff', authenticateToken, (req, res) => {
 app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
     const locId = req.locationId;
-    let query = 'SELECT * FROM STAFF';
-    let params = [];
-    if (locId) {
-      query += ' WHERE location_id = ?';
-      params.push(locId);
+    if (!locId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to manage staff.' });
     }
-    query += ' ORDER BY active DESC, name ASC';
-    const staff = db.prepare(query).all(...params);
+    const staff = db.prepare('SELECT * FROM STAFF WHERE location_id = ? ORDER BY active DESC, name ASC').all(locId);
 
     const withMetrics = staff.map(s => {
       const stats = db.prepare(`
@@ -4615,7 +4952,10 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
       return res.status(400).json({ error: 'Staff name and role are required' });
     }
 
-    const targetLocId = req.user.role === 'master_admin' ? (req.locationId || location_id || 1) : req.locationId;
+    const targetLocId = req.locationId;
+    if (!targetLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to add staff.' });
+    }
     const cleanSalaryType = salary_type === 'salary_plus_incentive' ? 'salary_plus_incentive' : 'fixed';
     const cleanSalaryAmount = Number(salary_amount) || 0;
     const cleanIncentivePct = cleanSalaryType === 'salary_plus_incentive' ? (Number(incentive_percentage) || 0) : 0;
@@ -4667,14 +5007,16 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
     } = req.body;
     const staffId = req.params.id;
 
-    if (req.user.role !== 'master_admin') {
-      const existing = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(staffId);
-      if (!existing) {
-        return res.status(404).json({ error: 'Staff member not found' });
-      }
-      if (existing.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Staff member belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update staff.' });
+    }
+    const existing = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(staffId);
+    if (!existing) {
+      return res.status(404).json({ error: 'Staff member not found' });
+    }
+    if (Number(existing.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Staff member belongs to another studio location' });
     }
 
     const cleanSalaryType = salary_type !== undefined
@@ -4786,7 +5128,10 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         throw new Error(`Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`);
       }
 
-      const targetLocId = req.locationId || req.body.location_id || 1;
+      const targetLocId = req.locationId;
+      if (!targetLocId) {
+        throw new Error('Branch context (x-location-id) is required to record a visit');
+      }
       const clientInfo = db.prepare(`
         INSERT INTO CLIENTS (
           name, surname, gender, address_line1, address_line2, pincode, city, state,
@@ -4837,17 +5182,17 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       if (!existing) {
         throw new Error('Selected client not found in database');
       }
-      if (req.user.role !== 'master_admin' && existing.location_id !== req.locationId) {
+      if (Number(existing.location_id) !== Number(req.locationId)) {
         throw new Error('Access denied: Selected client belongs to another studio location');
       }
     }
 
     // Validate assigned staff belongs to current studio location
-    if (services && services.length > 0 && req.user.role !== 'master_admin') {
+    if (services && services.length > 0) {
       for (const s of services) {
         if (s.staff_id) {
           const staffRow = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(s.staff_id);
-          if (staffRow && staffRow.location_id !== req.locationId) {
+          if (staffRow && Number(staffRow.location_id) !== Number(req.locationId)) {
             throw new Error('Access denied: Assigned staff member belongs to another studio location');
           }
         }
@@ -4968,12 +5313,10 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       });
     }
 
-    let clientLocationId = req.user.role === 'master_admin' ? (req.locationId || req.body.location_id || 1) : req.locationId;
-    if (!clientLocationId && finalClientId) {
-      const c = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(finalClientId);
-      clientLocationId = c?.location_id || 1;
+    const clientLocationId = req.locationId;
+    if (!clientLocationId) {
+      throw new Error('Branch context (x-location-id) is required to record a visit');
     }
-    if (!clientLocationId) clientLocationId = 1;
 
     // 3. Insert Visit
     const visitInfo = db.prepare(`
@@ -5200,10 +5543,12 @@ app.get('/api/visits/:id', authenticateToken, (req, res) => {
       return res.status(404).json({ error: 'Visit not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      if (visit.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Visit belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view visit details.' });
+    }
+    if (Number(visit.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Visit belongs to another studio location' });
     }
 
     const services = db.prepare(`
@@ -5242,18 +5587,20 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
       return res.status(404).json({ error: 'Visit not found' });
     }
 
-    if (req.user.role !== 'master_admin') {
-      if (existingVisit.location_id !== req.locationId) {
-        return res.status(403).json({ error: 'Access denied: Visit belongs to another studio location' });
-      }
+    const activeLocId = req.locationId;
+    if (!activeLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to update a visit.' });
+    }
+    if (Number(existingVisit.location_id) !== Number(activeLocId)) {
+      return res.status(403).json({ error: 'Access denied: Visit belongs to another studio location' });
     }
 
     // Verify assigned staff belongs to current location if updated
-    if (Array.isArray(services) && req.user.role !== 'master_admin') {
+    if (Array.isArray(services)) {
       for (const s of services) {
         if (s.staff_id) {
           const staffRow = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(s.staff_id);
-          if (staffRow && staffRow.location_id !== req.locationId) {
+          if (staffRow && Number(staffRow.location_id) !== Number(activeLocId)) {
             return res.status(403).json({ error: 'Access denied: Assigned staff member belongs to another studio location' });
           }
         }
@@ -5581,17 +5928,18 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
 
     const yesterdayLocal = addDays(todayLocal, -1);
 
-    // Location resolution: query param override (for master_admin) or header token location
-    const locId = req.user.role === 'master_admin' 
-      ? (req.query.location_id ? Number(req.query.location_id) : req.locationId)
-      : req.locationId;
+    // Location resolution: strictly scoped to the active branch context
+    const locId = req.locationId;
+    if (!locId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to view branch reports.' });
+    }
 
-    let vLoc = locId ? ' AND v.location_id = ?' : '';
-    let vLocParams = locId ? [locId] : [];
-    let vLocSingle = locId ? ' AND location_id = ?' : '';
-    let vLocSingleParams = locId ? [locId] : [];
-    let cLoc = locId ? ' WHERE location_id = ?' : '';
-    let cLocParams = locId ? [locId] : [];
+    const vLoc = ' AND v.location_id = ?';
+    const vLocParams = [locId];
+    const vLocSingle = ' AND location_id = ?';
+    const vLocSingleParams = [locId];
+    const cLoc = ' WHERE location_id = ?';
+    const cLocParams = [locId];
 
     // Branch info and data bounds
     const branchInfo = locId ? db.prepare('SELECT location_id, name, code, type, created_at FROM LOCATIONS WHERE location_id = ?').get(locId) : null;
@@ -5786,7 +6134,7 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
       WHERE date(v.visit_date) BETWEEN date(?) AND date(?) ${vLoc}
     `).get(filterStart, filterEnd, ...vLocParams);
 
-    // Payment methods in selected period
+    // Payment methods in selected period (filters out null and 'Other' non-tender entries)
     const paymentMethods = db.prepare(`
       SELECT 
         payment_method,
@@ -5794,6 +6142,8 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
         COALESCE(SUM(amount_paid), 0) as amount
       FROM VISITS v
       WHERE date(v.visit_date) BETWEEN date(?) AND date(?) ${vLoc}
+        AND payment_method IS NOT NULL
+        AND LOWER(TRIM(payment_method)) != 'other'
       GROUP BY payment_method
       ORDER BY amount DESC
     `).all(filterStart, filterEnd, ...vLocParams);
@@ -6338,12 +6688,11 @@ app.get('/api/reports/day-details', authenticateToken, authorizeRoles('admin'), 
     const day = req.query.date; // e.g. '2026-10-05'
     if (!day) return res.status(400).json({ error: 'Date is required' });
 
-    const locId = req.user.role === 'master_admin' 
-      ? (req.query.location_id ? Number(req.query.location_id) : req.locationId)
-      : req.locationId;
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to view day details.' });
 
-    let vLoc = locId ? ' AND v.location_id = ?' : '';
-    let vLocParams = locId ? [locId] : [];
+    const vLoc = ' AND v.location_id = ?';
+    const vLocParams = [locId];
 
     const visits = db.prepare(`
       SELECT 

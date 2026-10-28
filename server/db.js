@@ -228,6 +228,7 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN subtitle TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN tag TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN downtime TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICES ADD COLUMN vsp_badges TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN highlights TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN video_url TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN image_url TEXT;`); } catch(e) {}
@@ -483,7 +484,7 @@ export function initDatabase() {
 
       insertLoc.run(
         'Maison BeYou — Jubilee Hills Flagship',
-        'MB-JH-01',
+        'MB-B-HYD-001',
         'branch',
         'Road No. 36, Jubilee Hills',
         'Hyderabad',
@@ -497,7 +498,7 @@ export function initDatabase() {
 
       insertLoc.run(
         'Maison BeYou — Bandra West Studio',
-        'MB-BW-02',
+        'MB-B-MUM-001',
         'branch',
         'Linking Road, Bandra West',
         'Mumbai',
@@ -511,7 +512,7 @@ export function initDatabase() {
 
       insertLoc.run(
         'Maison BeYou — Indiranagar Franchise',
-        'MB-IN-F01',
+        'MB-F-BEN-001',
         'franchise',
         '100ft Road, Indiranagar',
         'Bengaluru',
@@ -525,7 +526,7 @@ export function initDatabase() {
 
       insertLoc.run(
         'Maison BeYou — Koregaon Park Franchise',
-        'MB-KP-F02',
+        'MB-F-PUN-001',
         'franchise',
         'North Main Road, Koregaon Park',
         'Pune',
@@ -1131,6 +1132,130 @@ function seedData() {
   } catch (e) {
     // Ignore
   }
+
+  // Runtime migration: Normalize all branch & franchise codes to MB-B-<CITY>-001 / MB-F-<CITY>-001
+  try {
+    migrateLocationCodes(db);
+  } catch (e) {
+    console.error('Location code normalization notice:', e.message);
+  }
+}
+
+export function generateLocationCode(dbInstance = db, { type = 'branch', city = 'LOC', excludeLocationId = null } = {}) {
+  const cleanType = (type || 'branch').trim().toLowerCase();
+  const typeChar = cleanType === 'franchise' ? 'F' : 'B';
+  const cityCode = (city || 'LOC').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'LOC';
+  const basePrefix = `MB-${typeChar}-${cityCode}`;
+
+  let seq = 1;
+  let candidateCode = `${basePrefix}-${String(seq).padStart(3, '0')}`;
+  while (true) {
+    const existing = excludeLocationId
+      ? dbInstance.prepare('SELECT location_id FROM LOCATIONS WHERE code = ? AND location_id != ?').get(candidateCode, excludeLocationId)
+      : dbInstance.prepare('SELECT location_id FROM LOCATIONS WHERE code = ?').get(candidateCode);
+    if (!existing) break;
+    seq++;
+    candidateCode = `${basePrefix}-${String(seq).padStart(3, '0')}`;
+  }
+  return candidateCode;
+}
+
+export function formatPhoneIndian(rawPhone) {
+  const raw = String(rawPhone || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const last10 = digits.length >= 10 ? digits.slice(-10) : '';
+  if (last10.length === 10) {
+    return `+91 ${last10.slice(0, 5)} ${last10.slice(5)}`;
+  }
+  return raw || '+91 98200 12345';
+}
+
+export function migrateLocationCodes(dbInstance = db) {
+  const codePattern = /^MB-[BF]-[A-Z]{3}-\d{3}$/;
+  const allLocs = dbInstance.prepare('SELECT * FROM LOCATIONS ORDER BY location_id ASC').all();
+
+  const fallbackManagers = [
+    'Ayesha Khan',
+    'Vikram Rathore',
+    'Karan Verma',
+    'Tanvi Deshmukh',
+    'Pooja Hegde',
+    'Rohan Kulkarni',
+    'Ananya Sharma',
+    'Siddharth Malhotra'
+  ];
+  const defaultPinByCity = {
+    hyderabad: '500033',
+    mumbai: '400050',
+    bengaluru: '560038',
+    bangalore: '560038',
+    pune: '411001'
+  };
+
+  const tx = dbInstance.transaction(() => {
+    // Temporarily clear non-conforming codes to avoid UNIQUE collisions while re-sequencing
+    for (const loc of allLocs) {
+      if (!loc.code || !codePattern.test(loc.code)) {
+        dbInstance.prepare('UPDATE LOCATIONS SET code = ? WHERE location_id = ?').run(`__TMP_LOC_${loc.location_id}__`, loc.location_id);
+      }
+    }
+    for (const loc of allLocs) {
+      let newCode = loc.code;
+      if (!newCode || !codePattern.test(newCode)) {
+        newCode = generateLocationCode(dbInstance, {
+          type: loc.type,
+          city: loc.city,
+          excludeLocationId: loc.location_id
+        });
+      }
+
+      let cleanName = String(loc.name || '').trim()
+        .replace(/\((?:Proprietor|Partnership|Pvt\.?\s*Ltd\.?|LLP|Updated\s*&\s*Verified|Updated|Verified)\)/gi, '')
+        .replace(/\b\d{10,}\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!/^maison\s*beyou/i.test(cleanName)) {
+        cleanName = `Maison BeYou — ${cleanName || 'Flagship Studio'}`;
+      } else {
+        cleanName = cleanName.replace(/^maison\s*beyou\s*[-–—]?\s*/i, 'Maison BeYou — ');
+      }
+
+      const cityStr = (loc.city || 'Hyderabad').trim();
+      const stateStr = (loc.state || 'Telangana').trim();
+      const addrStr = (loc.address || 'Road No. 36, Jubilee Hills').trim();
+      let pinStr = (loc.pincode || '').trim();
+      if (!pinStr) {
+        if (/gachibowli/i.test(addrStr)) pinStr = '500032';
+        else if (/whitefield/i.test(addrStr)) pinStr = '560066';
+        else if (/juhu/i.test(addrStr)) pinStr = '400049';
+        else pinStr = defaultPinByCity[cityStr.toLowerCase()] || '500033';
+      }
+
+      const phoneStr = formatPhoneIndian(loc.phone || loc.primary_login_phone);
+
+      let mgrStr = (loc.manager_name || '').trim();
+      if (!mgrStr) {
+        const sh = dbInstance.prepare('SELECT name FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC LIMIT 1').get(loc.location_id);
+        if (sh?.name) {
+          mgrStr = sh.name
+            .replace(/^(?:Partner\s+(?:One|Two|Three|\d+)\s*[-–—:]\s*|Director\s+|Proprietor\s+)/i, '')
+            .replace(/\bUpdated\b/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+      }
+      if (!mgrStr || /Test\s+Individual/i.test(mgrStr)) {
+        mgrStr = fallbackManagers[(Number(loc.location_id || 1) - 1) % fallbackManagers.length];
+      }
+
+      dbInstance.prepare(`
+        UPDATE LOCATIONS
+        SET code = ?, name = ?, address = ?, city = ?, state = ?, pincode = ?, phone = ?, manager_name = ?
+        WHERE location_id = ?
+      `).run(newCode, cleanName, addrStr, cityStr, stateStr, pinStr, phoneStr, mgrStr, loc.location_id);
+    }
+  });
+  tx();
 }
 
 export function recordAuditLog({ userId, action, targetType, targetId, locationId, details, ipAddress }) {

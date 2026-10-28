@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   UserPlus, UserCheck, ArrowLeft, ArrowRight, Check, Plus,
   Trash2, ShieldAlert, Sparkles, CheckCircle2, Clock,
@@ -16,6 +16,7 @@ import brandLogoTextImg from '../assets/brand-logo-text.png';
 import LuxuryDatePicker from './LuxuryDatePicker';
 import ServiceTermsModal from './ServiceTermsModal';
 import LoginPreferenceSelector from './LoginPreferenceSelector';
+import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 import { renderCategoryIcon } from '../utils/categoryIcons';
 
 export const MEMBERSHIP_PLANS = [
@@ -518,6 +519,58 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
   const clientMenuRef = useRef(null);
 
+  // Dynamic Membership Plans & Program Title (synced in real-time from Membership Management)
+  const [dynamicMembershipPlans, setDynamicMembershipPlans] = useState([]);
+  const [membershipProgramTitle, setMembershipProgramTitle] = useState('WORLD OF PRIVILEGES');
+
+  const fetchLiveMembershipData = useCallback(async () => {
+    try {
+      let res;
+      try {
+        res = await apiRequest('/memberships');
+      } catch (e) {
+        const publicRes = await fetch('/api/memberships/public');
+        if (publicRes.ok) {
+          res = await publicRes.json();
+        }
+      }
+      if (res) {
+        if (res.program_title) {
+          setMembershipProgramTitle(res.program_title);
+        }
+        if (res.plans && res.plans.length > 0) {
+          setDynamicMembershipPlans(res.plans);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch live membership plans:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLiveMembershipData();
+    const handleSync = () => fetchLiveMembershipData();
+    window.addEventListener('membership_plans_updated', handleSync);
+
+    let bc;
+    try {
+      bc = new BroadcastChannel('membership_sync');
+      bc.onmessage = () => fetchLiveMembershipData();
+    } catch (e) {}
+
+    return () => {
+      window.removeEventListener('membership_plans_updated', handleSync);
+      if (bc) bc.close();
+    };
+  }, [fetchLiveMembershipData]);
+
+  // Refetch when entering membership-plans step
+  useEffect(() => {
+    if (step === 'membership-plans') {
+      fetchLiveMembershipData();
+    }
+  }, [step, fetchLiveMembershipData]);
+
   // Sync cart count & openCart callback to Navbar via onCartChange
   // The cart should appear starting FROM 'categories' (DISCOVER YOUR RITUAL) onwards!
   const isCartStep = ['categories', 'sub-services', 'selected-services', 'billing-payment'].includes(step);
@@ -783,6 +836,64 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       }
     }
     loadMasterData();
+
+    const refreshCatalogSilently = async () => {
+      try {
+        const catRes = await apiRequest('/categories');
+        if (catRes && Array.isArray(catRes.categories)) {
+          setCategories(catRes.categories);
+          setSelectedCategory(prev => {
+            if (!prev) return prev;
+            const updatedCat = catRes.categories.find(c => Number(c.category_id) === Number(prev.category_id));
+            return updatedCat || prev;
+          });
+        }
+      } catch (e) {
+        // ignore silent refresh error
+      }
+    };
+
+    const handleStorageChange = (e) => {
+      if (!e || e.key === 'mb_catalog_updated_at') {
+        refreshCatalogSilently();
+      }
+    };
+    window.addEventListener('focus', refreshCatalogSilently);
+    window.addEventListener('mb_catalog_updated', refreshCatalogSilently);
+    window.addEventListener('storage', handleStorageChange);
+
+    let bc = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('mb_catalog_sync');
+        bc.onmessage = () => refreshCatalogSilently();
+      }
+    } catch (e) {}
+
+    return () => {
+      window.removeEventListener('focus', refreshCatalogSilently);
+      window.removeEventListener('mb_catalog_updated', refreshCatalogSilently);
+      window.removeEventListener('storage', handleStorageChange);
+      if (bc) {
+        try { bc.close(); } catch (e) {}
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step === 'categories' || step === 'sub-services') {
+      apiRequest('/categories').then(catRes => {
+        if (catRes && Array.isArray(catRes.categories)) {
+          setCategories(catRes.categories);
+          setSelectedCategory(prev => {
+            if (!prev) return prev;
+            return catRes.categories.find(c => Number(c.category_id) === Number(prev.category_id)) || prev;
+          });
+        }
+      }).catch(() => {});
+    }
+  }, [step, selectedCategory?.category_id]);
+  useEffect(() => {
   }, []);
 
   // Fetch regular clients list for Search Client screen
@@ -4479,14 +4590,16 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
             marginBottom: '4px',
             lineHeight: '1.2'
           }}>
-            WORLD OF PRIVILEGES
+            {membershipProgramTitle || 'WORLD OF PRIVILEGES'}
           </h1>
         </div>
 
-        {/* 4 Cards Grid (matching Image 2) */}
+        {/* Dynamic Cards Grid (synced in real-time with backend plans) */}
         <div className="membership-plans-grid">
-          {MEMBERSHIP_PLANS.map((plan) => {
+          {(dynamicMembershipPlans && dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS).map((plan) => {
             const isSelected = currentPlan?.id === plan.id;
+            const cardPrice = plan.priceFormatted || ('₹' + Number(plan.price || 0).toLocaleString('en-IN'));
+            const cardBenefits = Array.isArray(plan.benefits) ? plan.benefits : [];
 
             return (
               <div
@@ -4532,8 +4645,12 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                   background: '#FAF6EE'
                 }}>
                   <img
-                    src={plan.image}
+                    src={plan.image || `/memberships/card_${plan.id}_3d.jpg`}
                     alt={plan.name}
+                    onError={(e) => {
+                      e.target.onerror = null;
+                      e.target.src = '/memberships/card_infini_3d.jpg';
+                    }}
                     style={{
                       width: '100%',
                       height: '100%',
@@ -4595,7 +4712,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     textAlign: 'center',
                     lineHeight: 1.15
                   }}>
-                    {plan.priceFormatted}
+                    {cardPrice}
                   </div>
 
                   {/* Duration Subtitle (e.g. per year) */}
@@ -4648,7 +4765,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     gap: '5px',
                     flex: 1
                   }}>
-                    {plan.benefits.map((b, idx) => (
+                    {cardBenefits.map((b, idx) => (
                       <li key={idx} style={{
                         fontSize: '10.5px',
                         color: '#44403C',
@@ -4720,7 +4837,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           <div>
             <div style={{ fontSize: 'clamp(12.5px, 1vw, 14px)', fontWeight: '700', color: '#1C1917' }}>
               {currentPlan ? (
-                <span>Selected: <strong style={{ color: '#B88B4A' }}>{currentPlan.name}</strong> ({currentPlan.priceFormatted})</span>
+                <span>Selected: <strong style={{ color: '#B88B4A' }}>{currentPlan.name}</strong> ({currentPlan.priceFormatted || ('₹' + Number(currentPlan.price || 0).toLocaleString('en-IN'))})</span>
               ) : (
                 <span>No Membership Plan Selected</span>
               )}
@@ -5274,7 +5391,8 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     return {
                       x: Number(p.x) || 0,
                       y: Number(p.y) || 0,
-                      scale: Number(p.scale) || 1
+                      scale: Number(p.scale) || 1,
+                      actionLabel: p.actionLabel || ''
                     };
                   }
                 } catch (e) {
@@ -5319,6 +5437,15 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                   onClick={() => {
                     if (item.category) {
                       setSelectedCategory(item.category);
+                      setFeaturedService(null);
+                      setActiveMediaTab('video');
+                      apiRequest('/categories').then(catRes => {
+                        if (catRes && Array.isArray(catRes.categories)) {
+                          setCategories(catRes.categories);
+                          const fresh = catRes.categories.find(c => Number(c.category_id) === Number(item.category.category_id));
+                          if (fresh) setSelectedCategory(fresh);
+                        }
+                      }).catch(() => {});
                       setStep('sub-services');
                     }
                   }}
@@ -5336,7 +5463,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     <div>
                       <div className="ritual-card-divider" />
                       <div className="ritual-card-action">
-                        <span>Explore</span>
+                        <span>{(item.imagePos?.actionLabel || 'Explore').trim() || 'Explore'}</span>
                         <ChevronRight size={15} color="#B88B4A" />
                       </div>
                     </div>
@@ -5370,7 +5497,8 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   // STEP 4: SUB-SERVICES (Section 10)
   // ==========================================
   if (step === 'sub-services' && selectedCategory) {
-    const subServices = selectedCategory.services || [];
+    const liveSelectedCategory = (categories || []).find(c => Number(c.category_id) === Number(selectedCategory.category_id)) || selectedCategory;
+    const subServices = (liveSelectedCategory.services || []).filter(s => s.active !== 0);
     const priority = [
       'clear skin',
       'beu clear skin',
@@ -5396,7 +5524,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       return 0;
     });
     const activeService = (featuredService && subServices.some(s => s.service_id === featuredService.service_id))
-      ? featuredService
+      ? (subServices.find(s => s.service_id === featuredService.service_id) || featuredService)
       : (displayServices[0] || null);
     const activeMedia = getServiceMedia(activeService, selectedCategory.category_name);
     const activeCountInCart = activeService
@@ -5457,7 +5585,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       })
       .filter(Boolean);
 
-    const activeCatList = orderedCategories.length > 0 ? orderedCategories : categories;
+    const activeCatList = (categories || []).filter(c => c.active !== 0).length > 0 ? (categories || []).filter(c => c.active !== 0) : (orderedCategories.length > 0 ? orderedCategories : categories);
     const currentCatIdx = activeCatList.findIndex(c => c.category_id === selectedCategory.category_id);
     const activeCatConfig = ritualCategoriesConfig.find(rc => rc.matcher(selectedCategory)) || {
       tagline: 'Purify. Calm. Rebalance.',
@@ -5481,7 +5609,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       setActiveMediaTab('video');
     };
 
-    const benefitsList = (activeMedia.highlights && activeMedia.highlights.length >= 3)
+    const benefitsList = (activeMedia.highlights && activeMedia.highlights.length > 0)
       ? activeMedia.highlights
       : [
           'Deeply cleanses and purifies congested skin',
@@ -5615,6 +5743,35 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
             minWidth: 0
           }}>
             {activeService && (
+              <VisitorServiceSpotlightCard
+                categoryName={activeCatConfig.title || selectedCategory.category_name}
+                serviceName={activeService.service_name}
+                durationMins={activeService.duration_mins || 45}
+                price={activeService.price}
+                subtitle={activeMedia.subtitle || ''}
+                tag=""
+                downtime=""
+                vspBadges={activeMedia.vspBadges || []}
+                videoUrl={activeMedia.video}
+                heroImage={activeMedia.heroImage || activeMedia.image}
+                gallery={activeMedia.gallery}
+                highlights={benefitsList}
+                activeMediaTab={activeMediaTab}
+                onSelectMediaTab={setActiveMediaTab}
+                videoRef={videoRef}
+                isVideoPlaying={isVideoPlaying}
+                setIsVideoPlaying={setIsVideoPlaying}
+                isVideoMuted={isVideoMuted}
+                setIsVideoMuted={setIsVideoMuted}
+                onTogglePlay={handleToggleVideoPlay}
+                onToggleMute={handleToggleVideoMute}
+                isActiveInCart={isActiveInCart}
+                onSelectService={() => handleOpenTermsModal(activeService)}
+                onOpenTerms={() => handleOpenTermsModal(activeService)}
+                maxGalleryThumbnails={4}
+              />
+            )}
+            {false && activeService && (
               <div className="card spotlight-card-container">
               <div className="spotlight-featured-grid">
                 {/* LEFT COLUMN: Main Media Display + 4 Horizontal Thumbnails Below */}

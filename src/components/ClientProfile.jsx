@@ -729,9 +729,6 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
                 <h3 style={{ fontSize: '18px', fontWeight: '700', color: '#1C1917', margin: 0 }}>
                   Active Treatment Plans & Clinical Session Tracking
                 </h3>
-                <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                  Track treatment course progression, scheduled intervals, and automated next session due dates.
-                </p>
               </div>
 
               <button

@@ -714,6 +714,33 @@ export function getServiceMedia(service, categoryName = '') {
   }
 
   const baseGallery = resolveGallery(base);
+  let resolvedTag = service?.tag !== undefined && service?.tag !== null ? service.tag : (base.tag || 'Quick & Effective');
+  let resolvedVspBadges = [];
+  if (typeof resolvedTag === 'string' && resolvedTag.trim().startsWith('{')) {
+    try {
+      const parsedTagObj = JSON.parse(resolvedTag);
+      if (parsedTagObj && typeof parsedTagObj === 'object') {
+        resolvedTag = parsedTagObj.tag !== undefined ? parsedTagObj.tag : (base.tag || 'Quick & Effective');
+        if (Array.isArray(parsedTagObj.vsp_badges)) {
+          resolvedVspBadges = parsedTagObj.vsp_badges.map(b => String(b || '').trim()).filter(Boolean);
+        }
+      }
+    } catch (e) {}
+  }
+  if (service?.vsp_badges) {
+    if (Array.isArray(service.vsp_badges)) {
+      resolvedVspBadges = service.vsp_badges.map(b => String(b || '').trim()).filter(Boolean);
+    } else if (typeof service.vsp_badges === 'string') {
+      try {
+        const parsedVsp = JSON.parse(service.vsp_badges);
+        if (Array.isArray(parsedVsp)) {
+          resolvedVspBadges = parsedVsp.map(b => String(b || '').trim()).filter(Boolean);
+        }
+      } catch (e) {
+        resolvedVspBadges = service.vsp_badges.split(',').map(s => s.trim()).filter(Boolean);
+      }
+    }
+  }
   const finalGallery = (customGallery && customGallery.length > 0)
     ? [...customGallery, ...baseGallery].slice(0, 4)
     : baseGallery;
@@ -724,7 +751,8 @@ export function getServiceMedia(service, categoryName = '') {
     image: service?.image_url || service?.image || base.image,
     heroImage: service?.image_url || service?.heroImage || base.heroImage,
     downtime: service?.downtime || base.downtime || 'Zero Downtime',
-    tag: service?.tag || base.tag || 'Quick & Effective',
+    tag: resolvedTag,
+    vspBadges: resolvedVspBadges,
     subtitle: service?.subtitle || service?.description || base.subtitle || 'Quick & effective',
     highlights: (customHighlights && customHighlights.length > 0) ? customHighlights : base.highlights,
     gallery: finalGallery

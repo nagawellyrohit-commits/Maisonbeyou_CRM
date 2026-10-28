@@ -56,20 +56,43 @@ export default function App() {
     setStoredLocation(null);
     setCurrentUser(null);
     setSelectedLocation(null);
-    setMasterAdminView('types');
+    setMasterAdminView('locations'); // Back to studio list
   };
 
   const handleSelectLocation = (location) => {
+    setSelectedClientId(null);
+    setActiveVisitClient(null);
+    setPreSelectedVisitClient(null);
+    setReceiptVisitId(null);
     setSelectedLocation(location);
     setStoredLocation(location);
     setActiveTab('dashboard');
     window.dispatchEvent(new Event('auth_change'));
   };
 
-  const handleSwitchLocation = () => {
+  const handleSwitchLocation = async () => {
+    if (currentUser?.role !== 'master_admin' && currentUser?.original_role === 'master_admin') {
+      try {
+        const data = await apiRequest('/auth/switch-role', {
+          method: 'POST',
+          body: JSON.stringify({ role: 'master_admin' })
+        });
+        if (data?.token && data?.user) {
+          setStoredToken(data.token);
+          setStoredUser(data.user);
+          setCurrentUser(data.user);
+        }
+      } catch (e) {
+        console.error('Error restoring master_admin role on studio switch:', e);
+      }
+    }
+    setSelectedClientId(null);
+    setActiveVisitClient(null);
+    setPreSelectedVisitClient(null);
+    setReceiptVisitId(null);
     setSelectedLocation(null);
     setStoredLocation(null);
-    setMasterAdminView('types');
+    setMasterAdminView('locations'); // Back to studio list
     window.dispatchEvent(new Event('auth_change'));
   };
 
@@ -80,6 +103,7 @@ export default function App() {
       apiRequest('/auth/me')
         .then(res => {
           setCurrentUser(res.user);
+          setStoredUser(res.user);
           if (res.user?.role === 'master_admin') {
             const loc = getStoredLocation();
             if (!loc) {
@@ -114,7 +138,7 @@ export default function App() {
       setSelectedLocation(loc);
       if (u?.role === 'master_admin') {
         if (!loc) {
-          setMasterAdminView('types');
+          setMasterAdminView('locations');
         } else {
           setActiveTab('dashboard');
         }
@@ -199,7 +223,7 @@ export default function App() {
   }
 
   // Master Admin View: When no location is selected, display Studio Management or Location Selection
-  if (currentUser?.role === 'master_admin' && !selectedLocation) {
+  if ((currentUser?.role === 'master_admin' || currentUser?.original_role === 'master_admin') && !selectedLocation) {
     if (masterAdminView === 'locations') {
       return (
         <LocationSelection
@@ -361,7 +385,7 @@ export default function App() {
         )}
 
         {activeTab === 'membership' && (
-          <MembershipManagement currentUser={currentUser} activeLocation={activeLocation} />
+          <MembershipManagement currentUser={currentUser} activeLocation={selectedLocation} />
         )}
 
         {isAdmin && activeTab === 'reports' && (

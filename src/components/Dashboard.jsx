@@ -2,11 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2, Handshake,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
-  ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
+  ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
   Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check,
   Edit2, FileText, Crown
 } from 'lucide-react';
-import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
+import { apiRequest, formatCurrency, formatDate, formatPhone, setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
 import { MEMBERSHIP_PLANS } from './NewVisitWizard';
 import ClientsList from './ClientsList';
 import ServiceManagement from './ServiceManagement';
@@ -19,6 +19,54 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
   const [currentLocation, setCurrentLocation] = useState(activeLocation);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showDashboardRoleMenu, setShowDashboardRoleMenu] = useState(false);
+  const adminMenuRef = useRef(null);
+
+  const effectiveOriginalRole = currentUser?.original_role || currentUser?.role;
+  const isOriginalMasterAdmin = effectiveOriginalRole === 'master_admin';
+  const isOriginalBranchAdmin = effectiveOriginalRole === 'admin';
+  const isOriginalReception = effectiveOriginalRole === 'reception';
+
+  const handleDashboardSwitchRole = async (targetRole) => {
+    try {
+      const activeLocId = activeLocation?.location_id || currentUser?.location_id;
+      const res = await apiRequest('/auth/switch-role', {
+        method: 'POST',
+        body: JSON.stringify({
+          role: targetRole,
+          location_id: activeLocId
+        })
+      });
+      if (res && res.token) {
+        setStoredToken(res.token);
+        setStoredUser(res.user);
+        if (res.location || activeLocation) {
+          setStoredLocation(res.location || activeLocation);
+        }
+        setShowAdminMenu(false);
+        setShowDashboardRoleMenu(false);
+        setActiveSection('visits');
+        window.dispatchEvent(new Event('auth_change'));
+      } else {
+        alert(res?.error || 'Failed to switch role');
+      }
+    } catch (err) {
+      console.error('Switch role error:', err);
+      alert(err.message || 'Failed to switch role');
+    }
+  };
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (adminMenuRef.current && !adminMenuRef.current.contains(event.target)) {
+        setShowAdminMenu(false);
+        setShowDashboardRoleMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     setCurrentLocation(activeLocation);
@@ -34,6 +82,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   useEffect(() => {
     setActiveSection('visits');
   }, [activeLocation?.location_id]);
+
+  useEffect(() => {
+    const handleResetDashboard = () => setActiveSection('visits');
+    window.addEventListener('reset_dashboard_section', handleResetDashboard);
+    return () => window.removeEventListener('reset_dashboard_section', handleResetDashboard);
+  }, []);
 
   // Staff allocation & Payment verification state for Reception
   const [staffList, setStaffList] = useState([]);
@@ -67,6 +121,37 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [hoveredServicesVisitId, setHoveredServicesVisitId] = useState(null);
   const [isSelectingUpgradeMembership, setIsSelectingUpgradeMembership] = useState(false);
   const [pendingUpgradePlan, setPendingUpgradePlan] = useState(null);
+  const [dynamicMembershipPlans, setDynamicMembershipPlans] = useState([]);
+
+  useEffect(() => {
+    const fetchLivePlans = async () => {
+      try {
+        let res;
+        try {
+          res = await apiRequest('/memberships');
+        } catch (e) {
+          const publicRes = await fetch('/api/memberships/public');
+          if (publicRes.ok) res = await publicRes.json();
+        }
+        if (res && res.plans && res.plans.length > 0) {
+          setDynamicMembershipPlans(res.plans);
+        }
+      } catch (err) {
+        console.warn('Could not fetch live membership plans in Dashboard:', err);
+      }
+    };
+    fetchLivePlans();
+    window.addEventListener('membership_plans_updated', fetchLivePlans);
+    let bc;
+    try {
+      bc = new BroadcastChannel('membership_sync');
+      bc.onmessage = () => fetchLivePlans();
+    } catch (e) {}
+    return () => {
+      window.removeEventListener('membership_plans_updated', fetchLivePlans);
+      if (bc) bc.close();
+    };
+  }, []);
 
   const formatVisitTime = (dateStr) => {
     if (!dateStr) return '—';
@@ -358,6 +443,49 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
 
+      {isOriginalMasterAdmin && onSwitchLocation && (
+        <div style={{ display: 'flex', alignItems: 'center', marginTop: '14px', marginBottom: '-6px' }}>
+          <button
+            type="button"
+            onClick={onSwitchLocation}
+            title="Back to All Studios"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '12px',
+              padding: '8px 18px',
+              borderRadius: '9999px',
+              fontSize: '13px',
+              fontWeight: '700',
+              letterSpacing: '0.02em',
+              color: '#9F7335',
+              background: '#FAF6EE',
+              border: '1.5px solid #DAC493',
+              boxShadow: '0 2px 10px rgba(184, 139, 74, 0.10)',
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#B88B4A';
+              e.currentTarget.style.color = '#FFFFFF';
+              e.currentTarget.style.borderColor = '#B88B4A';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = '0 4px 14px rgba(184, 139, 74, 0.28)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#FAF6EE';
+              e.currentTarget.style.color = '#9F7335';
+              e.currentTarget.style.borderColor = '#DAC493';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 2px 10px rgba(184, 139, 74, 0.10)';
+            }}
+          >
+            <ArrowLeft size={15} strokeWidth={2.2} />
+            <span>Back</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Banner / Hero with Search & Quick Action */}
       <div style={{
         background: '#FFFFFF',
@@ -380,10 +508,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             letterSpacing: '0.14em',
             color: '#B88B4A',
             fontWeight: '700',
-            marginBottom: '4px',
+            marginBottom: '12px',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            gap: '12px'
           }}>
             {activeLocation ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -398,12 +526,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 background: '#FAF6EE',
                 border: '1px solid #DAC493',
                 color: '#9F7335',
-                padding: '1px 8px',
+                padding: '3px 10px',
                 borderRadius: '6px',
                 fontSize: '10.5px',
                 fontWeight: '800'
               }}>
-                {activeLocation.code || 'MB-LOC'}
+                {activeLocation.code || `MB-${activeLocation.type === 'franchise' ? 'F' : 'B'}-${(activeLocation.city || 'LOC').slice(0, 3).toUpperCase()}-001`}
               </span>
             )}
           </div>
@@ -422,106 +550,336 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           flex: '1 1 auto',
           minWidth: 0
         }}>
-          {/* Quick Module Navigation (Clients, Services, Staff, Reports) */}
+          {/* Quick Module Navigation Menu (Services, Membership, Team, Clients, Reports, KYC Details) */}
           {(isAdmin || currentUser?.role === 'reception') && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              {[
-                { id: 'clients', label: 'Clients', icon: Users, show: true },
-                { id: 'services', label: 'Services', icon: Scissors, show: isAdmin },
-                { id: 'staff', label: 'Staff', icon: Award, show: isAdmin },
-                { id: 'membership', label: 'Membership', icon: Crown, show: true },
-                { id: 'reports', label: 'Reports', icon: BarChart3, show: isAdmin }
-              ].filter(item => item.show).map(item => {
-                const Icon = item.icon;
-                const isActive = activeSection === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      setActiveSection(prev => {
-                        const next = prev === item.id ? 'visits' : item.id;
-                        setTimeout(() => {
-                          if (sectionContentRef.current) {
-                            sectionContentRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }
-                        }, 50);
-                        return next;
-                      });
-                    }}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '9px 18px',
-                      borderRadius: '9999px',
-                      fontSize: '13.5px',
-                      fontWeight: '600',
-                      color: isActive ? '#FFFFFF' : '#44403C',
-                      background: isActive ? '#B88B4A' : '#FAF6EE',
-                      border: isActive ? '1.5px solid #B88B4A' : '1.5px solid rgba(218, 196, 147, 0.45)',
-                      cursor: 'pointer',
-                      boxShadow: isActive ? '0 2px 8px rgba(184, 139, 74, 0.28)' : '0 1px 3px rgba(0,0,0,0.02)',
-                      transition: 'all 0.15s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = '#F5ECE0';
-                        e.currentTarget.style.borderColor = '#B88B4A';
-                        e.currentTarget.style.color = '#1C1917';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) {
-                        e.currentTarget.style.background = '#FAF6EE';
-                        e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.45)';
-                        e.currentTarget.style.color = '#44403C';
-                      }
-                    }}
-                  >
-                    <Icon size={15} color={isActive ? '#FFFFFF' : '#B88B4A'} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
+            <div ref={adminMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setShowAdminMenu(prev => !prev)}
+                title="Studio Modules Menu"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '9999px',
+                  color: '#44403C',
+                  background: showAdminMenu ? '#F5ECE0' : '#FAF6EE',
+                  border: `1.5px solid ${showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)'}`,
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#F5ECE0';
+                  e.currentTarget.style.borderColor = '#B88B4A';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = showAdminMenu ? '#F5ECE0' : '#FAF6EE';
+                  e.currentTarget.style.borderColor = showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)';
+                }}
+              >
+                <Menu size={18} color="#B88B4A" />
+              </button>
 
-              {/* KYC Details Pill Button matching Image 1 */}
-              {activeLocation && (
-                <button
-                  type="button"
-                  onClick={() => setIsKycModalOpen(true)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    padding: '9px 18px',
-                    borderRadius: '9999px',
-                    fontSize: '13.5px',
+              {showAdminMenu && (
+                <div style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 8px)',
+                  width: '230px',
+                  background: '#FFFFFF',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-lg)',
+                  border: '1px solid var(--border-color)',
+                  padding: '8px',
+                  zIndex: 100,
+                  animation: 'fadeIn 0.15s ease-out',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px'
+                }}>
+                  <div style={{
+                    fontSize: '11px',
                     fontWeight: '700',
-                    color: '#9F7335',
-                    background: '#FAF6EE',
-                    border: '1.5px solid #DAC493',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#F5ECE0';
-                    e.currentTarget.style.borderColor = '#B88B4A';
-                    e.currentTarget.style.color = '#1C1917';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#FAF6EE';
-                    e.currentTarget.style.borderColor = '#DAC493';
-                    e.currentTarget.style.color = '#9F7335';
-                  }}
-                  title="View or update Statutory KYC Details for this location"
-                >
-                  <ShieldCheck size={16} color="#B88B4A" />
-                  <span>KYC Details</span>
-                </button>
-              )}
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: '#B88B4A',
+                    padding: '6px 10px 8px 10px',
+                    borderBottom: '1px solid var(--border-color)',
+                    marginBottom: '4px'
+                  }}>
+                    Studio Modules
+                  </div>
 
+                  {[
+                    { id: 'visits', label: 'Dashboard', icon: LayoutDashboard, show: true },
+                    { id: 'services', label: 'Services', icon: Scissors, show: isAdmin },
+                    { id: 'membership', label: 'Membership', icon: Crown, show: true },
+                    { id: 'staff', label: 'Team', icon: Award, show: isAdmin },
+                    { id: 'clients', label: 'Clients', icon: Users, show: true },
+                    { id: 'reports', label: 'Reports', icon: BarChart3, show: isAdmin }
+                  ].filter(item => item.show).map(item => {
+                    const Icon = item.icon;
+                    const isActive = activeSection === item.id;
+                    const studioShortName = activeLocation
+                      ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name)
+                      : 'Studio';
+
+                    if (item.id === 'visits') {
+                      return (
+                        <div key={item.id} style={{ position: 'relative', display: 'flex', flexDirection: 'column' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activeSection !== 'visits') {
+                                setActiveSection('visits');
+                              }
+                              setShowDashboardRoleMenu(prev => !prev);
+                            }}
+                            style={{
+                              width: '100%',
+                              textAlign: 'left',
+                              padding: '9px 12px',
+                              borderRadius: 'var(--radius-sm)',
+                              fontSize: '13.5px',
+                              fontWeight: isActive ? '700' : '600',
+                              color: isActive ? '#B88B4A' : '#44403C',
+                              background: isActive ? '#FAF6EE' : 'transparent',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '10px',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              border: 'none'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = '#F5ECE0';
+                              e.currentTarget.style.color = '#1C1917';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = isActive ? '#FAF6EE' : 'transparent';
+                              e.currentTarget.style.color = isActive ? '#B88B4A' : '#44403C';
+                            }}
+                          >
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
+                              <Icon size={16} color="#B88B4A" />
+                              <span>{item.label}</span>
+                            </span>
+                            <ChevronDown
+                              size={14}
+                              color="#B88B4A"
+                              style={{
+                                transform: showDashboardRoleMenu ? 'rotate(90deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.2s ease'
+                              }}
+                            />
+                          </button>
+
+                          {showDashboardRoleMenu && (
+                            <div style={{
+                              position: 'absolute',
+                              right: 'calc(100% + 12px)',
+                              top: '-4px',
+                              width: '235px',
+                              background: '#FAF7F2',
+                              border: '1px solid #E5D8C6',
+                              borderRadius: '10px',
+                              padding: '8px',
+                              boxShadow: 'var(--shadow-lg)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              zIndex: 120,
+                              animation: 'fadeIn 0.15s ease-out'
+                            }}>
+                              {/* Branch Admin option: shown if logged in as Master Admin, OR if Branch Admin currently switched to Manager */}
+                              {(isOriginalMasterAdmin || (isOriginalBranchAdmin && currentUser?.role !== 'admin')) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDashboardSwitchRole('admin')}
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    padding: '8px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '12.5px',
+                                    background: currentUser?.role === 'admin' ? '#F3EDE4' : 'transparent',
+                                    border: 'none',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px',
+                                    cursor: 'pointer'
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'admin' ? '#F3EDE4' : 'transparent'; }}
+                                >
+                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
+                                    🏢 Branch Admin
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
+                                    Admin • Full Studio Operations & Reports
+                                  </span>
+                                </button>
+                              )}
+
+                              {/* Manager option: shown if logged in as Master Admin or Branch Admin */}
+                              {(isOriginalMasterAdmin || isOriginalBranchAdmin) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDashboardSwitchRole('reception')}
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    padding: '8px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '12.5px',
+                                    background: currentUser?.role === 'reception' ? '#F3EDE4' : 'transparent',
+                                    border: 'none',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px',
+                                    cursor: 'pointer'
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'reception' ? '#F3EDE4' : 'transparent'; }}
+                                >
+                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
+                                    🛎️ Manager
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
+                                    Staff • Dashboard, Billing & Visits
+                                  </span>
+                                </button>
+                              )}
+
+                              {/* Visitor option: shown for Master Admin, Branch Admin, and Manager/Reception */}
+                              {(isOriginalMasterAdmin || isOriginalBranchAdmin || isOriginalReception) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDashboardSwitchRole('visitor')}
+                                  style={{
+                                    width: '100%',
+                                    textAlign: 'left',
+                                    padding: '8px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '12.5px',
+                                    background: currentUser?.role === 'visitor' ? '#F3EDE4' : 'transparent',
+                                    border: 'none',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px',
+                                    cursor: 'pointer'
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'visitor' ? '#F3EDE4' : 'transparent'; }}
+                                >
+                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
+                                    📋 Visitor
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
+                                    Visitor • Client Check-in & Intake Flow
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false);
+                          setShowDashboardRoleMenu(false);
+                          setActiveSection(prev => {
+                            const next = prev === item.id ? 'visits' : item.id;
+                            setTimeout(() => {
+                              if (sectionContentRef.current) {
+                                sectionContentRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }
+                            }, 50);
+                            return next;
+                          });
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '9px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '13.5px',
+                          fontWeight: isActive ? '700' : '600',
+                          color: isActive ? '#B88B4A' : '#44403C',
+                          background: isActive ? '#FAF6EE' : 'transparent',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          border: 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#F5ECE0';
+                          e.currentTarget.style.color = '#1C1917';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = isActive ? '#FAF6EE' : 'transparent';
+                          e.currentTarget.style.color = isActive ? '#B88B4A' : '#44403C';
+                        }}
+                      >
+                        <Icon size={16} color="#B88B4A" />
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+
+                  {activeLocation && (
+                    <>
+                      <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminMenu(false);
+                          setIsKycModalOpen(true);
+                        }}
+                        title="View or update Statutory KYC Details for this location"
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '9px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '13.5px',
+                          fontWeight: '700',
+                          color: '#9F7335',
+                          background: 'transparent',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          border: 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#F5ECE0';
+                          e.currentTarget.style.color = '#1C1917';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.color = '#9F7335';
+                        }}
+                      >
+                        <ShieldCheck size={16} color="#B88B4A" />
+                        <span>KYC Details</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1274,8 +1632,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Services Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'services' && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1311,8 +1669,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'staff' && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1348,8 +1706,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Membership Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'membership' && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1389,8 +1747,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'reports' && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
             <button
               type="button"
               onClick={() => setActiveSection('visits')}
@@ -1420,7 +1778,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               ← Back to Today's Visits
             </button>
           </div>
-          <ReportsView />
+          <ReportsView onOpenClient={onOpenClient} />
         </div>
       )}
 
@@ -1831,10 +2189,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </button>
               </div>
 
-              {/* 4 Cards Grid */}
+              {/* Dynamic Cards Grid (synced in real-time with backend plans) */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-                {MEMBERSHIP_PLANS.map(plan => {
+                {(dynamicMembershipPlans && dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS).map(plan => {
                   const isSelected = pendingUpgradePlan?.id === plan.id;
+                  const planBenefits = Array.isArray(plan.benefits) ? plan.benefits : [];
                   return (
                     <div
                       key={plan.id}
@@ -1878,7 +2237,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             Privileges:
                           </div>
                           <ul style={{ margin: 0, paddingLeft: '14px', fontSize: '11px', color: '#44403C', lineHeight: 1.4 }}>
-                            {plan.benefits.slice(0, 2).map((b, i) => (
+                            {planBenefits.slice(0, 2).map((b, i) => (
                               <li key={i}>{b}</li>
                             ))}
                           </ul>
@@ -2087,7 +2446,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: '8px'
+                    gap: '12px'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <Crown size={20} color="#B88B4A" style={{ flexShrink: 0 }} />
@@ -2151,7 +2510,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: '8px'
+                    gap: '12px'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <AlertCircle size={18} color="#D97706" style={{ flexShrink: 0 }} />
@@ -2402,7 +2761,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            gap: '8px'
+                            gap: '12px'
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <Sparkles size={15} color="#B88B4A" style={{ flexShrink: 0 }} />
@@ -2499,7 +2858,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     flexWrap: 'wrap',
-                    gap: '8px'
+                    gap: '12px'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <CheckCircle2 size={18} color="#166534" style={{ flexShrink: 0 }} />

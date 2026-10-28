@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Crown, Sparkles, Users, Search, Filter, Plus, Calendar, Clock,
   ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RotateCw,
   ChevronRight, Edit2, ExternalLink, X, DollarSign, Wallet,
-  CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Image as ImageIcon
+  CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Image as ImageIcon,
+  Upload
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import { MEMBERSHIP_PLANS } from './NewVisitWizard';
@@ -25,10 +26,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   });
   const [loading, setLoading] = useState(true);
 
-  // Filter states
-  const [searchTerm, setSearchTerm] = useState('');
-  const [tierFilter, setTierFilter] = useState('all'); // 'all' | 'Lumière' | 'Infini' | 'Eternal' | 'Éclat'
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'expired'
+  const [selectedTier, setSelectedTier] = useState(null);
 
   // Modals state
   const [enrollModal, setEnrollModal] = useState(false);
@@ -45,6 +43,41 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   const [newClientName, setNewClientName] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
   const [creatingClient, setCreatingClient] = useState(false);
+
+  // Delete Confirmation Modal State
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState({
+    open: false,
+    planId: null,
+    planName: '',
+    deleting: false
+  });
+
+  // Program Title State
+  const [programTitle, setProgramTitle] = useState('WORLD OF PRIVILEGES');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState('WORLD OF PRIVILEGES');
+  const [savingTitle, setSavingTitle] = useState(false);
+
+  // Edit Membership Plan Modal (Master Admin & Main Admin only)
+  const [showEditPlanModal, setShowEditPlanModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(null);
+  const [savingEditPlan, setSavingEditPlan] = useState(false);
+  const [editCardImageUploading, setEditCardImageUploading] = useState(false);
+  const editCardImageInputRef = useRef(null);
+  const [editPlanForm, setEditPlanForm] = useState({
+    name: '',
+    fullName: '',
+    tier: '',
+    tierNumber: '',
+    price: '',
+    validity: 'Valid for 1 year',
+    validityBadge: 'VALID FOR 1 YEAR',
+    durationLabel: '(per year)',
+    image: '/memberships/card_infini_3d.jpg',
+    tagline: 'Exclusive personalized aesthetic luxury membership.',
+    benefitInput: '',
+    benefits: []
+  });
 
   // Add Membership Plan Modal (Master Admin & Main Admin only)
   const [showAddPlanModal, setShowAddPlanModal] = useState(false);
@@ -68,16 +101,19 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     ]
   });
 
-  // Quick Action Modals
-  const [adjustBalanceModal, setAdjustBalanceModal] = useState({ open: false, member: null, amount: '' });
-  const [extendValidityModal, setExtendValidityModal] = useState({ open: false, member: null, date: '' });
-
+  // Card Image File Upload State & Ref
+  const [cardImageUploading, setCardImageUploading] = useState(false);
+  const cardImageInputRef = useRef(null);
   const fetchMemberships = async () => {
     try {
       setLoading(true);
       const res = await apiRequest('/memberships');
-      if (res.plans && res.plans.length > 0) {
+      if (res.plans) {
         setPlans(res.plans);
+      }
+      if (res.program_title) {
+        setProgramTitle(res.program_title);
+        setTempTitle(res.program_title);
       }
       setMembers(res.members || []);
       setStats(res.stats || {
@@ -199,41 +235,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     }
   };
 
-  const handleSaveBalanceAdjustment = async (e) => {
-    e.preventDefault();
-    const { member, amount } = adjustBalanceModal;
-    if (!member) return;
-    try {
-      await apiRequest(`/clients/${member.client_id}/membership`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          membership_balance: parseFloat(amount) || 0
-        })
-      });
-      setAdjustBalanceModal({ open: false, member: null, amount: '' });
-      fetchMemberships();
-    } catch (err) {
-      alert('Failed to update balance: ' + err.message);
-    }
-  };
-
-  const handleSaveExtendValidity = async (e) => {
-    e.preventDefault();
-    const { member, date } = extendValidityModal;
-    if (!member || !date) return;
-    try {
-      await apiRequest(`/clients/${member.client_id}/membership-validity`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          membership_expires_at: date
-        })
-      });
-      setExtendValidityModal({ open: false, member: null, date: '' });
-      fetchMemberships();
-    } catch (err) {
-      alert('Failed to extend validity: ' + err.message);
-    }
-  };
 
   const handleAddBenefit = () => {
     if (!newPlanForm.benefitInput.trim()) return;
@@ -249,6 +250,47 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       ...prev,
       benefits: prev.benefits.filter((_, i) => i !== idx)
     }));
+  };
+
+  const handleCardImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (PNG, JPG, JPEG, WEBP)');
+      return;
+    }
+
+    try {
+      setCardImageUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiRequest('/admin/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (res && res.url) {
+        setNewPlanForm(prev => ({
+          ...prev,
+          image: res.url
+        }));
+      }
+    } catch (err) {
+      console.error('Card image upload error:', err);
+      alert('Image upload failed: ' + (err.message || 'Please check file format or size'));
+    } finally {
+      setCardImageUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const notifyMembershipChanged = () => {
+    try {
+      window.dispatchEvent(new CustomEvent('membership_plans_updated'));
+      const bc = new BroadcastChannel('membership_sync');
+      bc.postMessage({ type: 'MEMBERSHIP_UPDATED', timestamp: Date.now() });
+      bc.close();
+    } catch (e) {}
   };
 
   const handleCreatePlan = async (e) => {
@@ -301,6 +343,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           ]
         });
         await fetchMemberships();
+        notifyMembershipChanged();
       } else {
         alert(res?.error || 'Failed to save membership tier');
       }
@@ -312,56 +355,185 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     }
   };
 
-  const handleDeletePlan = async (planId, planName) => {
-    if (!window.confirm(`Are you sure you want to delete the "${planName}" membership plan?`)) {
+  const handleSaveTitle = async () => {
+    if (!tempTitle || !tempTitle.trim()) return;
+    try {
+      setSavingTitle(true);
+      const res = await apiRequest('/memberships/title', {
+        method: 'PUT',
+        body: JSON.stringify({ title: tempTitle.trim() })
+      });
+      if (res && res.success) {
+        setProgramTitle(res.program_title);
+        setTempTitle(res.program_title);
+        setIsEditingTitle(false);
+        notifyMembershipChanged();
+      } else {
+        alert(res?.error || 'Failed to update title');
+      }
+    } catch (err) {
+      console.error('Save title error:', err);
+      alert('Failed to update title: ' + err.message);
+    } finally {
+      setSavingTitle(false);
+    }
+  };
+
+  const handleOpenEditPlan = (p) => {
+    setEditingPlan(p);
+    setEditPlanForm({
+      name: p.name || '',
+      fullName: p.fullName || (p.name ? `${p.name.toUpperCase()} MEMBERSHIP` : ''),
+      tier: p.tier || p.name || '',
+      tierNumber: p.tierNumber || '',
+      price: p.price !== undefined ? p.price : '',
+      validity: p.validity || 'Valid for 1 year',
+      validityBadge: p.validityBadge || (p.validity ? p.validity.toUpperCase() : 'VALID FOR 1 YEAR'),
+      durationLabel: p.durationLabel || `(${p.validity || 'per year'})`,
+      image: p.image || '/memberships/card_infini_3d.jpg',
+      tagline: p.tagline || 'Exclusive personalized aesthetic luxury membership.',
+      benefitInput: '',
+      benefits: Array.isArray(p.benefits) ? [...p.benefits] : []
+    });
+    setShowEditPlanModal(true);
+  };
+
+  const handleAddEditBenefit = () => {
+    if (!editPlanForm.benefitInput.trim()) return;
+    setEditPlanForm(prev => ({
+      ...prev,
+      benefits: [...prev.benefits, prev.benefitInput.trim()],
+      benefitInput: ''
+    }));
+  };
+
+  const handleRemoveEditBenefit = (idx) => {
+    setEditPlanForm(prev => ({
+      ...prev,
+      benefits: prev.benefits.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const handleEditCardImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (PNG, JPG, JPEG, WEBP)');
+      return;
+    }
+
+    try {
+      setEditCardImageUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await apiRequest('/admin/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (res && res.url) {
+        setEditPlanForm(prev => ({
+          ...prev,
+          image: res.url
+        }));
+      }
+    } catch (err) {
+      console.error('Card image upload error:', err);
+      alert('Image upload failed: ' + (err.message || 'Please check file format or size'));
+    } finally {
+      setEditCardImageUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleSaveEditPlan = async (e) => {
+    e.preventDefault();
+    if (!editingPlan) return;
+    if (!editPlanForm.name.trim() || !editPlanForm.price) {
+      alert('Please enter a tier name and price.');
       return;
     }
     try {
-      const res = await apiRequest(`/memberships/plans/${planId}`, {
+      setSavingEditPlan(true);
+      const tierVal = editPlanForm.tier.trim() || editPlanForm.name.trim();
+      const payload = {
+        name: editPlanForm.name.trim(),
+        fullName: editPlanForm.fullName.trim() || `${editPlanForm.name.trim().toUpperCase()} MEMBERSHIP`,
+        tier: tierVal,
+        tierNumber: editPlanForm.tierNumber.trim() || editingPlan.tierNumber || '01 — SERVICE',
+        price: Number(editPlanForm.price),
+        credits: Number(editPlanForm.price),
+        validity: editPlanForm.validity,
+        validityBadge: editPlanForm.validityBadge || editPlanForm.validity.toUpperCase(),
+        durationLabel: editPlanForm.durationLabel || `(${editPlanForm.validity.toLowerCase()})`,
+        image: editPlanForm.image,
+        tagline: editPlanForm.tagline,
+        benefits: editPlanForm.benefits.length > 0 ? editPlanForm.benefits : ['Exclusive tailored beauty treatment privileges']
+      };
+
+      const res = await apiRequest(`/memberships/plans/${editingPlan.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+
+      if (res && res.success) {
+        setShowEditPlanModal(false);
+        setEditingPlan(null);
+        await fetchMemberships();
+        notifyMembershipChanged();
+      } else {
+        alert(res?.error || 'Failed to update membership plan');
+      }
+    } catch (err) {
+      console.error('Update plan error:', err);
+      alert('Error updating plan: ' + err.message);
+    } finally {
+      setSavingEditPlan(false);
+    }
+  };
+
+  const handleOpenDeleteConfirm = (planId, planName) => {
+    setDeleteConfirmModal({
+      open: true,
+      planId,
+      planName,
+      deleting: false
+    });
+  };
+
+  const handleConfirmDeletePlan = async () => {
+    if (!deleteConfirmModal.planId) return;
+    try {
+      setDeleteConfirmModal(prev => ({ ...prev, deleting: true }));
+      const res = await apiRequest(`/memberships/plans/${deleteConfirmModal.planId}`, {
         method: 'DELETE'
       });
       if (res && res.success) {
+        setDeleteConfirmModal({ open: false, planId: null, planName: '', deleting: false });
         await fetchMemberships();
+        notifyMembershipChanged();
       } else {
         alert(res?.error || 'Failed to delete plan');
+        setDeleteConfirmModal(prev => ({ ...prev, deleting: false }));
       }
     } catch (err) {
       console.error('Delete plan error:', err);
       alert('Error deleting plan: ' + err.message);
+      setDeleteConfirmModal(prev => ({ ...prev, deleting: false }));
     }
   };
-
-  // Filter members list
-  const filteredMembers = members.filter(m => {
-    if (tierFilter !== 'all' && m.tier_group !== tierFilter) return false;
-    if (statusFilter === 'active' && m.is_expired) return false;
-    if (statusFilter === 'expired' && !m.is_expired) return false;
-
-    if (searchTerm.trim()) {
-      const q = searchTerm.trim().toLowerCase();
-      const matchName = (m.name || '').toLowerCase().includes(q) || (m.surname || '').toLowerCase().includes(q);
-      const matchPhone = (m.phone || '').includes(q);
-      const matchTier = (m.membership_tier || '').toLowerCase().includes(q);
-      if (!matchName && !matchPhone && !matchTier) return false;
-    }
-    return true;
-  });
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Top Header Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.14em', color: '#B88B4A', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Crown size={14} color="#B88B4A" />
-            Studio Client Privilege Program
-          </div>
-          <h1 style={{ fontSize: '28px', color: '#1C1917', margin: '4px 0 0 0', fontWeight: '800' }}>
-            MEMBERSHIP TIERS & CLIENT DIRECTORY
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700', paddingLeft: '20px' }}>
+            Membership Tiers & Privileges
           </h1>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginRight: '20px' }}>
           <button
             type="button"
             onClick={fetchMemberships}
@@ -410,53 +582,118 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleOpenEnrollModal}
-            className="btn-primary"
-            style={{ padding: '9px 18px', fontSize: '13.5px', display: 'inline-flex', alignItems: 'center', gap: '7px' }}
-          >
-            <UserPlus size={16} />
-            Enroll Client into Membership
-          </button>
         </div>
       </div>
 
       {/* SECTION 1: WORLD OF PRIVILEGES SHOWCASE (MATCHING IMAGE 2) */}
       <div>
         <div style={{ textAlign: 'center', marginBottom: '22px', position: 'relative' }}>
-          <h2 style={{
-            fontSize: 'clamp(22px, 2.2vw, 26px)',
-            color: '#1C1917',
-            fontWeight: '800',
-            letterSpacing: '0.04em',
-            margin: 0,
-            textTransform: 'uppercase'
-          }}>
-            WORLD OF PRIVILEGES
-          </h2>
-          {tierFilter !== 'all' && (
-            <div style={{ marginTop: '10px' }}>
+          {isEditingTitle ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <input
+                type="text"
+                value={tempTitle}
+                onChange={(e) => setTempTitle(e.target.value)}
+                style={{
+                  fontSize: 'clamp(18px, 2vw, 24px)',
+                  fontWeight: '800',
+                  color: '#1C1917',
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  padding: '6px 14px',
+                  borderRadius: '8px',
+                  border: '2px solid #B88B4A',
+                  outline: 'none',
+                  background: '#FFFFFF',
+                  textAlign: 'center',
+                  minWidth: '280px',
+                  maxWidth: '100%'
+                }}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveTitle();
+                  if (e.key === 'Escape') {
+                    setIsEditingTitle(false);
+                    setTempTitle(programTitle);
+                  }
+                }}
+              />
               <button
                 type="button"
-                onClick={() => setTierFilter('all')}
+                onClick={handleSaveTitle}
+                disabled={savingTitle}
                 style={{
-                  fontSize: '11.5px',
-                  padding: '4px 14px',
-                  borderRadius: '9999px',
-                  border: '1px solid #DAC493',
-                  background: '#FAF6EE',
-                  color: '#8C6228',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
+                  color: '#FFFFFF',
                   fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  boxShadow: '0 2px 6px rgba(184, 139, 74, 0.1)'
+                  fontSize: '12px',
+                  border: 'none',
+                  cursor: savingTitle ? 'wait' : 'pointer'
                 }}
               >
-                Clear Filter ({tierFilter}) ×
+                {savingTitle ? 'Saving...' : 'Save Title'}
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditingTitle(false);
+                  setTempTitle(programTitle);
+                }}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  background: '#F5F5F4',
+                  color: '#57534E',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  border: '1px solid #D6D3D1',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+              <h2 style={{
+                fontSize: 'clamp(22px, 2.2vw, 26px)',
+                color: '#1C1917',
+                fontWeight: '800',
+                letterSpacing: '0.04em',
+                margin: 0,
+                textTransform: 'uppercase'
+              }}>
+                {programTitle}
+              </h2>
+              {canManagePlans && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingTitle(true);
+                    setTempTitle(programTitle);
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    background: '#FAF6EE',
+                    border: '1px solid #DAC493',
+                    color: '#8C6228',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Click to edit program title"
+                >
+                  <Edit2 size={12} />
+                  <span>Edit Title</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -468,7 +705,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         }}>
           {plans.map(p => {
             const memberCount = stats.tier_counts?.[p.tier] || stats.tier_counts?.[p.name] || 0;
-            const isSelected = tierFilter === p.tier;
+            const isSelected = selectedTier === p.tier;
             const cardImg = p.image || `/memberships/card_${p.id}_3d.jpg`;
 
             return (
@@ -655,7 +892,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
                     <button
                       type="button"
-                      onClick={() => setTierFilter(isSelected ? 'all' : p.tier)}
+                      onClick={() => setSelectedTier(isSelected ? null : p.tier)}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
@@ -700,58 +937,62 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       )}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setTierFilter(isSelected ? 'all' : p.tier)}
-                      style={{
-                        width: '100%',
-                        background: 'transparent',
-                        border: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '4px',
-                        fontSize: '11px',
-                        color: isSelected ? '#8C6228' : '#78716C',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        padding: '4px',
-                        userSelect: 'none'
-                      }}
-                    >
-                      <span>{isSelected ? '✓ Filter Active on Roster' : `Filter Roster (${memberCount})`}</span>
-                      <ChevronRight size={13} />
-                    </button>
-
-                    {/* Delete Custom Tier (Master Admin & Main Admin only) */}
-                    {p.is_custom === 1 && canManagePlans && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeletePlan(p.id, p.name);
-                        }}
-                        style={{
-                          background: '#FEF2F2',
-                          border: '1px solid #FECACA',
-                          borderRadius: '6px',
-                          color: '#DC2626',
-                          fontSize: '10.5px',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '5px',
-                          padding: '5px 8px',
-                          marginTop: '2px',
-                          fontWeight: '700',
-                          transition: 'all 0.15s ease'
-                        }}
-                        title="Delete custom membership plan"
-                      >
-                        <Trash2 size={12} />
-                        Delete Custom Plan
-                      </button>
+                    {/* Plan Management Actions (Master Admin & Main Admin only) */}
+                    {canManagePlans && (
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditPlan(p);
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: '7px 10px',
+                            borderRadius: '7px',
+                            background: '#FAF6EE',
+                            border: '1px solid #DAC493',
+                            color: '#8C6228',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '4px',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Edit2 size={12} />
+                          Edit Plan
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDeleteConfirm(p.id, p.name || p.fullName);
+                          }}
+                          style={{
+                            padding: '7px 12px',
+                            borderRadius: '7px',
+                            background: '#FEF2F2',
+                            border: '1px solid #FECACA',
+                            color: '#DC2626',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '4px',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title="Delete membership plan"
+                        >
+                          <Trash2 size={12} />
+                          Delete
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -843,309 +1084,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             </div>
           )}
         </div>
-      </div>
-
-      {/* SECTION 2: ENROLLED MEMBER CLIENTS DIRECTORY */}
-      <div style={{
-        background: '#FFFFFF',
-        borderRadius: '16px',
-        border: '1px solid #EADBBE',
-        padding: '24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '18px'
-      }}>
-        {/* Controls: Search & Filters */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
-          <div>
-            <h2 style={{ fontSize: '19px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
-              ENROLLED MEMBER ROSTER
-            </h2>
-            <div style={{ fontSize: '12.5px', color: '#78716C', marginTop: '2px' }}>
-              Showing {filteredMembers.length} of {members.length} member clients
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            {/* Search Input */}
-            <div style={{ position: 'relative', width: '240px' }}>
-              <Search size={14} color="#78716C" style={{ position: 'absolute', left: '10px', top: '11px' }} />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search name or mobile..."
-                style={{
-                  width: '100%',
-                  padding: '8px 12px 8px 30px',
-                  borderRadius: '8px',
-                  border: '1px solid #D6D3D1',
-                  fontSize: '13px',
-                  outline: 'none',
-                  background: '#FFFDF9'
-                }}
-              />
-            </div>
-
-            {/* Status Filter */}
-            <div style={{ display: 'flex', borderRadius: '8px', border: '1px solid #D6D3D1', overflow: 'hidden' }}>
-              {['all', 'active', 'expired'].map(st => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setStatusFilter(st)}
-                  style={{
-                    padding: '7px 12px',
-                    fontSize: '12px',
-                    fontWeight: statusFilter === st ? '700' : '500',
-                    border: 'none',
-                    background: statusFilter === st ? '#B88B4A' : '#FFFFFF',
-                    color: statusFilter === st ? '#FFFFFF' : '#57534E',
-                    cursor: 'pointer',
-                    textTransform: 'capitalize'
-                  }}
-                >
-                  {st}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Members Roster Table / Card Grid */}
-        {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#78716C' }}>
-            Loading enrolled studio members...
-          </div>
-        ) : filteredMembers.length === 0 ? (
-          <div style={{
-            padding: '40px',
-            textAlign: 'center',
-            background: '#FAF6EE',
-            borderRadius: '12px',
-            border: '1px dashed #DAC493'
-          }}>
-            <Crown size={32} color="#B88B4A" style={{ margin: '0 auto 8px auto' }} />
-            <div style={{ fontSize: '15px', fontWeight: '700', color: '#1C1917' }}>
-              No members found matching your search
-            </div>
-            <p style={{ fontSize: '12.5px', color: '#78716C', maxWidth: '400px', margin: '4px auto 14px auto' }}>
-              Enroll a new client into a membership or clear filters to view the full studio member directory.
-            </p>
-            <button
-              type="button"
-              onClick={handleOpenEnrollModal}
-              className="btn-primary"
-              style={{ padding: '8px 16px', fontSize: '13px' }}
-            >
-              + Enroll Client into Membership
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '16px' }}>
-            {filteredMembers.map(m => {
-              const planConfig = plans.find(p => p.tier === m.tier_group) || {};
-              const usedPct = m.usage_pct || 0;
-
-              return (
-                <div
-                  key={m.client_id}
-                  style={{
-                    padding: '20px',
-                    borderRadius: '12px',
-                    border: m.is_expired ? '1px dashed #E7E5E4' : '1px solid #EADBBE',
-                    background: m.is_expired ? '#FAFAF9' : '#FFFFFF',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    gap: '14px',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.02)'
-                  }}
-                >
-                  <div>
-                    {/* Header: Avatar, Name, Status */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <div style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '50%',
-                          background: '#FAF8F5',
-                          color: '#8C6228',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: '800',
-                          fontSize: '16px',
-                          border: '1px solid #EADBBE'
-                        }}>
-                          {m.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div style={{ fontSize: '16px', fontWeight: '800', color: '#1C1917' }}>
-                            {m.name} {m.surname || ''}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#78716C' }}>
-                            {formatPhone(m.phone)}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: '600',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        background: '#FAF8F5',
-                        color: m.is_expired ? '#78716C' : '#57534E',
-                        border: '1px solid #EADBBE'
-                      }}>
-                        {m.effective_status}
-                      </span>
-                    </div>
-
-                    {/* Tier Badge & Validity Pill */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginTop: '12px' }}>
-                      <span style={{
-                        fontSize: '11.5px',
-                        fontWeight: '700',
-                        padding: '3px 9px',
-                        borderRadius: '6px',
-                        background: '#FAF8F5',
-                        color: '#8C6228',
-                        border: '1px solid #EADBBE',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}>
-                        <Crown size={12} />
-                        {m.membership_tier}
-                      </span>
-
-                      {m.days_remaining !== null && (
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: '600',
-                          color: '#57534E',
-                          background: '#FAF8F5',
-                          border: '1px solid #EADBBE',
-                          padding: '3px 8px',
-                          borderRadius: '6px'
-                        }}>
-                          <Clock size={11} style={{ display: 'inline', marginRight: '3px', verticalAlign: 'middle' }} />
-                          {m.is_expired ? 'Expired' : `${m.days_remaining} days left`}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Credit Balance Progress Bar (Clean inline layout, single color) */}
-                    <div style={{
-                      marginTop: '12px',
-                      padding: '10px 0',
-                      borderTop: '1px solid #F0ECE4',
-                      borderBottom: '1px solid #F0ECE4'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', marginBottom: '6px' }}>
-                        <span style={{ color: '#78716C', fontWeight: '600' }}>Available Balance:</span>
-                        <span style={{ fontWeight: '800', color: '#1C1917', fontSize: '13px' }}>
-                          {formatCurrency(m.balance)}
-                        </span>
-                      </div>
-
-                      {/* Progress Bar */}
-                      <div style={{ width: '100%', height: '5px', background: '#F0ECE4', borderRadius: '9999px', overflow: 'hidden' }}>
-                        <div style={{
-                          width: `${Math.min(100, Math.max(0, 100 - usedPct))}%`,
-                          height: '100%',
-                          background: '#8C6228',
-                          borderRadius: '9999px'
-                        }} />
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10.5px', color: '#78716C', marginTop: '6px' }}>
-                        <span>Used: {formatCurrency(m.used)} ({usedPct}%)</span>
-                        <span>Plan Worth: {formatCurrency(m.cost)}</span>
-                      </div>
-                    </div>
-
-                    {/* Tenure Dates */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', color: '#78716C', marginTop: '10px' }}>
-                      <span>Started: <strong>{m.membership_started_at ? formatDate(m.membership_started_at) : 'N/A'}</strong></span>
-                      <span>Expires: <strong>{m.membership_expires_at ? formatDate(m.membership_expires_at) : 'N/A'}</strong></span>
-                    </div>
-                  </div>
-
-                  {/* Actions Row */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    paddingTop: '12px',
-                    borderTop: '1px solid #F5F5F4',
-                    gap: '8px'
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => setAdjustBalanceModal({ open: true, member: m, amount: String(m.balance) })}
-                      style={{
-                        fontSize: '11.5px',
-                        padding: '5px 9px',
-                        borderRadius: '6px',
-                        border: '1px solid #DAC493',
-                        background: '#FAF6EE',
-                        color: '#8C6228',
-                        fontWeight: '700',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Adjust Balance
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setExtendValidityModal({ open: true, member: m, date: m.membership_expires_at || '' })}
-                      style={{
-                        fontSize: '11.5px',
-                        padding: '5px 9px',
-                        borderRadius: '6px',
-                        border: '1px solid #E7E5E4',
-                        background: '#FFFFFF',
-                        color: '#57534E',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Extend Validity
-                    </button>
-
-                    {onOpenClient && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenClient(m)}
-                        style={{
-                          fontSize: '11.5px',
-                          padding: '5px 10px',
-                          borderRadius: '6px',
-                          border: 'none',
-                          background: '#B88B4A',
-                          color: '#FFFFFF',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '3px'
-                        }}
-                      >
-                        Profile
-                        <ChevronRight size={13} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* ENROLL CLIENT MODAL */}
@@ -1470,179 +1408,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         </div>
       )}
 
-      {/* ADJUST BALANCE MODAL */}
-      {adjustBalanceModal.open && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(28,25,23,0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            maxWidth: '420px',
-            width: '100%',
-            background: '#FFFFFF',
-            borderRadius: '14px',
-            border: '1px solid #EADBBE',
-            padding: '24px'
-          }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
-              Adjust Membership Credit Balance
-            </h3>
-            <p style={{ fontSize: '12.5px', color: '#78716C', margin: '4px 0 16px 0' }}>
-              Client: <strong>{adjustBalanceModal.member?.name}</strong> • Current Plan: {adjustBalanceModal.member?.membership_tier}
-            </p>
 
-            <form onSubmit={handleSaveBalanceAdjustment}>
-              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '6px' }}>
-                New Balance Amount (₹)
-              </label>
-              <input
-                type="number"
-                step="100"
-                min="0"
-                required
-                value={adjustBalanceModal.amount}
-                onChange={(e) => setAdjustBalanceModal({ ...adjustBalanceModal, amount: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid #D6D3D1',
-                  fontSize: '15px',
-                  fontWeight: '700',
-                  color: '#1C1917',
-                  marginBottom: '16px'
-                }}
-              />
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setAdjustBalanceModal({ open: false, member: null, amount: '' })}
-                  className="btn-secondary"
-                  style={{ padding: '8px 14px' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  style={{ padding: '8px 18px', fontWeight: '700' }}
-                >
-                  Save Balance
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* EXTEND VALIDITY MODAL */}
-      {extendValidityModal.open && (
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(28,25,23,0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            maxWidth: '420px',
-            width: '100%',
-            background: '#FFFFFF',
-            borderRadius: '14px',
-            border: '1px solid #EADBBE',
-            padding: '24px'
-          }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
-              Extend Membership Validity
-            </h3>
-            <p style={{ fontSize: '12.5px', color: '#78716C', margin: '4px 0 16px 0' }}>
-              Client: <strong>{extendValidityModal.member?.name}</strong> • Plan: {extendValidityModal.member?.membership_tier}
-            </p>
-
-            <form onSubmit={handleSaveExtendValidity}>
-              <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '6px' }}>
-                New Expiration Date
-              </label>
-              <input
-                type="date"
-                required
-                value={extendValidityModal.date}
-                onChange={(e) => setExtendValidityModal({ ...extendValidityModal, date: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid #D6D3D1',
-                  fontSize: '14px',
-                  color: '#1C1917',
-                  marginBottom: '12px'
-                }}
-              />
-
-              {/* Quick extension pills */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                {[
-                  { label: '+30 Days', days: 30 },
-                  { label: '+90 Days', days: 90 },
-                  { label: '+1 Year', days: 365 }
-                ].map(opt => (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    onClick={() => {
-                      const baseDate = extendValidityModal.date ? new Date(extendValidityModal.date) : new Date();
-                      const newD = new Date(baseDate.getTime() + opt.days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                      setExtendValidityModal({ ...extendValidityModal, date: newD });
-                    }}
-                    style={{
-                      fontSize: '11px',
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      border: '1px solid #DAC493',
-                      background: '#FAF6EE',
-                      color: '#8C6228',
-                      fontWeight: '700',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setExtendValidityModal({ open: false, member: null, date: '' })}
-                  className="btn-secondary"
-                  style={{ padding: '8px 14px' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  style={{ padding: '8px 18px', fontWeight: '700' }}
-                >
-                  Update Validity
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* CREATE NEW MEMBERSHIP TIER MODAL (MASTER ADMIN & MAIN ADMIN ONLY) */}
       {showAddPlanModal && canManagePlans && (
@@ -1865,16 +1631,25 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 </div>
               </div>
 
-              {/* 3D Metallic Card Image Finish Selector */}
+              {/* 3D Metallic Card Image Finish Selector & Direct Image Uploader */}
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '8px' }}>
-                  Choose 3D Metallic Card Artwork
-                </label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#44403C', margin: 0 }}>
+                    Choose 3D Metallic Card Artwork or Upload Custom
+                  </label>
+                  <input
+                    type="file"
+                    ref={cardImageInputRef}
+                    onChange={handleCardImageUpload}
+                    accept="image/png,image/jpeg,image/webp,image/jpg"
+                    style={{ display: 'none' }}
+                  />
+                </div>
+
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                  gap: '10px',
-                  marginBottom: '10px'
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))',
+                  gap: '10px'
                 }}>
                   {[
                     { label: 'Royal Gold', path: '/memberships/card_infini_3d.jpg' },
@@ -1907,22 +1682,71 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       </div>
                     );
                   })}
+
+                  {/* 5th Tile: Custom Upload Tile with Real-time Preview */}
+                  {(() => {
+                    const presetPaths = [
+                      '/memberships/card_infini_3d.jpg',
+                      '/memberships/card_lumiere_3d.jpg',
+                      '/memberships/card_eclat_3d.jpg',
+                      '/memberships/card_eternal_3d.jpg'
+                    ];
+                    const hasCustomImage = Boolean(newPlanForm.image && !presetPaths.includes(newPlanForm.image));
+
+                    return (
+                      <div
+                        onClick={() => {
+                          if (!hasCustomImage) {
+                            cardImageInputRef.current?.click();
+                          }
+                        }}
+                        style={{
+                          borderRadius: '10px',
+                          border: hasCustomImage ? '2px solid #B88B4A' : '1.5px dashed #DAC493',
+                          padding: '6px',
+                          cursor: 'pointer',
+                          background: hasCustomImage ? '#FAF6EE' : '#FFFDF9',
+                          transition: 'all 0.15s ease',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: hasCustomImage ? '0 4px 12px rgba(184, 139, 74, 0.2)' : 'none'
+                        }}
+                      >
+                        {hasCustomImage ? (
+                          <>
+                            <div style={{ width: '100%', height: '65px', borderRadius: '6px', overflow: 'hidden', marginBottom: '6px', position: 'relative' }}>
+                              <img src={newPlanForm.image} alt="Custom Artwork" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                            <div style={{ fontSize: '11px', fontWeight: '800', color: '#8E633A', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}>
+                              <span>✓ Uploaded</span>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cardImageInputRef.current?.click();
+                                }}
+                                style={{ textDecoration: 'underline', color: '#B88B4A', cursor: 'pointer', fontSize: '10px', marginLeft: '3px' }}
+                                title="Change custom uploaded image"
+                              >
+                                Change
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ minHeight: '84px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                            <Upload size={18} color="#B88B4A" />
+                            <span style={{ fontSize: '11px', fontWeight: '700', color: '#8E633A' }}>
+                              {cardImageUploading ? 'Uploading...' : '+ Upload Custom'}
+                            </span>
+                            <span style={{ fontSize: '9.5px', color: '#78716C' }}>PNG, JPG, WEBP</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
-                <input
-                  type="text"
-                  placeholder="Or enter custom image URL: https://..."
-                  value={newPlanForm.image}
-                  onChange={(e) => setNewPlanForm({ ...newPlanForm, image: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #E5E7EB',
-                    fontSize: '11.5px',
-                    color: '#78716C',
-                    boxSizing: 'border-box'
-                  }}
-                />
               </div>
 
               {/* Tagline */}
@@ -2085,6 +1909,635 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MEMBERSHIP PLAN MODAL (MASTER ADMIN & MAIN ADMIN ONLY) */}
+      {showEditPlanModal && canManagePlans && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          padding: '20px'
+        }}>
+          {/* Hidden File Input for Card Image */}
+          <input
+            type="file"
+            ref={editCardImageInputRef}
+            onChange={handleEditCardImageUpload}
+            accept="image/*"
+            style={{ display: 'none' }}
+          />
+
+          <div style={{
+            background: '#FFFFFF',
+            borderRadius: '20px',
+            maxWidth: '680px',
+            width: '100%',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)',
+            border: '1px solid #EADBCC',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid #F0E6D8',
+              background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              position: 'relative'
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                height: '4px',
+                background: 'linear-gradient(90deg, #B88B4A 0%, #D4AF37 50%, #8E633A 100%)'
+              }} />
+              <div>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: '#B88B4A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <Crown size={14} color="#B88B4A" />
+                  Admin Privilege • Edit Membership Tier
+                </div>
+                <h3 style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', margin: '4px 0 0 0' }}>
+                  Edit Plan: {editPlanForm.name || editingPlan?.name || 'Tier Plan'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditPlanModal(false)}
+                style={{
+                  background: '#F5EFE6',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#78716C',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form Body */}
+            <form onSubmit={handleSaveEditPlan} style={{ overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Tier Name <span style={{ color: '#E11D48' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. ECLAT MEMBER, INFINI MEMBER"
+                    value={editPlanForm.name}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditPlanForm(prev => ({
+                        ...prev,
+                        name: val,
+                        tier: val
+                      }));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Full Plan Title
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. ECLAT PRIVILEGE MEMBERSHIP"
+                    value={editPlanForm.fullName}
+                    onChange={(e) => setEditPlanForm({ ...editPlanForm, fullName: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Price / Fee (₹) <span style={{ color: '#E11D48' }}>*</span>
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <span style={{ position: 'absolute', left: '12px', top: '10px', color: '#78716C', fontWeight: '700' }}>₹</span>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      placeholder="e.g. 25000"
+                      value={editPlanForm.price}
+                      onChange={(e) => setEditPlanForm({ ...editPlanForm, price: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px 10px 28px',
+                        borderRadius: '8px',
+                        border: '1px solid #D6D3D1',
+                        fontSize: '13.5px',
+                        fontWeight: '700',
+                        boxSizing: 'border-box',
+                        color: '#B88B4A'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Tier Sequence / Tag
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="01 — SERVICE"
+                    value={editPlanForm.tierNumber}
+                    onChange={(e) => setEditPlanForm({ ...editPlanForm, tierNumber: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13.5px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                    Validity Period
+                  </label>
+                  <select
+                    value={editPlanForm.validity}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      let dur = '(per year)';
+                      if (val.includes('3 months')) dur = '(per 3 months)';
+                      else if (val.includes('6 months')) dur = '(per 6 months)';
+                      else if (val.includes('2 years')) dur = '(per 2 years)';
+                      setEditPlanForm({
+                        ...editPlanForm,
+                        validity: val,
+                        validityBadge: val.toUpperCase(),
+                        durationLabel: dur
+                      });
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                      background: '#FFFFFF'
+                    }}
+                  >
+                    <option value="Valid for 1 year">Valid for 1 year</option>
+                    <option value="Valid for 6 months">Valid for 6 months</option>
+                    <option value="Valid for 3 months">Valid for 3 months</option>
+                    <option value="Valid for 2 years">Valid for 2 years</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 3D Metallic Card Image Finish Selector & Direct Image Uploader */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#44403C', margin: 0 }}>
+                    Choose 3D Metallic Card Artwork or Upload Custom
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => editCardImageInputRef.current?.click()}
+                    disabled={editCardImageUploading}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #DAC493',
+                      background: '#FAF6EE',
+                      color: '#8E633A',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: editCardImageUploading ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <Upload size={12} />
+                    {editCardImageUploading ? 'Uploading...' : 'Upload Image'}
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))', gap: '10px' }}>
+                  {[
+                    { label: 'Gold (Infini)', img: '/memberships/card_infini_3d.jpg' },
+                    { label: 'Platinum (Éclat)', img: '/memberships/card_eclat_3d.jpg' },
+                    { label: 'Bronze (Eternal)', img: '/memberships/card_eternal_3d.jpg' },
+                    { label: 'Obsidian (Lumière)', img: '/memberships/card_lumiere_3d.jpg' }
+                  ].map((preset) => {
+                    const isSelected = editPlanForm.image === preset.img;
+                    return (
+                      <div
+                        key={preset.img}
+                        onClick={() => setEditPlanForm({ ...editPlanForm, image: preset.img })}
+                        style={{
+                          borderRadius: '8px',
+                          border: isSelected ? '2px solid #B88B4A' : '1px solid #E7E5E4',
+                          background: isSelected ? '#FAF6EE' : '#FFFFFF',
+                          padding: '6px',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          boxShadow: isSelected ? '0 2px 8px rgba(184, 139, 74, 0.25)' : 'none',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ width: '100%', height: '65px', borderRadius: '6px', overflow: 'hidden', marginBottom: '6px' }}>
+                          <img src={preset.img} alt={preset.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                        <span style={{ fontSize: '10.5px', fontWeight: isSelected ? '800' : '600', color: isSelected ? '#8E633A' : '#78716C' }}>
+                          {preset.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                  {/* Custom Upload Tile */}
+                  {(() => {
+                    const isCustom = editPlanForm.image && !editPlanForm.image.startsWith('/memberships/');
+                    return (
+                      <div
+                        onClick={() => {
+                          if (!isCustom) {
+                            editCardImageInputRef.current?.click();
+                          }
+                        }}
+                        style={{
+                          borderRadius: '8px',
+                          border: isCustom ? '2px solid #B88B4A' : '1.5px dashed #DAC493',
+                          background: isCustom ? '#FAF6EE' : '#FAF6EE40',
+                          padding: '6px',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          boxShadow: isCustom ? '0 2px 8px rgba(184, 139, 74, 0.25)' : 'none'
+                        }}
+                      >
+                        {isCustom ? (
+                          <>
+                            <div style={{ width: '100%', height: '65px', borderRadius: '6px', overflow: 'hidden', marginBottom: '6px', position: 'relative' }}>
+                              <img src={editPlanForm.image} alt="Custom Artwork" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            </div>
+                            <div style={{ fontSize: '11px', fontWeight: '800', color: '#8E633A', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}>
+                              <span>✓ Uploaded</span>
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  editCardImageInputRef.current?.click();
+                                }}
+                                style={{ textDecoration: 'underline', color: '#B88B4A', cursor: 'pointer', fontSize: '10px', marginLeft: '3px' }}
+                                title="Change custom uploaded image"
+                              >
+                                Change
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ minHeight: '84px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                            <Upload size={18} color="#B88B4A" />
+                            <span style={{ fontSize: '11px', fontWeight: '700', color: '#8E633A' }}>
+                              {editCardImageUploading ? 'Uploading...' : '+ Upload Custom'}
+                            </span>
+                            <span style={{ fontSize: '9.5px', color: '#78716C' }}>PNG, JPG, WEBP</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Tagline */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                  Tagline / Overview
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Unmatched aesthetic brilliance and personalized luxury."
+                  value={editPlanForm.tagline}
+                  onChange={(e) => setEditPlanForm({ ...editPlanForm, tagline: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #D6D3D1',
+                    fontSize: '13px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Privileges & Benefits List */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                  Privileges & Benefits ({editPlanForm.benefits.length})
+                </label>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  maxHeight: '180px',
+                  overflowY: 'auto',
+                  border: '1px solid #E7E5E4',
+                  borderRadius: '8px',
+                  padding: '10px',
+                  background: '#FAFAF9',
+                  marginBottom: '10px'
+                }}>
+                  {editPlanForm.benefits.map((b, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      background: '#FFFFFF',
+                      padding: '7px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #E7E5E4',
+                      fontSize: '12px',
+                      color: '#292524'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                        <span style={{ color: '#E11D48', fontWeight: 'bold' }}>•</span>
+                        <span>{b}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEditBenefit(idx)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#DC2626',
+                          cursor: 'pointer',
+                          padding: '2px',
+                          display: 'flex'
+                        }}
+                        title="Remove benefit"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {editPlanForm.benefits.length === 0 && (
+                    <div style={{ fontSize: '12px', color: '#A8A29E', textAlign: 'center', padding: '10px' }}>
+                      No benefits added yet. Add at least one privilege below.
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Benefit Input */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Type benefit item (e.g. Free 1x medi-facial quarterly)..."
+                    value={editPlanForm.benefitInput}
+                    onChange={(e) => setEditPlanForm({ ...editPlanForm, benefitInput: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddEditBenefit();
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid #D6D3D1',
+                      fontSize: '12.5px'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddEditBenefit}
+                    style={{
+                      padding: '9px 16px',
+                      borderRadius: '8px',
+                      border: '1px solid #DAC493',
+                      background: '#FAF6EE',
+                      color: '#8E633A',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer Buttons */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                marginTop: '12px',
+                paddingTop: '16px',
+                borderTop: '1px solid #F0E6D8'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEditPlanModal(false)}
+                  className="btn-secondary"
+                  style={{ padding: '10px 18px', fontSize: '13px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEditPlan}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #B88B4A 0%, #8E633A 100%)',
+                    color: '#FFFFFF',
+                    fontSize: '13.5px',
+                    fontWeight: '700',
+                    cursor: savingEditPlan ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 4px 14px rgba(184, 139, 74, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <Crown size={15} />
+                  {savingEditPlan ? 'Saving Changes...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE MEMBERSHIP PLAN CONFIRMATION MODAL */}
+      {deleteConfirmModal.open && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1200,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#FFFFFF',
+            borderRadius: '18px',
+            maxWidth: '440px',
+            width: '100%',
+            padding: '24px',
+            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.35)',
+            border: '1px solid #FECACA',
+            position: 'relative',
+            overflow: 'hidden',
+            textAlign: 'center'
+          }}>
+            {/* Top Red Bar */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              height: '4px',
+              background: '#DC2626'
+            }} />
+
+            {/* Alert Icon */}
+            <div style={{
+              width: '52px',
+              height: '52px',
+              borderRadius: '50%',
+              background: '#FEE2E2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 14px'
+            }}>
+              <AlertCircle size={28} color="#DC2626" />
+            </div>
+
+            <h3 style={{ fontSize: '19px', fontWeight: '800', color: '#1C1917', margin: '0 0 8px 0' }}>
+              Confirm Permanent Deletion
+            </h3>
+
+            <p style={{ fontSize: '13.5px', color: '#57534E', lineHeight: 1.5, margin: '0 0 14px 0' }}>
+              Do you need to delete <strong>"{deleteConfirmModal.planName}"</strong>?
+            </p>
+
+            <div style={{
+              padding: '12px 14px',
+              borderRadius: '8px',
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+              fontSize: '12.5px',
+              color: '#991B1B',
+              lineHeight: 1.45,
+              marginBottom: '20px',
+              textAlign: 'left'
+            }}>
+              <strong>Confirm:</strong> This will be completely deleting the membership card permanently from both the membership page and the visitor membership screen.
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmModal({ open: false, planId: null, planName: '', deleting: false })}
+                disabled={deleteConfirmModal.deleting}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #D6D3D1',
+                  background: '#FFFFFF',
+                  color: '#44403C',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: deleteConfirmModal.deleting ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePlan}
+                disabled={deleteConfirmModal.deleting}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: '#DC2626',
+                  color: '#FFFFFF',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: deleteConfirmModal.deleting ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)'
+                }}
+              >
+                <Trash2 size={14} />
+                {deleteConfirmModal.deleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
