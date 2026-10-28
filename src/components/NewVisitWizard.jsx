@@ -1364,25 +1364,35 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
 
   // 2. Applicable Membership Discount on Services
   const applicableTierName = isPurchasingMembership
-    ? (activeMembership?.plan?.name || '')
+    ? (activeMembership?.plan?.tier || activeMembership?.plan?.name || '')
     : (hasValidMembership ? rawClientTier : '');
+  const normalizeMembershipName = (value) => String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  const normalizedTierName = normalizeMembershipName(applicableTierName);
+  const membershipPlanOptions = dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS;
+  const configuredDiscountPlan = isPurchasingMembership
+    ? activeMembership?.plan
+    : membershipPlanOptions.find(plan => [plan.tier, plan.name, plan.fullName, plan.id]
+      .some(value => normalizeMembershipName(value) === normalizedTierName));
   const lowerTier = applicableTierName.toLowerCase();
-
-  let membershipDiscountPercent = 0;
-  let membershipDiscountLabel = '';
-  if (lowerTier.includes('lumiere') || lowerTier.includes('lumière')) {
-    membershipDiscountPercent = 20;
-    membershipDiscountLabel = 'Lumière membership discount applied on services @20%';
-  } else if (lowerTier.includes('infini')) {
-    membershipDiscountPercent = 15;
-    membershipDiscountLabel = 'Infini membership discount applied on services @15%';
-  } else if (lowerTier.includes('eternal')) {
-    membershipDiscountPercent = 10;
-    membershipDiscountLabel = 'Eternal membership discount applied on services @10%';
-  } else if (lowerTier.includes('eclat')) {
-    membershipDiscountPercent = 5;
-    membershipDiscountLabel = 'Éclat membership discount applied on services @5%';
-  }
+  const legacyDiscountPercent = lowerTier.includes('lumiere') || lowerTier.includes('lumière') ? 20
+    : lowerTier.includes('infini') ? 15
+      : lowerTier.includes('eternal') ? 10
+        : lowerTier.includes('eclat') || lowerTier.includes('éclat') ? 5
+          : 0;
+  const configuredDiscountValue = configuredDiscountPlan?.discount_percent ?? configuredDiscountPlan?.discountPercent;
+  const parsedMembershipDiscount = configuredDiscountValue === undefined || configuredDiscountValue === null
+    ? legacyDiscountPercent
+    : Number(configuredDiscountValue);
+  const membershipDiscountPercent = Number.isFinite(parsedMembershipDiscount)
+    ? Math.min(100, Math.max(0, parsedMembershipDiscount))
+    : 0;
+  const membershipDiscountLabel = membershipDiscountPercent > 0
+    ? `${configuredDiscountPlan?.name || applicableTierName} membership discount applied on services @${membershipDiscountPercent}%`
+    : '';
 
   const membershipDiscountAmount = (grossTotalA > 0 && membershipDiscountPercent > 0)
     ? Math.round(grossTotalA * (membershipDiscountPercent / 100) * 100) / 100

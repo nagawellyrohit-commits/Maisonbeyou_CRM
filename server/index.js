@@ -3146,6 +3146,7 @@ function ensureMembershipPlansTable() {
       bg TEXT DEFAULT '#FAF6EE',
       tagline TEXT,
       benefits TEXT,
+      discount_percent REAL NOT NULL DEFAULT 0,
       is_custom INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -3156,6 +3157,25 @@ function ensureMembershipPlansTable() {
       value TEXT
     );
   `);
+
+  let discountColumnAdded = false;
+  try {
+    db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0');
+    discountColumnAdded = true;
+  } catch (e) {}
+  if (discountColumnAdded) {
+    db.prepare(`
+      UPDATE MEMBERSHIP_PLANS
+      SET discount_percent = CASE
+        WHEN LOWER(tier) LIKE '%clat%' THEN 5
+        WHEN LOWER(tier) LIKE '%eternal%' THEN 10
+        WHEN LOWER(tier) LIKE '%infini%' THEN 15
+        WHEN LOWER(tier) LIKE '%lum%' THEN 20
+        ELSE 0
+      END
+      WHERE COALESCE(is_custom, 0) = 0
+    `).run();
+  }
 
   const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
   if (!titleRow) {
@@ -3265,8 +3285,14 @@ function ensureMembershipPlansTable() {
     ];
 
     const insertStmt = db.prepare(`
-      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, validity, validityBadge, name, fullName, durationLabel, price, credits, image, color, bg, tagline, benefits, is_custom)
-      VALUES (@id, @tier, @tierNumber, @validity, @validityBadge, @name, @fullName, @durationLabel, @price, @credits, @image, @color, @bg, @tagline, @benefits, 0)
+      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, validity, validityBadge, name, fullName, durationLabel, price, credits, image, color, bg, tagline, benefits, discount_percent, is_custom)
+      VALUES (@id, @tier, @tierNumber, @validity, @validityBadge, @name, @fullName, @durationLabel, @price, @credits, @image, @color, @bg, @tagline, @benefits, CASE
+        WHEN LOWER(@tier) LIKE '%clat%' THEN 5
+        WHEN LOWER(@tier) LIKE '%eternal%' THEN 10
+        WHEN LOWER(@tier) LIKE '%infini%' THEN 15
+        WHEN LOWER(@tier) LIKE '%lum%' THEN 20
+        ELSE 0
+      END, 0)
     `);
     defaultCanonicalPlans.forEach(p => insertStmt.run(p));
   }
@@ -3386,11 +3412,14 @@ app.get('/api/memberships/public', (req, res) => {
   try {
     ensureMembershipPlansTable();
     const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
-    const canonicalPlans = planRows.map(p => ({
-      ...p,
-      priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
-      benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
-    }));
+    const canonicalPlans = planRows.map(p => {
+      const { discount_percent: _discountPercent, ...clientPlan } = p;
+      return {
+        ...clientPlan,
+        priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
+        benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
+      };
+    });
     const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
     const programTitle = titleRow ? titleRow.value : 'WORLD OF PRIVILEGES';
     res.json({
@@ -3427,9 +3456,13 @@ app.put('/api/memberships/title', authenticateToken, authorizeRoles('master_admi
 app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     ensureMembershipPlansTable();
-    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits } = req.body;
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
     if (!name || !price) {
       return res.status(400).json({ error: 'Membership tier name and price are required' });
+    }
+    const discountPercent = Number(discount_percent ?? 0);
+    if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+      return res.status(400).json({ error: 'Membership discount must be between 0 and 100 percent' });
     }
     const cleanId = (tier || name).toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
     const benefitsList = Array.isArray(benefits) 
@@ -3441,8 +3474,8 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
     const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
 
     const insert = db.prepare(`
-      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, is_custom)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, discount_percent, is_custom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       cleanId,
       tierVal,
@@ -3458,7 +3491,8 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
       '#B88B4A',
       '#FAF6EE',
       tagline || 'Exclusive personalized aesthetic luxury membership.',
-      benefitsJson
+      benefitsJson,
+      discountPercent
     );
 
     const createdPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE plan_id = ?').get(insert.lastInsertRowid);
@@ -3481,9 +3515,13 @@ app.put('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_
   try {
     ensureMembershipPlansTable();
     const { id } = req.params;
-    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits } = req.body;
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
     if (!name || !price) {
       return res.status(400).json({ error: 'Membership tier name and price are required' });
+    }
+    const discountPercent = Number(discount_percent ?? 0);
+    if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+      return res.status(400).json({ error: 'Membership discount must be between 0 and 100 percent' });
     }
 const benefitsList = Array.isArray(benefits)
       ? benefits
@@ -3511,6 +3549,7 @@ const benefitsList = Array.isArray(benefits)
           image = ?,
           tagline = ?,
           benefits = ?,
+          discount_percent = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
@@ -3526,6 +3565,7 @@ const benefitsList = Array.isArray(benefits)
       cardImg,
       tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitsJson,
+      discountPercent,
       planExists.id
     );
 

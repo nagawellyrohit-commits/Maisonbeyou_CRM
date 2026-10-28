@@ -434,12 +434,11 @@ export default function ServiceManagement() {
         setCatDesc('');
         setCatOrder(nextOrder);
         setCatIcon('Sparkles');
-        const defaultPreset = CATEGORY_IMAGE_PRESETS[(nextOrder - 1) % CATEGORY_IMAGE_PRESETS.length]?.url || '/services/categories/cat_01_signature_facials.png?v=45';
-        setCatImageUrl(defaultPreset);
+        setCatImageUrl(null);
         setCatImagePosX(0);
         setCatImagePosY(0);
         setCatImageScale(1);
-        setCatActionLabel('Explore');
+        setCatActionLabel('');
         setCatImageUploadError('');
         setCatImageTransparentVerified(true);
       }
@@ -797,35 +796,24 @@ export default function ServiceManagement() {
       ]);
     } else {
       const nextOrder = (parentCat?.services?.length || 0) + 1;
-      const defaults = getServiceMedia(null, catTitle);
-
       setServiceModal({ open: true, mode: 'create', categoryId, data: null });
       setServName('');
       setServPrice('');
-      setServDuration(20);
+      setServDuration('');
       setServDesc('');
       setServOrder(nextOrder);
-      setServSubtitle('Quick & effective');
-      setServDowntime('Zero Downtime');
-      setServTag('Quick & Effective');
-      setServVspBadges([]);
+      setServSubtitle('');
+      setServDowntime('');
+      setServTag('');
+      setServVspBadges(['']);
       setServHasSessions(false);
       setServTotalSessions(3);
       setServSessionInterval(15);
       setServSessionIntervalUnit('days');
-      setServHighlights([
-        'Advanced cooling sapphire tip for painless comfort',
-        'Targeted elimination of coarse hair & ingrown roots',
-        'Express 15–20 minute session; zero recovery time'
-      ]);
-      setServVideoUrl(defaults.video || 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');
-      setServImageUrl(defaults.heroImage || defaults.image || '/services/laser_hero.jpg');
-      setServGallery(defaults.gallery || [
-        '/services/thumb_underarms.jpg',
-        '/services/laser_hero.jpg',
-        'https://images.unsplash.com/photo-1512290903671-17adc8104b5b?w=800&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?w=800&auto=format&fit=crop&q=80'
-      ]);
+      setServHighlights(['']);
+      setServVideoUrl('');
+      setServImageUrl('');
+      setServGallery([]);
     }
     setServPreviewTab('video');
     setIsServVideoPlaying(false);
@@ -1914,17 +1902,17 @@ export default function ServiceManagement() {
                           {String(catOrder || 1).padStart(2, '0')}
                         </div>
                         <h2 className="ritual-card-title" style={{ fontSize: '18px', margin: '0 0 8px 0', minHeight: '44px' }}>
-                          {(catName || '').trim().toUpperCase() || 'LASER HAIR REDUCTION'}
+                          {(catName || '').trim().toUpperCase() || 'TITLE'}
                         </h2>
                         <p className="ritual-card-desc" style={{ minHeight: '34px' }}>
-                          {(catDesc || '').trim() || 'Advanced diode & alexandrite precision laser for smooth, hair-free skin'}
+                          {(catDesc || '').trim() || 'Subtitle / description'}
                         </p>
                       </div>
 
                       <div>
                         <div className="ritual-card-divider" />
                         <div className="ritual-card-action">
-                          <span>{(catActionLabel || '').trim() || 'Explore'}</span>
+                          <span>{(catActionLabel || '').trim() || 'BUTTON TEXT'}</span>
                           <ChevronRight size={15} color="#B88B4A" />
                         </div>
                       </div>
@@ -1965,7 +1953,7 @@ export default function ServiceManagement() {
                         }}
                       >
                         <img
-                          src={catImageUrl || '/services/categories/cat_01_signature_facials.png?v=45'}
+                          src={catImageUrl || undefined}
                           alt={catName || 'Category Image'}
                           className="ritual-card-img"
                           draggable={false}
@@ -3382,9 +3370,9 @@ export default function ServiceManagement() {
                       <VisitorServiceSpotlightCard
                         compact={true}
                         categoryName={modalCategoryName}
-                        serviceName={(servName || '').trim() || 'Underarms Laser'}
-                        durationMins={servDuration || 20}
-                        price={servPrice !== '' ? servPrice : 1200}
+                        serviceName={(servName || '').trim() || 'Treatment name'}
+                        durationMins={servDuration || 'Duration'}
+                        price={servPrice !== '' ? servPrice : ''}
                         subtitle={(servSubtitle || '').trim()}
                         tag=""
                         downtime=""
@@ -3781,7 +3769,7 @@ export default function ServiceManagement() {
                                 margin: '0 0 8px 0',
                                 fontWeight: '700'
                               }}>
-                                {(servName || '').trim() || 'Underarms Laser'}
+                                {(servName || '').trim() || 'TREATMENT NAME'}
                               </h2>
 
                               {/* Badges / Specs Pill Row */}
@@ -3799,7 +3787,7 @@ export default function ServiceManagement() {
                                   gap: '4px'
                                 }}>
                                   <Clock size={11} color="#9E7437" />
-                                  {servDuration || 20} Mins Session
+                                  {servDuration || 'DURATION'} {servDuration ? 'Mins Session' : ''}
                                 </span>
 
                                 {servHasSessions && (
@@ -3849,7 +3837,7 @@ export default function ServiceManagement() {
                                   gap: '4px'
                                 }}>
                                   <Sparkles size={11} color="#9E7437" />
-                                  {servTag || 'Quick & Effective'}
+                                  {servTag || 'BADGE'}
                                 </span>
                               </div>
 
@@ -3860,7 +3848,7 @@ export default function ServiceManagement() {
                                 margin: '4px 0 10px 0',
                                 fontWeight: '500'
                               }}>
-                                {(servSubtitle || '').trim() || 'Quick & effective'}
+                                {(servSubtitle || '').trim() || 'Subtitle / tagline'}
                               </div>
 
                               {/* Clinical Highlights & Benefits Box with Botanical Watermark */}
@@ -3921,7 +3909,7 @@ export default function ServiceManagement() {
                                   lineHeight: 1,
                                   letterSpacing: '0.01em'
                                 }}>
-                                  ₹ {servPrice ? Number(servPrice).toLocaleString('en-IN') : '1,200'}
+                                  {servPrice ? `₹ ${Number(servPrice).toLocaleString('en-IN')}` : 'PRICE'}
                                 </span>
                                 <span style={{
                                   fontSize: '11px',

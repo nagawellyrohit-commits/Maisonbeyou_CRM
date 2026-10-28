@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Crown, Sparkles, Users, Search, Filter, Plus, Calendar, Clock,
-  ArrowRight, ShieldCheck, CheckCircle2, AlertCircle, RotateCw,
+  ArrowRight, ShieldCheck, CheckCircle2, AlertCircle,
   ChevronRight, Edit2, ExternalLink, X, DollarSign, Wallet,
   CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Image as ImageIcon,
   Upload
@@ -73,6 +73,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     validity: 'Valid for 1 year',
     validityBadge: 'VALID FOR 1 YEAR',
     durationLabel: '(per year)',
+    discountPercent: 0,
     image: '/memberships/card_infini_3d.jpg',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
     benefitInput: '',
@@ -81,6 +82,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
   // Add Membership Plan Modal (Master Admin & Main Admin only)
   const [showAddPlanModal, setShowAddPlanModal] = useState(false);
+  const [isInlineAddingPlan, setIsInlineAddingPlan] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [newPlanForm, setNewPlanForm] = useState({
     name: '',
@@ -91,6 +93,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     validity: 'Valid for 1 year',
     validityBadge: 'VALID FOR 1 YEAR',
     durationLabel: '(per year)',
+    discountPercent: 0,
     image: '/memberships/card_infini_3d.jpg',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
     benefitInput: '',
@@ -314,7 +317,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         durationLabel: newPlanForm.durationLabel || `(${newPlanForm.validity.toLowerCase()})`,
         image: newPlanForm.image,
         tagline: newPlanForm.tagline,
-        benefits: newPlanForm.benefits.length > 0 ? newPlanForm.benefits : ['Exclusive tailored beauty treatment privileges']
+        benefits: newPlanForm.benefits.map(benefit => benefit.trim()).filter(Boolean).length > 0
+          ? newPlanForm.benefits.map(benefit => benefit.trim()).filter(Boolean)
+          : ['Exclusive tailored beauty treatment privileges'],
+        discount_percent: Number(newPlanForm.discountPercent) || 0
       };
 
       const res = await apiRequest('/memberships/plans', {
@@ -324,6 +330,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
       if (res && res.success) {
         setShowAddPlanModal(false);
+        setIsInlineAddingPlan(false);
         setNewPlanForm({
           name: '',
           fullName: '',
@@ -333,6 +340,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           validity: 'Valid for 1 year',
           validityBadge: 'VALID FOR 1 YEAR',
           durationLabel: '(per year)',
+          discountPercent: 0,
           image: '/memberships/card_infini_3d.jpg',
           tagline: 'Exclusive personalized aesthetic luxury membership.',
           benefitInput: '',
@@ -353,6 +361,36 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     } finally {
       setSavingPlan(false);
     }
+  };
+
+  const handleStartInlineAddPlan = () => {
+    setNewPlanForm({
+      name: '',
+      fullName: '',
+      tier: '',
+      tierNumber: `0${plans.length + 1} — SERVICE`,
+      price: '',
+      validity: 'Valid for 1 year',
+      validityBadge: 'VALID FOR 1 YEAR',
+      durationLabel: '(per year)',
+      discountPercent: 0,
+      image: '',
+      tagline: '',
+      benefitInput: '',
+      benefits: ['', '', '']
+    });
+    setIsInlineAddingPlan(true);
+  };
+
+  const currentValidityMatch = (newPlanForm.validity || '').match(/(\d+)\s+(days?|months?|years?)/i);
+  const currentValidityValue = currentValidityMatch ? currentValidityMatch[1] : '1';
+  const currentValidityUnit = currentValidityMatch ? currentValidityMatch[2].replace(/s$/i, '').toLowerCase() : 'year';
+  const updateNewPlanValidity = (value, unit) => {
+    const safeValue = Math.max(1, Number(value) || 1);
+    const pluralUnit = safeValue === 1 ? unit : `${unit}s`;
+    const validity = `Valid for ${safeValue} ${pluralUnit}`;
+    const durationLabel = `(per ${safeValue} ${pluralUnit})`;
+    setNewPlanForm(prev => ({ ...prev, validity, validityBadge: validity.toUpperCase(), durationLabel }));
   };
 
   const handleSaveTitle = async () => {
@@ -390,6 +428,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       validity: p.validity || 'Valid for 1 year',
       validityBadge: p.validityBadge || (p.validity ? p.validity.toUpperCase() : 'VALID FOR 1 YEAR'),
       durationLabel: p.durationLabel || `(${p.validity || 'per year'})`,
+      discountPercent: p.discount_percent ?? 0,
       image: p.image || '/memberships/card_infini_3d.jpg',
       tagline: p.tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitInput: '',
@@ -468,7 +507,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         durationLabel: editPlanForm.durationLabel || `(${editPlanForm.validity.toLowerCase()})`,
         image: editPlanForm.image,
         tagline: editPlanForm.tagline,
-        benefits: editPlanForm.benefits.length > 0 ? editPlanForm.benefits : ['Exclusive tailored beauty treatment privileges']
+        benefits: editPlanForm.benefits.length > 0 ? editPlanForm.benefits : ['Exclusive tailored beauty treatment privileges'],
+        discount_percent: Number(editPlanForm.discountPercent) || 0
       };
 
       const res = await apiRequest(`/memberships/plans/${editingPlan.id}`, {
@@ -533,56 +573,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           </h1>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginRight: '20px' }}>
-          <button
-            type="button"
-            onClick={fetchMemberships}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '9px 14px',
-              borderRadius: '8px',
-              border: '1px solid #E7E5E4',
-              background: '#FFFFFF',
-              color: '#57534E',
-              fontSize: '13px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-            title="Refresh member records"
-          >
-            <RotateCw size={14} />
-            Refresh
-          </button>
-
-          {canManagePlans && (
-            <button
-              type="button"
-              onClick={() => setShowAddPlanModal(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '7px',
-                padding: '9px 18px',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #B88B4A 0%, #8E633A 100%)',
-                color: '#FFFFFF',
-                fontSize: '13.5px',
-                fontWeight: '700',
-                cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(184, 139, 74, 0.28)',
-                letterSpacing: '0.02em',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Plus size={16} />
-              Add Membership Plan
-            </button>
-          )}
-
-        </div>
       </div>
 
       {/* SECTION 1: WORLD OF PRIVILEGES SHOWCASE (MATCHING IMAGE 2) */}
@@ -704,7 +694,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           gap: '18px'
         }}>
           {plans.map(p => {
-            const memberCount = stats.tier_counts?.[p.tier] || stats.tier_counts?.[p.name] || 0;
             const isSelected = selectedTier === p.tier;
             const cardImg = p.image || `/memberships/card_${p.id}_3d.jpg`;
 
@@ -744,28 +733,6 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       display: 'block'
                     }}
                   />
-                  {/* Top-Right Member Count Badge */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '10px',
-                    right: '10px',
-                    background: 'rgba(255, 255, 255, 0.95)',
-                    backdropFilter: 'blur(4px)',
-                    color: '#8C6228',
-                    padding: '3px 10px',
-                    borderRadius: '9999px',
-                    fontSize: '11px',
-                    fontWeight: '800',
-                    border: '1px solid #DAC493',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    zIndex: 2
-                  }}>
-                    <Users size={12} />
-                    {memberCount} {memberCount === 1 ? 'member' : 'members'}
-                  </div>
                   {/* Selected Filter indicator */}
                   {isSelected && (
                     <div style={{
@@ -850,6 +817,14 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       {p.validityBadge || (p.validity ? p.validity.toUpperCase() : 'VALID FOR 1 YEAR')}
                     </span>
                   </div>
+
+                  {Number(p.discount_percent) > 0 && (
+                    <div style={{ textAlign: 'center', margin: '-4px 0 10px' }}>
+                      <span style={{ display: 'inline-block', borderRadius: '9999px', padding: '3px 9px', background: '#F0FDF4', border: '1px solid #BBF7D0', color: '#166534', fontSize: '9px', fontWeight: '800' }}>
+                        {Number(p.discount_percent)}% SERVICE DISCOUNT
+                      </span>
+                    </div>
+                  )}
 
                   {/* Benefits Header */}
                   <div style={{
@@ -1003,18 +978,26 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           {/* Add New Membership Card Tile for Master or Main Admin */}
           {canManagePlans && (
             <div
-              onClick={() => setShowAddPlanModal(true)}
+              role={isInlineAddingPlan ? undefined : 'button'}
+              tabIndex={isInlineAddingPlan ? -1 : 0}
+              aria-label="Add a membership plan"
+              onClick={isInlineAddingPlan ? undefined : handleStartInlineAddPlan}
+              onKeyDown={(e) => {
+                if (!isInlineAddingPlan && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  handleStartInlineAddPlan();
+                }
+              }}
               style={{
-                background: 'linear-gradient(180deg, #FFFFFF 0%, #FAF6EE 100%)',
+                background: '#FFFFFF',
+                gridColumn: '1',
+                gridRow: '1',
                 borderRadius: '18px',
-                border: '2px dashed #DAC493',
+                border: '1px solid #E8DCCB',
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: '36px 20px',
-                textAlign: 'center',
-                cursor: 'pointer',
+                overflow: 'hidden',
+                cursor: isInlineAddingPlan ? 'default' : 'pointer',
                 minHeight: '440px',
                 transition: 'all 0.22s ease',
                 boxShadow: '0 3px 14px rgba(184, 139, 74, 0.05)',
@@ -1026,61 +1009,210 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 e.currentTarget.style.boxShadow = '0 10px 28px rgba(184, 139, 74, 0.18)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#DAC493';
+                e.currentTarget.style.borderColor = '#E8DCCB';
                 e.currentTarget.style.transform = 'none';
                 e.currentTarget.style.boxShadow = '0 3px 14px rgba(184, 139, 74, 0.05)';
               }}
             >
+              {isInlineAddingPlan ? (
+                <form onSubmit={handleCreatePlan} style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '9px', height: '100%' }}>
+                  <input
+                    type="file"
+                    ref={cardImageInputRef}
+                    onChange={handleCardImageUpload}
+                    accept="image/png,image/jpeg,image/webp,image/jpg"
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => cardImageInputRef.current?.click()}
+                    style={{
+                      height: '150px',
+                      flexShrink: 0,
+                      borderRadius: '12px',
+                      border: '1px dashed #D8BC8F',
+                      background: newPlanForm.image ? '#F8F5EF' : 'linear-gradient(135deg, #FBF8F3 0%, #F3EBDD 100%)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '7px',
+                      color: '#9E7437',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {newPlanForm.image ? (
+                      <img src={newPlanForm.image} alt="Membership card artwork" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : (
+                      <>
+                        <Plus size={22} />
+                        <span style={{ fontSize: '10px', fontWeight: '800' }}>{cardImageUploading ? 'UPLOADING...' : 'ADD CARD IMAGE'}</span>
+                      </>
+                    )}
+                  </button>
+
+                  <input
+                    aria-label="Membership name"
+                    required
+                    placeholder="Membership name"
+                    value={newPlanForm.name}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setNewPlanForm(prev => ({ ...prev, name: value, fullName: value ? `${value.toUpperCase()} MEMBERSHIP` : '', tier: value }));
+                    }}
+                    style={{ width: '100%', boxSizing: 'border-box', padding: '8px 9px', border: '1px solid #E7D8C4', borderRadius: '7px', textAlign: 'center', fontWeight: '700', fontSize: '12px' }}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px' }}>
+                    <input
+                      aria-label="Membership amount"
+                      required
+                      type="number"
+                      min="1"
+                      placeholder="Amount ₹"
+                      value={newPlanForm.price}
+                      onChange={(e) => setNewPlanForm(prev => ({ ...prev, price: e.target.value }))}
+                      style={{ minWidth: 0, boxSizing: 'border-box', padding: '8px', border: '1px solid #E7D8C4', borderRadius: '7px', textAlign: 'center', fontWeight: '700', fontSize: '12px' }}
+                    />
+                    <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF' }}>
+                      <Calendar size={12} color="#9E7437" />
+                      <input
+                        aria-label="Membership duration"
+                        type="number"
+                        min="1"
+                        value={currentValidityValue}
+                        onChange={(e) => updateNewPlanValidity(e.target.value, currentValidityUnit)}
+                        style={{ width: '34px', minWidth: 0, border: 0, outline: 'none', padding: '8px 0', fontSize: '10px' }}
+                      />
+                      <select
+                        aria-label="Membership duration unit"
+                        value={currentValidityUnit}
+                        onChange={(e) => updateNewPlanValidity(currentValidityValue, e.target.value)}
+                        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: '10px' }}
+                      >
+                        <option value="day">days</option>
+                        <option value="month">months</option>
+                        <option value="year">years</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <label htmlFor="inline-membership-discount" style={{ flex: 1, color: '#57534E', fontSize: '10px', fontWeight: '700' }}>SERVICE DISCOUNT</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '82px', border: '1px solid #E7D8C4', borderRadius: '7px', padding: '0 7px', background: '#FFFFFF' }}>
+                      <input
+                        id="inline-membership-discount"
+                        aria-label="Membership service discount percentage"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={newPlanForm.discountPercent}
+                        onChange={(e) => setNewPlanForm(prev => ({ ...prev, discountPercent: e.target.value }))}
+                        style={{ width: '100%', minWidth: 0, border: 0, outline: 'none', padding: '7px 0', fontSize: '11px', textAlign: 'right' }}
+                      />
+                      <span style={{ color: '#9E7437', fontSize: '11px', fontWeight: '800' }}>%</span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: '#B88B4A', fontSize: '10px', fontWeight: '800', letterSpacing: '0.06em' }}>BENEFITS</span>
+                    <button
+                      type="button"
+                      onClick={() => setNewPlanForm(prev => ({ ...prev, benefits: [...prev.benefits, ''] }))}
+                      style={{ padding: '4px 7px', border: '1px solid #E7D8C4', borderRadius: '6px', background: '#FAF6EE', color: '#8E633A', fontSize: '9px', fontWeight: '700', cursor: 'pointer' }}
+                    >
+                      + Add Benefit
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {newPlanForm.benefits.map((benefit, index) => (
+                      <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <span style={{ color: '#D4AF37', fontSize: '10px' }}>•</span>
+                        <input
+                          aria-label={`Membership benefit ${index + 1}`}
+                          placeholder={`Add benefit ${index + 1}`}
+                          value={benefit}
+                          onChange={(e) => setNewPlanForm(prev => ({ ...prev, benefits: prev.benefits.map((item, itemIndex) => itemIndex === index ? e.target.value : item) }))}
+                          style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', padding: '6px 7px', border: '1px solid #EFE7DC', borderRadius: '6px', fontSize: '10px' }}
+                        />
+                        {newPlanForm.benefits.length > 1 && (
+                          <button type="button" aria-label={`Remove benefit ${index + 1}`} onClick={() => handleRemoveBenefit(index)} style={{ border: 0, background: 'transparent', color: '#A8A29E', cursor: 'pointer', fontSize: '14px', padding: '0 2px' }}>×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '7px', marginTop: 'auto' }}>
+                    <button type="button" onClick={() => setIsInlineAddingPlan(false)} style={{ flex: 1, padding: '8px 5px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF', color: '#57534E', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>Cancel</button>
+                    <button type="submit" disabled={savingPlan} style={{ flex: 1.4, padding: '8px 5px', border: '1px solid #D8BC8F', borderRadius: '7px', background: '#FAF6EE', color: '#8E633A', fontSize: '10px', fontWeight: '800', cursor: savingPlan ? 'wait' : 'pointer' }}>{savingPlan ? 'SAVING...' : '+ ADD MEMBERSHIP'}</button>
+                  </div>
+                </form>
+              ) : (
+                <>
               <div style={{
-                width: '60px',
-                height: '60px',
-                borderRadius: '50%',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
+                height: '210px',
+                flexShrink: 0,
+                margin: '10px 10px 0',
+                borderRadius: '12px',
+                border: '1px dashed #D8BC8F',
+                background: 'linear-gradient(135deg, #FBF8F3 0%, #F3EBDD 100%)',
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#B88B4A',
-                marginBottom: '16px'
+                gap: '8px',
+                color: '#9E7437'
               }}>
-                <Plus size={30} strokeWidth={2.2} />
+                <span style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '50%',
+                  background: '#FFFFFF',
+                  border: '1px solid #D8BC8F',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Plus size={22} />
+                </span>
+                <span style={{ fontSize: '11px', fontWeight: '700' }}>ADD CARD IMAGE</span>
               </div>
 
-              <div style={{
-                fontSize: '13px',
-                fontWeight: '800',
-                letterSpacing: '0.06em',
-                color: '#292524',
-                textTransform: 'uppercase',
-                marginBottom: '6px'
-              }}>
-                ADD NEW MEMBERSHIP
+              <div style={{ padding: '16px 17px 14px', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                <div style={{ textAlign: 'center', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: '#A8A29E', letterSpacing: '0.04em' }}>MEMBERSHIP NAME</div>
+                  <div style={{ fontSize: '24px', fontWeight: '800', color: '#C49A5A', marginTop: '3px' }}>₹ —</div>
+                  <div style={{ fontSize: '10px', color: '#A8A29E' }}>PRICE AND VALIDITY</div>
+                </div>
+
+                <div style={{ color: '#B88B4A', fontSize: '10px', fontWeight: '800', letterSpacing: '0.08em', marginBottom: '7px' }}>
+                  BENEFITS
+                </div>
+                {[0, 1, 2, 3].map((item) => (
+                  <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '7px' }}>
+                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#D4AF37', flexShrink: 0 }} />
+                    <span style={{ fontSize: '10px', color: '#B8B1A8' }}>ADD BENEFIT {item + 1}</span>
+                  </div>
+                ))}
+
+                <span style={{
+                  marginTop: 'auto',
+                  padding: '9px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid #D8BC8F',
+                  background: '#FAF6EE',
+                  color: '#8E633A',
+                  textAlign: 'center',
+                  fontSize: '10px',
+                  fontWeight: '800',
+                  letterSpacing: '0.05em'
+                }}>
+                  + ADD MEMBERSHIP
+                </span>
               </div>
-
-              <p style={{
-                fontSize: '11px',
-                color: '#78716C',
-                lineHeight: 1.45,
-                maxWidth: '200px',
-                margin: '0 0 18px 0'
-              }}>
-                Create a custom tier with bespoke privileges, pricing, and 3D metallic card finish.
-              </p>
-
-              <span style={{
-                display: 'inline-block',
-                background: '#FAF6EE',
-                border: '1px solid #DAC493',
-                borderRadius: '9999px',
-                padding: '5px 14px',
-                fontSize: '10px',
-                fontWeight: '800',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                color: '#8E633A'
-              }}>
-                + Create Tier
-              </span>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1747,6 +1879,21 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     );
                   })()}
                 </div>
+              </div>
+
+              <div style={{ maxWidth: '260px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#44403C', marginBottom: '6px' }}>
+                  Service Discount (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  value={editPlanForm.discountPercent}
+                  onChange={(e) => setEditPlanForm(prev => ({ ...prev, discountPercent: e.target.value }))}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #D6D3D1', fontSize: '13px', boxSizing: 'border-box' }}
+                />
               </div>
 
               {/* Tagline */}
