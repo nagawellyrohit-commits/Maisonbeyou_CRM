@@ -26,7 +26,7 @@ export default function Login({ onLoginSuccess }) {
   // Auto-detected account state
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectedAccount, setDetectedAccount] = useState(null);
-  const [selectedRole, setSelectedRole] = useState('admin'); // For multi-role branch numbers
+  const [selectedAccountId, setSelectedAccountId] = useState(null);
 
   // OTP flow states
   const [otp, setOtp] = useState('');
@@ -68,12 +68,13 @@ export default function Login({ onLoginSuccess }) {
         if (data.found) {
           setDetectedAccount(data);
           if (data.type === 'multiple' && data.accounts && data.accounts.length > 0) {
-            setSelectedRole(data.accounts[0].role);
+            setSelectedAccountId(data.accounts[0].user_id);
           } else if (data.type === 'single') {
-            setSelectedRole(data.user.role);
+            setSelectedAccountId(data.user.user_id);
           }
         } else {
           setDetectedAccount(null);
+          setSelectedAccountId(null);
         }
       } catch (err) {
         console.error('Failed to detect account:', err);
@@ -117,8 +118,13 @@ export default function Login({ onLoginSuccess }) {
     try {
       const payload = {
         identifier: trimmed,
-        role: detectedAccount?.type === 'multiple' ? selectedRole : detectedAccount?.user?.role,
-        location_id: detectedAccount?.location?.location_id || detectedAccount?.user?.location_id
+        role: detectedAccount?.type === 'multiple'
+          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.role
+          : detectedAccount?.user?.role,
+        location_id: detectedAccount?.type === 'multiple'
+          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.location_id
+          : detectedAccount?.user?.location_id,
+        account_user_id: selectedAccountId
       };
 
       const res = await fetch('/api/auth/send-login-otp', {
@@ -139,7 +145,7 @@ export default function Login({ onLoginSuccess }) {
       setResolvedRoleLabel(
         data.userRole === 'master_admin' ? 'Maison Master Admin' :
         data.userRole === 'admin' ? 'Branch Main Admin' :
-        data.userRole === 'reception' ? 'Reception Desk' : 'Visitor Desk'
+        data.userRole === 'reception' ? 'Manager' : 'Visitor'
       );
       setDemoOtp(data.demoOtp || '784920');
       setOtpCooldown(60);
@@ -172,8 +178,13 @@ export default function Login({ onLoginSuccess }) {
       const payload = {
         identifier: identifier.trim(),
         otp: otp.trim(),
-        role: detectedAccount?.type === 'multiple' ? selectedRole : detectedAccount?.user?.role,
-        location_id: detectedAccount?.location?.location_id || detectedAccount?.user?.location_id
+        role: detectedAccount?.type === 'multiple'
+          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.role
+          : detectedAccount?.user?.role,
+        location_id: detectedAccount?.type === 'multiple'
+          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.location_id
+          : detectedAccount?.user?.location_id,
+        account_user_id: selectedAccountId
       };
 
       const res = await fetch('/api/auth/login-otp', {
@@ -232,18 +243,18 @@ export default function Login({ onLoginSuccess }) {
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '460px',
+        maxWidth: '520px',
         background: 'rgba(255, 252, 247, 0.96)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
         borderRadius: '24px',
         boxShadow: '0 25px 60px -15px rgba(90, 60, 20, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.8) inset, 0 10px 30px -5px rgba(0, 0, 0, 0.05)',
         border: '1.5px solid #DAC493',
-        padding: '34px 30px',
+        padding: '42px 40px',
         position: 'relative'
       }}>
         {/* Brand Crest */}
-        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '34px' }}>
           <img 
             src={brandLogoImg} 
             alt="Maison BeYou Logo" 
@@ -254,16 +265,6 @@ export default function Login({ onLoginSuccess }) {
               objectFit: 'contain'
             }}
           />
-          <div style={{ 
-            fontSize: '11px', 
-            fontWeight: '700', 
-            letterSpacing: '0.14em', 
-            textTransform: 'uppercase', 
-            color: '#8C6228', 
-            marginTop: '8px' 
-          }}>
-            Studio Operations & Desk Portal
-          </div>
         </div>
 
         {/* Success Alert */}
@@ -307,25 +308,23 @@ export default function Login({ onLoginSuccess }) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
           {/* STEP 1: Phone / Mobile Input */}
           {!otpSent ? (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '700', color: '#1C1917' }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '11px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '700', color: '#57534E' }}>
                   Registered Mobile Number
                 </label>
-                <span style={{ fontSize: '11px', color: '#8C6228', fontWeight: '600' }}>
-                  Auto-Detects Role & Branch
-                </span>
               </div>
 
               <div style={{ position: 'relative' }}>
                 <Phone size={17} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '14px' }} />
                 <input
+                  className="login-phone-input"
                   type="text"
                   value={identifier}
-                  placeholder="Enter phone number (e.g. 98400 99881)"
+                  placeholder="Enter phone number"
                   onChange={(e) => {
                     setIdentifier(e.target.value);
                     setError('');
@@ -334,7 +333,7 @@ export default function Login({ onLoginSuccess }) {
                   required
                   style={{
                     width: '100%',
-                    padding: '12px 14px 12px 42px',
+                    padding: '15px 14px 15px 42px',
                     borderRadius: '12px',
                     border: '1.5px solid #DAC493',
                     background: '#FFFFFF',
@@ -373,7 +372,7 @@ export default function Login({ onLoginSuccess }) {
                     width: '38px',
                     height: '38px',
                     borderRadius: '10px',
-                    background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
+                  background: 'linear-gradient(135deg, #C9A56F 0%, #B88B4A 100%)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -434,12 +433,14 @@ export default function Login({ onLoginSuccess }) {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: `repeat(${detectedAccount.accounts?.length || 3}, 1fr)`, gap: '6px' }}>
                     {detectedAccount.accounts?.map((acc) => {
-                      const isSelected = selectedRole === acc.role;
+                      const isSelected = selectedAccountId === acc.user_id;
                       return (
                         <button
-                          key={acc.role}
+                          key={acc.user_id}
                           type="button"
-                          onClick={() => setSelectedRole(acc.role)}
+                          onClick={() => {
+                            setSelectedAccountId(acc.user_id);
+                          }}
                           style={{
                             padding: '8px 4px',
                             borderRadius: '8px',
@@ -453,9 +454,9 @@ export default function Login({ onLoginSuccess }) {
                             boxShadow: isSelected ? '0 2px 6px rgba(184, 139, 74, 0.15)' : 'none'
                           }}
                         >
-                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: isSelected ? '#8C6228' : '#44403C' }}>
-                            {acc.role === 'admin' ? 'Branch Admin' : acc.role === 'reception' ? 'Reception Desk' : 'Visitor Desk'}
-                          </span>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: isSelected ? '#8C6228' : '#44403C' }}>{acc.roleLabel}</span>
+                          <span style={{ fontSize: '10px', color: '#78716C' }}>{acc.name}</span>
+                          <span style={{ fontSize: '9px', color: '#A8A29E' }}>{acc.branch_name || detectedAccount.branchName}</span>
                         </button>
                       );
                     })}
@@ -641,10 +642,10 @@ export default function Login({ onLoginSuccess }) {
             disabled={loading || sendingOtp}
             style={{
               width: '100%',
-              padding: '13px 18px',
+              padding: '16px 18px',
               fontSize: '14px',
               fontWeight: '700',
-              marginTop: '4px',
+              marginTop: '14px',
               background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
               color: '#FFFFFF',
               border: 'none',
@@ -654,7 +655,7 @@ export default function Login({ onLoginSuccess }) {
               justifyContent: 'center',
               gap: '8px',
               cursor: (loading || sendingOtp) ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 14px rgba(184, 139, 74, 0.3)',
+              boxShadow: '0 4px 14px rgba(184, 139, 74, 0.18)',
               transition: 'all 0.2s ease'
             }}
           >
@@ -670,10 +671,10 @@ export default function Login({ onLoginSuccess }) {
 
         {/* Footer */}
         <div style={{
-          marginTop: '16px',
+          marginTop: '25px',
           textAlign: 'center',
           fontSize: '11px',
-          color: '#8C6228',
+          color: '#A17D4D',
           opacity: 0.8
         }}>
           <span>Maison BeYou Luxury Aesthetic Clinic & Salon</span>

@@ -13,6 +13,11 @@ import ReceiptModal from './components/ReceiptModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import StudioManagement from './components/StudioManagement';
 import LocationSelection from './components/LocationSelection';
+import { canAccessModule } from './utils/permissions';
+
+const dashboardModuleKeys = ['dashboard', 'visits', 'clients', 'services', 'team', 'membership', 'reports'];
+const landingTabFor = (user) => user?.role === 'visitor' && canAccessModule(user, 'visitor_intake') &&
+  !dashboardModuleKeys.some(module => canAccessModule(user, module)) ? 'new-visit' : 'dashboard';
 import {
   getStoredToken,
   getStoredUser,
@@ -31,7 +36,7 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState(() => {
     const user = getStoredUser();
-    return user?.role === 'visitor' ? 'new-visit' : 'dashboard';
+    return landingTabFor(user);
   });
   const [wizardResetKey, setWizardResetKey] = useState(0);
   
@@ -77,11 +82,10 @@ export default function App() {
           method: 'POST',
           body: JSON.stringify({ role: 'master_admin' })
         });
-        if (data?.token && data?.user) {
-          setStoredToken(data.token);
-          setStoredUser(data.user);
-          setCurrentUser(data.user);
-        }
+        if (!data?.token || !data?.user) throw new Error('Could not restore the master admin session.');
+        setStoredToken(data.token);
+        setStoredUser(data.user);
+        setCurrentUser(data.user);
       } catch (e) {
         console.error('Error restoring master_admin role on studio switch:', e);
       }
@@ -93,6 +97,30 @@ export default function App() {
     setSelectedLocation(null);
     setStoredLocation(null);
     setMasterAdminView('locations'); // Back to studio list
+    window.dispatchEvent(new Event('auth_change'));
+  };
+
+  const handleReturnToMasterDashboard = async () => {
+    if (currentUser?.role !== 'master_admin' && currentUser?.original_role === 'master_admin') {
+      try {
+        const data = await apiRequest('/auth/switch-role', {
+          method: 'POST',
+          body: JSON.stringify({ role: 'master_admin' })
+        });
+        if (data?.token && data?.user) {
+          setStoredToken(data.token);
+          setStoredUser(data.user);
+          setCurrentUser(data.user);
+        }
+      } catch (error) {
+        console.error('Error returning to master admin dashboard:', error);
+        return;
+      }
+    }
+    setSelectedLocation(null);
+    setStoredLocation(null);
+    setMasterAdminView('types');
+    setActiveTab('dashboard');
     window.dispatchEvent(new Event('auth_change'));
   };
 
@@ -116,12 +144,8 @@ export default function App() {
               setSelectedLocation(res.location);
               setStoredLocation(res.location);
             }
-            if (res.user?.role === 'visitor') {
-              setActiveTab('new-visit');
-            } else {
-              setActiveTab('dashboard');
-              setActiveVisitClient(null);
-            }
+            setActiveTab(landingTabFor(res.user));
+            setActiveVisitClient(null);
           }
         })
         .catch(() => {
@@ -142,8 +166,8 @@ export default function App() {
         } else {
           setActiveTab('dashboard');
         }
-      } else if (u?.role === 'visitor') {
-        setActiveTab('new-visit');
+      } else if (u?.role === 'visitor' && canAccessModule(u, 'visitor_intake')) {
+        setActiveTab(landingTabFor(u));
       } else {
         setActiveTab('dashboard');
         setActiveVisitClient(null);
@@ -155,23 +179,25 @@ export default function App() {
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
 
-  // Guard: Role-based tab permissions
+  const userHasAnyDashboardModule = currentUser && ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => canAccessModule(currentUser, module));
+  const tabPermission = {
+    'new-visit': 'visitor_intake',
+    clients: 'clients',
+    'client-profile': 'clients',
+    services: 'services',
+    staff: 'team',
+    membership: 'membership',
+    reports: 'reports'
+  };
+
+  // Enforce saved module permissions when choosing a tab or reopening a session.
   useEffect(() => {
-    if (currentUser) {
-      if (currentUser.role === 'visitor') {
-        if (activeTab !== 'new-visit') {
-          setActiveTab('new-visit');
-        }
-      } else {
-        // Reception and Admin must never see visitor wizard ('new-visit')
-        if (activeTab === 'new-visit') {
-          setActiveTab('dashboard');
-        } else if (!isAdmin && activeTab !== 'dashboard' && activeTab !== 'client-profile' && activeTab !== 'clients') {
-          setActiveTab('dashboard');
-        }
-      }
+    if (!currentUser) return;
+    const requiredModule = tabPermission[activeTab];
+    if ((requiredModule && !canAccessModule(currentUser, requiredModule)) || (activeTab === 'dashboard' && !userHasAnyDashboardModule)) {
+      setActiveTab('dashboard');
     }
-  }, [currentUser, activeTab, isAdmin]);
+  }, [currentUser, activeTab, userHasAnyDashboardModule]);
 
   // Handlers
   const handleOpenClient = (clientId, source = 'dashboard') => {
@@ -210,12 +236,8 @@ export default function App() {
               setSelectedLocation(locToSet);
               setStoredLocation(locToSet);
             }
-            if (user?.role === 'visitor') {
-              setActiveTab('new-visit');
-              setWizardResetKey(k => k + 1);
-            } else {
-              setActiveTab('dashboard');
-            }
+            setActiveTab(landingTabFor(user));
+            if (landingTabFor(user) === 'new-visit') setWizardResetKey(k => k + 1);
           }
         }}
       />
@@ -255,18 +277,11 @@ export default function App() {
         activeLocation={selectedLocation}
         onSwitchLocation={handleSwitchLocation}
         setActiveTab={(tab) => {
-          if (currentUser?.role === 'visitor') {
-            setPreSelectedVisitClient(null);
-            setInitialVisitType(null);
-            setActiveVisitClient(null);
-            setWizardResetKey(k => k + 1);
-            setActiveTab('new-visit');
+          if (tab === 'new-visit' && !canAccessModule(currentUser, 'visitor_intake')) {
             return;
           }
-          if (tab === 'new-visit') {
-            return;
-          }
-          if (!isAdmin && tab !== 'dashboard' && tab !== 'client-profile' && tab !== 'clients') {
+          const requiredModule = tabPermission[tab];
+          if (requiredModule && !canAccessModule(currentUser, requiredModule)) {
             return;
           }
           if (tab === 'dashboard') {
@@ -288,16 +303,13 @@ export default function App() {
           setInitialVisitType(null);
           setCartInfo({ count: 0, openCart: null, visible: false });
           setWizardResetKey(k => k + 1);
-          if (currentUser?.role !== 'visitor') {
-            setActiveTab('dashboard');
-          } else {
-            setActiveTab('new-visit');
-          }
+          setActiveTab(landingTabFor(currentUser));
         }}
       />
 
       <ErrorBoundary>
         <main
+          key={selectedLocation?.location_id || 'unscoped-session'}
           className="app-container"
           style={{
             flex: 1,
@@ -313,6 +325,7 @@ export default function App() {
             currentUser={currentUser}
             activeLocation={selectedLocation}
             onSwitchLocation={handleSwitchLocation}
+            onBackToMasterDashboard={handleReturnToMasterDashboard}
             onOpenClient={handleOpenClient}
             onOpenReceipt={handleOpenReceipt}
             onBackToDashboard={() => {
@@ -324,7 +337,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'new-visit' && (
+        {canAccessModule(currentUser, 'visitor_intake') && activeTab === 'new-visit' && (
           <NewVisitWizard
             key={`${wizardResetKey}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
             preSelectedClient={preSelectedVisitClient}
@@ -361,14 +374,14 @@ export default function App() {
           />
         )}
 
-        {(isAdmin || currentUser?.role === 'reception') && activeTab === 'clients' && (
+        {canAccessModule(currentUser, 'clients') && activeTab === 'clients' && (
           <ClientsList
             onOpenClient={(id) => handleOpenClient(id, 'clients')}
             onBackToDashboard={() => setActiveTab('dashboard')}
           />
         )}
 
-        {(isAdmin || currentUser?.role === 'reception') && activeTab === 'client-profile' && selectedClientId && (
+        {canAccessModule(currentUser, 'clients') && activeTab === 'client-profile' && selectedClientId && (
           <ClientProfile
             clientId={selectedClientId}
             onBack={() => setActiveTab(clientProfileSource === 'clients' ? 'clients' : 'dashboard')}
@@ -376,19 +389,19 @@ export default function App() {
           />
         )}
 
-        {isAdmin && activeTab === 'services' && (
+        {canAccessModule(currentUser, 'services') && activeTab === 'services' && (
           <ServiceManagement />
         )}
 
-        {isAdmin && activeTab === 'staff' && (
+        {canAccessModule(currentUser, 'team') && activeTab === 'staff' && (
           <StaffManagement />
         )}
 
-        {activeTab === 'membership' && (
+        {canAccessModule(currentUser, 'membership') && activeTab === 'membership' && (
           <MembershipManagement currentUser={currentUser} activeLocation={selectedLocation} />
         )}
 
-        {isAdmin && activeTab === 'reports' && (
+        {canAccessModule(currentUser, 'reports') && activeTab === 'reports' && (
           <ReportsView />
         )}
       </main>

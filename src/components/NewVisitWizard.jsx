@@ -522,6 +522,13 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   // Dynamic Membership Plans & Program Title (synced in real-time from Membership Management)
   const [dynamicMembershipPlans, setDynamicMembershipPlans] = useState([]);
   const [membershipProgramTitle, setMembershipProgramTitle] = useState('WORLD OF PRIVILEGES');
+  const findConfiguredMembershipPlan = (tierName) => {
+    if (!tierName) return null;
+    const normalizedTier = String(tierName).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    return dynamicMembershipPlans.find(plan => [plan.tier, plan.name, plan.fullName, plan.id].some(value =>
+      String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(normalizedTier)
+    )) || null;
+  };
 
   const fetchLiveMembershipData = useCallback(async () => {
     try {
@@ -529,10 +536,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       try {
         res = await apiRequest('/memberships');
       } catch (e) {
-        const publicRes = await fetch('/api/memberships/public');
-        if (publicRes.ok) {
-          res = await publicRes.json();
-        }
+        res = await apiRequest('/memberships/public');
       }
       if (res) {
         if (res.program_title) {
@@ -764,7 +768,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
         }
       }
       if (tierName && tierName !== 'Non-Member') {
-        const matchedPlan = findMembershipPlan(tierName);
+        const matchedPlan = findConfiguredMembershipPlan(tierName);
         if (matchedPlan) {
           setActiveMembership({
             plan: matchedPlan,
@@ -1372,20 +1376,14 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
   const normalizedTierName = normalizeMembershipName(applicableTierName);
-  const membershipPlanOptions = dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS;
+  const membershipPlanOptions = dynamicMembershipPlans;
   const configuredDiscountPlan = isPurchasingMembership
     ? activeMembership?.plan
     : membershipPlanOptions.find(plan => [plan.tier, plan.name, plan.fullName, plan.id]
       .some(value => normalizeMembershipName(value) === normalizedTierName));
-  const lowerTier = applicableTierName.toLowerCase();
-  const legacyDiscountPercent = lowerTier.includes('lumiere') || lowerTier.includes('lumière') ? 20
-    : lowerTier.includes('infini') ? 15
-      : lowerTier.includes('eternal') ? 10
-        : lowerTier.includes('eclat') || lowerTier.includes('éclat') ? 5
-          : 0;
   const configuredDiscountValue = configuredDiscountPlan?.discount_percent ?? configuredDiscountPlan?.discountPercent;
   const parsedMembershipDiscount = configuredDiscountValue === undefined || configuredDiscountValue === null
-    ? legacyDiscountPercent
+    ? 0
     : Number(configuredDiscountValue);
   const membershipDiscountPercent = Number.isFinite(parsedMembershipDiscount)
     ? Math.min(100, Math.max(0, parsedMembershipDiscount))
@@ -2351,7 +2349,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       if (active && active.isLoggedIn) {
         const rawClient = selectedRegularClient || (registeredClientModal ? registeredClientModal.client : null) || clientHistory?.client;
         const clientBadge = getClientFormattedId(active, rawClient);
-        const planInfo = active.isMember ? findMembershipPlan(active.membershipTier) : null;
+        const planInfo = active.isMember ? findConfiguredMembershipPlan(active.membershipTier) : null;
         const expiryInfo = getMembershipExpiryInfo(rawClient, planInfo);
 
         // Compute rich membership details mirroring Image 1
@@ -4606,7 +4604,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
 
         {/* Dynamic Cards Grid (synced in real-time with backend plans) */}
         <div className="membership-plans-grid">
-          {(dynamicMembershipPlans && dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS).map((plan) => {
+          {dynamicMembershipPlans.map((plan) => {
             const isSelected = currentPlan?.id === plan.id;
             const cardPrice = plan.priceFormatted || ('₹' + Number(plan.price || 0).toLocaleString('en-IN'));
             const cardBenefits = Array.isArray(plan.benefits) ? plan.benefits : [];
@@ -5393,6 +5391,24 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
 
               const activeCats = (categories || []).filter(c => c.active !== 0);
 
+              if (activeCats.length === 0) {
+                return (
+                  <div style={{
+                    gridColumn: '1 / -1',
+                    padding: '48px 24px',
+                    border: '1px solid #E5D8C6',
+                    borderRadius: '16px',
+                    background: '#FAF7F2',
+                    color: '#796B5D',
+                    textAlign: 'center',
+                    fontSize: '14px',
+                    lineHeight: 1.6
+                  }}>
+                    No services have been added to this branch yet. The branch administrator needs to add service categories and sub-services first.
+                  </div>
+                );
+              }
+
               const parseImgPos = (raw) => {
                 if (!raw) return null;
                 try {
@@ -5411,35 +5427,22 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                 return null;
               };
 
-              let displayList = [];
-              if (activeCats.length > 0) {
-                displayList = activeCats.map((cat, idx) => {
-                  const fallbackItem = defaultAestheticCards.find(d => d.matcher && d.matcher(cat)) || defaultAestheticCards[idx % defaultAestheticCards.length];
-                  const num = String(cat.display_order || idx + 1).padStart(2, '0');
-                  const title = (cat.category_name || fallbackItem.title).toUpperCase();
-                  const desc = cat.description || fallbackItem.desc;
-                  const image = cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : null) || fallbackItem.image;
-                  const imagePos = parseImgPos(cat.image_position);
-                  return {
-                    num,
-                    title,
-                    desc,
-                    image,
-                    imagePos,
-                    category: cat
-                  };
-                });
-              } else {
-                displayList = defaultAestheticCards.map((item, idx) => {
-                  const cat = categories.find(item.matcher) || categories[idx] || null;
-                  const imagePos = parseImgPos(cat?.image_position);
-                  return {
-                    ...item,
-                    imagePos,
-                    category: cat
-                  };
-                });
-              }
+              const displayList = activeCats.map((cat, idx) => {
+                const fallbackItem = defaultAestheticCards.find(d => d.matcher && d.matcher(cat)) || defaultAestheticCards[idx % defaultAestheticCards.length];
+                const num = String(cat.display_order || idx + 1).padStart(2, '0');
+                const title = (cat.category_name || fallbackItem.title).toUpperCase();
+                const desc = cat.description || fallbackItem.desc;
+                const image = cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : null) || fallbackItem.image;
+                const imagePos = parseImgPos(cat.image_position);
+                return {
+                  num,
+                  title,
+                  desc,
+                  image,
+                  imagePos,
+                  category: cat
+                };
+              });
 
               return displayList.map((item, idx) => (
                 <div

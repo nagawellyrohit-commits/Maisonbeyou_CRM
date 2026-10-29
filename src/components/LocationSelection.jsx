@@ -3,7 +3,7 @@ import {
   Building2, Store, Handshake, ArrowLeft, Plus, MapPin, Phone, Mail, User,
   CheckCircle2, Clock, ArrowRight, X, AlertCircle, AlertTriangle, Sparkles, Shield, ShieldCheck,
   ChevronRight, Users, Briefcase, ChevronDown, LogOut, TrendingUp, TrendingDown, Minus,
-  Calendar, BarChart3
+  Calendar, BarChart3, Menu
 } from 'lucide-react';
 import brandLogoImg from '../assets/brand-logo.png';
 import studioBg from '../assets/studio-bg.png';
@@ -15,16 +15,17 @@ import MasterAdminReportsDashboard from './MasterAdminReportsDashboard';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
 
-export function formatStudioCode(loc) {
+export function formatStudioCode(loc, sequence) {
   if (!loc) return 'MB-B-LOC-001';
-  if (loc.code && /^MB-[BF]-[A-Z]{3}-\d{3}$/.test(loc.code)) {
-    return loc.code;
-  }
-  const cleanType = (loc.type || 'branch').trim().toLowerCase();
-  const typeChar = cleanType === 'franchise' ? 'F' : 'B';
-  const cityCode = (loc.city || 'LOC').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'LOC';
-  const seqNum = String(loc.location_id || 1).padStart(3, '0');
-  return `MB-${typeChar}-${cityCode}-${seqNum}`;
+  const validCode = loc.code && loc.code.match(/^(MB-[BF]-[A-Z]{3})-(\d{3})$/);
+  const prefix = validCode?.[1] || (() => {
+    const cleanType = (loc.type || 'branch').trim().toLowerCase();
+    const typeChar = cleanType === 'franchise' ? 'F' : 'B';
+    const cityCode = (loc.city || 'LOC').replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'LOC';
+    return `MB-${typeChar}-${cityCode}`;
+  })();
+  const sequenceNumber = sequence ?? (validCode ? Number(validCode[2]) : Number(loc.location_id) || 1);
+  return `${prefix}-${String(sequenceNumber).padStart(3, '0')}`;
 }
 
 export function formatStudioTitle(loc) {
@@ -62,42 +63,18 @@ export function formatStudioAddress(loc) {
 }
 
 export function formatStudioPhone(loc) {
-  const rawPhone = (
-    loc?.phone ||
-    loc?.primary_login_phone ||
-    loc?.kyc?.primary_login_phone ||
-    loc?.kyc?.mobile_numbers?.[0] ||
-    '+91 98200 12345'
-  ).trim();
+  const rawPhone = String(loc?.phone || '').trim();
+  if (!rawPhone) return '';
   const digits = rawPhone.replace(/\D/g, '');
   const last10 = digits.length >= 10 ? digits.slice(-10) : '';
   if (last10.length === 10) {
     return `+91 ${last10.slice(0, 5)} ${last10.slice(5)}`;
   }
-  return rawPhone || '+91 98200 12345';
+  return rawPhone;
 }
 
 export function formatStudioManager(loc) {
-  let mgr = (loc?.manager_name || loc?.stakeholders?.[0]?.name || '').trim();
-  mgr = mgr
-    .replace(/^(?:Partner\s+(?:One|Two|Three|\d+)\s*[-–—:]\s*|Director\s+|Proprietor\s+)/i, '')
-    .replace(/\bUpdated\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!mgr || /Test\s+Individual/i.test(mgr)) {
-    const fallbackManagers = [
-      'Ayesha Khan',
-      'Vikram Rathore',
-      'Karan Verma',
-      'Tanvi Deshmukh',
-      'Pooja Hegde',
-      'Rohan Kulkarni',
-      'Ananya Sharma',
-      'Siddharth Malhotra'
-    ];
-    mgr = fallbackManagers[(Number(loc?.location_id || 1) - 1) % fallbackManagers.length];
-  }
-  return mgr;
+  return String(loc?.manager_name || '').trim();
 }
 
 const getReturnTierConfig = (tier = 'Good', dailyIncome = 0) => {
@@ -257,13 +234,26 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
     setIsSelectingFirmTypeToAdd(false);
   }, [type]);
 
+  // Keep the active Juhu branch and branches created after it. Older seeded/demo
+  // records should not be mixed into this workspace; test branches stay hidden.
+  const juhuBranch = locations.find(loc => /juhu/i.test(`${loc.name || ''} ${loc.address || ''}`));
+  const branchLocations = type === 'branch'
+    ? locations.filter(loc => {
+        const isJuhu = /juhu/i.test(`${loc.name || ''} ${loc.address || ''}`);
+        const isLaterRealBranch = juhuBranch
+          && loc.location_id > juhuBranch.location_id
+          && !/\btest\b/i.test(loc.name || '');
+        return isJuhu || isLaterRealBranch;
+      })
+    : locations;
+
   const handleApplyDateFilter = (newFilter) => {
     setDateFilter(newFilter);
     fetchLocations(newFilter.startDate, newFilter.endDate);
   };
 
   const getFirmCount = (firm) => {
-    return locations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === firm).length;
+    return branchLocations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === firm).length;
   };
 
   const handleOpenAddModal = (targetFirmType = 'Proprietor') => {
@@ -307,13 +297,13 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
 
   // In locations view, display all locations cleanly; in reports view, filter by selected firm type
   const displayedLocations = (viewMode === 'reports' && filterFirmType !== 'All')
-    ? locations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === filterFirmType)
-    : locations;
+    ? branchLocations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === filterFirmType)
+    : branchLocations;
 
   // Aggregate metrics for Reports View
   const reportLocations = filterFirmType === 'All'
-    ? locations
-    : locations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === filterFirmType);
+    ? branchLocations
+    : branchLocations.filter(loc => (loc.kyc?.firm_type || loc.firm_type) === filterFirmType);
 
   const totalReportRevenue = reportLocations.reduce((sum, loc) => sum + Number(loc.daily_income || 0), 0);
   const totalReportFootfall = reportLocations.reduce((sum, loc) => sum + Number(loc.footfall || 0), 0);
@@ -322,9 +312,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
   const lowTiersCount = reportLocations.filter(loc => (loc.return_tier || '').toLowerCase() === 'low').length;
 
   return (
-    <div style={{
+    <div className={viewMode === 'locations' ? 'branch-selection-page-light' : ''} style={{
       minHeight: '100vh',
-      backgroundImage: `linear-gradient(180deg, rgba(44, 33, 27, 0.78) 0%, rgba(44, 33, 27, 0.70) 280px, rgba(44, 33, 27, 0.65) 100%), url(${studioBg})`,
+      background: viewMode === 'locations'
+        ? '#F7F3ED'
+        : `linear-gradient(180deg, rgba(44, 33, 27, 0.78) 0%, rgba(44, 33, 27, 0.70) 280px, rgba(44, 33, 27, 0.65) 100%), url(${studioBg}) center / cover fixed`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
@@ -354,34 +346,30 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
             />
           </div>
 
-          {/* Master Admin Profile & Dropdown - Matching Image 1 */}
+          {/* Master Admin Menu */}
           <div ref={userMenuRef} style={{ position: 'relative' }}>
-            <div
+            <button
+              type="button"
+              aria-label="Open Master Admin menu"
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="navbar-user-pill"
               style={{
-                background: showUserMenu ? 'var(--bg-surface)' : 'transparent',
+                width: '40px',
+                height: '40px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #D8BD91',
+                borderRadius: '8px',
+                color: '#A8793D',
+                background: showUserMenu ? '#FAF6EE' : '#FFFFFF',
+                cursor: 'pointer',
+                transition: 'background 0.15s ease, border-color 0.15s ease'
               }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; e.currentTarget.style.borderColor = '#B88B4A'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = showUserMenu ? '#FAF6EE' : '#FFFFFF'; e.currentTarget.style.borderColor = '#D8BD91'; }}
             >
-              <div
-                className="navbar-user-avatar"
-                style={{
-                  background: 'var(--primary-subtle)',
-                  color: 'var(--primary-hover)',
-                }}
-              >
-                {currentUser?.name?.charAt(0) || 'M'}
-              </div>
-              <div className="navbar-user-info">
-                <div className="navbar-user-name">
-                  {currentUser?.name || 'Maison Master Admin'}
-                </div>
-                <div className="navbar-user-role">
-                  Master Administrator
-                </div>
-              </div>
-              <ChevronDown size={14} color="var(--text-muted)" className="navbar-user-chevron" />
-            </div>
+              <Menu size={18} strokeWidth={1.8} />
+            </button>
 
             {showUserMenu && (
               <div style={{
@@ -588,16 +576,16 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 </div>
 
                 {/* Heading: All Branches */}
-                <div style={{ marginBottom: '44px' }}>
+                <div style={{ marginBottom: '36px' }}>
                   <h1 style={{
                     fontFamily: 'var(--font-sans)',
                     fontSize: '28px',
                     fontWeight: '500',
-                    color: '#FFFFFF',
+                    color: '#2C211B',
                     letterSpacing: '0.04em',
                     textTransform: 'uppercase',
                     margin: 0,
-                    textShadow: '0 2px 14px rgba(0,0,0,0.75)'
+                    textShadow: 'none'
                   }}>
                     {isBranch ? 'All Branches' : 'All Franchises'}
                   </h1>
@@ -624,9 +612,9 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 <div
                   onClick={() => setIsSelectingFirmTypeToAdd(true)}
                   style={{
-                    background: '#FAF7F2',
-                    borderRadius: '20px',
-                    border: '1.5px dashed #C6A36A',
+                    background: '#FFFDF9',
+                    borderRadius: '22px',
+                    border: '1px solid #D99A64',
                     padding: '32px 24px',
                     display: 'flex',
                     flexDirection: 'column',
@@ -635,10 +623,10 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     textAlign: 'center',
                     cursor: 'pointer',
                     transition: 'all 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
-                    minHeight: '260px',
+                    minHeight: '300px',
                     height: '100%',
                     boxSizing: 'border-box',
-                    boxShadow: '0 8px 24px -6px rgba(44, 33, 27, 0.05)'
+                    boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)'
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.transform = 'translateY(-3px)';
@@ -648,9 +636,9 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.background = '#FAF7F2';
-                    e.currentTarget.style.borderColor = '#C6A36A';
-                    e.currentTarget.style.boxShadow = '0 8px 24px -6px rgba(44, 33, 27, 0.05)';
+                    e.currentTarget.style.background = '#FFFDF9';
+                    e.currentTarget.style.borderColor = '#D99A64';
+                    e.currentTarget.style.boxShadow = '0 6px 18px rgba(87, 58, 32, 0.06)';
                   }}
                 >
                   <div style={{
@@ -718,26 +706,28 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 )}
 
                 {/* 2. LOCATION CARDS */}
-                {displayedLocations.map((loc) => {
+                {displayedLocations.map((loc, branchIndex) => {
                   const isActive = (loc.status || 'Active').toLowerCase() === 'active';
                   const locFirmType = loc.kyc?.firm_type || loc.firm_type || 'Proprietor';
+                  const officePhone = formatStudioPhone(loc);
+                  const branchManager = formatStudioManager(loc);
+                  const dialPhone = officePhone;
                   return (
                     <div
                       key={loc.location_id}
-                      onClick={() => onSelectLocation(loc)}
                       style={{
-                        background: '#FAF7F2',
-                        borderRadius: '20px',
-                        border: '1.5px solid #E5D8C6',
-                        padding: '24px 24px 20px 24px',
-                        boxShadow: '0 8px 24px -6px rgba(44, 33, 27, 0.05)',
-                        cursor: 'pointer',
+                        background: '#FFFDF9',
+                        borderRadius: '22px',
+                        border: '1px solid #D99A64',
+                        padding: '30px 28px 58px',
+                        boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)',
+                        cursor: 'default',
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'space-between',
                         transition: 'all 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
                         position: 'relative',
-                        minHeight: '260px',
+                        minHeight: '300px',
                         height: '100%',
                         boxSizing: 'border-box'
                       }}
@@ -748,8 +738,8 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.borderColor = '#E5D8C6';
-                        e.currentTarget.style.boxShadow = '0 8px 24px -6px rgba(44, 33, 27, 0.05)';
+                        e.currentTarget.style.borderColor = '#D99A64';
+                        e.currentTarget.style.boxShadow = '0 6px 18px rgba(87, 58, 32, 0.06)';
                       }}
                     >
                       <div>
@@ -765,7 +755,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                             alignItems: 'center',
                             gap: '6px',
                             background: '#F3EDE4',
-                            border: '1px solid #E5D8C6',
+                            border: '1px solid #D99A64',
                             padding: '4px 10px',
                             borderRadius: '9999px',
                             fontSize: '11px',
@@ -774,8 +764,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                             letterSpacing: '0.02em',
                             fontFamily: 'var(--font-sans)'
                           }}>
-                            <MapPin size={12} color="#C6A36A" />
-                            <span>{formatStudioCode(loc)}</span>
+                            <span>{formatStudioCode(loc, branchIndex + 1)}</span>
                           </span>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -785,7 +774,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                                 alignItems: 'center',
                                 gap: '5px',
                                 background: '#F3EDE4',
-                                border: '1px solid #E5D8C6',
+                                border: '1px solid #D99A64',
                                 padding: '4px 10px',
                                 borderRadius: '9999px',
                                 fontSize: '11px',
@@ -804,7 +793,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                               alignItems: 'center',
                               gap: '5px',
                               background: '#F3EDE4',
-                              border: '1px solid #E5D8C6',
+                              border: '1px solid #D99A64',
                               padding: '4px 10px',
                               borderRadius: '9999px',
                               fontSize: '11px',
@@ -828,7 +817,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                           fontSize: '18px',
                           fontWeight: '700',
                           color: '#2C211B',
-                          margin: '14px 0 10px 0',
+                          margin: '14px 0 24px 0',
                           lineHeight: 1.35,
                           letterSpacing: '-0.01em',
                           fontFamily: 'var(--font-sans)'
@@ -837,7 +826,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                         </h3>
 
                         {/* Address / Location */}
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#796B5D', fontSize: '12.5px', marginBottom: '6px', lineHeight: 1.45, fontFamily: 'var(--font-sans)' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif" }}>
                           <MapPin size={14} color="#C6A36A" style={{ flexShrink: 0, marginTop: '2px' }} />
                           <span>
                             {formatStudioAddress(loc)}
@@ -845,17 +834,55 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                         </div>
 
                         {/* Phone */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', marginBottom: '6px', fontFamily: 'var(--font-sans)' }}>
+                        {officePhone ? <a
+                          href={`tel:${String(dialPhone).replace(/[^\d+]/g, '')}`}
+                          style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif", textDecoration: 'none', cursor: 'pointer', transition: 'color 0.15s ease, font-weight 0.15s ease' }}
+                          onMouseEnter={event => {
+                            event.currentTarget.style.color = '#2C211B';
+                            event.currentTarget.style.fontWeight = '700';
+                          }}
+                          onMouseLeave={event => {
+                            event.currentTarget.style.color = '#796B5D';
+                            event.currentTarget.style.fontWeight = '500';
+                          }}
+                        >
                           <Phone size={14} color="#C6A36A" />
-                          <span>{formatStudioPhone(loc)}</span>
-                        </div>
+                          <span>{officePhone}</span>
+                        </a> : <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif" }}>
+                          <Phone size={14} color="#C6A36A" />
+                          <span />
+                        </div>}
 
                         {/* Manager */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontFamily: 'var(--font-sans)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif" }}>
                           <User size={14} color="#C6A36A" />
-                          <span>Manager: {formatStudioManager(loc)}</span>
+                          <span>Manager: {branchManager}</span>
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        className="branch-card-open-button"
+                        aria-label={`Open ${formatStudioTitle(loc)}`}
+                        onClick={() => onSelectLocation(loc)}
+                        style={{
+                          position: 'absolute',
+                          right: '20px',
+                          bottom: '18px',
+                          width: '40px',
+                          height: '40px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '50%',
+                          border: '1px solid #D99A64',
+                          background: '#F3EDE4',
+                          color: '#9F7335',
+                          cursor: 'pointer',
+                          padding: 0
+                        }}
+                      >
+                        <ArrowRight size={19} strokeWidth={2} />
+                      </button>
                     </div>
                   );
                 })}

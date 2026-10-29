@@ -1,65 +1,93 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Building2, Handshake,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
-  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check,
+  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut,
   Edit2, FileText, Crown
 } from 'lucide-react';
-import { apiRequest, formatCurrency, formatDate, formatPhone, setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
-import { MEMBERSHIP_PLANS } from './NewVisitWizard';
+import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import ClientsList from './ClientsList';
 import ServiceManagement from './ServiceManagement';
 import StaffManagement from './StaffManagement';
 import MembershipManagement from './MembershipManagement';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
+import BranchUserManagement from './BranchUserManagement';
+import { canAccessModule } from '../utils/permissions';
 
-export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation }) {
-  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+const roleDashboardButtonStyle = {
+  width: '100%',
+  textAlign: 'left',
+  padding: '8px 10px',
+  borderRadius: 6,
+  fontSize: 12.5,
+  color: '#44403C',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer'
+};
+
+export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard }) {
+  const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
   const [currentLocation, setCurrentLocation] = useState(activeLocation);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
   const [showAdminMenu, setShowAdminMenu] = useState(false);
   const [showDashboardRoleMenu, setShowDashboardRoleMenu] = useState(false);
+  const [adminMenuPosition, setAdminMenuPosition] = useState({ top: 68, right: 64 });
+  const [roleDashboardUsers, setRoleDashboardUsers] = useState({ manager: [], visitor: [] });
+  const [dashboardViewRole, setDashboardViewRole] = useState(null);
   const adminMenuRef = useRef(null);
+  const adminMenuPortalRef = useRef(null);
+
+  const isManagerDashboardPreview = isActualAdmin && dashboardViewRole === 'manager';
+  const isAdmin = isActualAdmin && !isManagerDashboardPreview;
+  const managerDashboardUser = roleDashboardUsers.manager[0] || null;
+  const dashboardUser = isManagerDashboardPreview
+    ? (managerDashboardUser || { role: 'reception', permission_profile_exists: true, permissions: [] })
+    : currentUser;
+  const hasModuleAccess = (moduleId) => canAccessModule(dashboardUser, moduleId);
+  const availableRoleDashboards = {
+    manager: roleDashboardUsers.manager.length > 0,
+    visitor: roleDashboardUsers.visitor.length > 0
+  };
 
   const effectiveOriginalRole = currentUser?.original_role || currentUser?.role;
   const isOriginalMasterAdmin = effectiveOriginalRole === 'master_admin';
-  const isOriginalBranchAdmin = effectiveOriginalRole === 'admin';
-  const isOriginalReception = effectiveOriginalRole === 'reception';
+  const isMasterAdminContext = currentUser?.role === 'master_admin' || currentUser?.original_role === 'master_admin';
 
-  const handleDashboardSwitchRole = async (targetRole) => {
+  const loadAvailableRoleDashboards = async () => {
+    if (!isActualAdmin) return;
     try {
-      const activeLocId = activeLocation?.location_id || currentUser?.location_id;
-      const res = await apiRequest('/auth/switch-role', {
-        method: 'POST',
-        body: JSON.stringify({
-          role: targetRole,
-          location_id: activeLocId
-        })
+      const branchQuery = currentUser?.role === 'master_admin' && activeLocation?.location_id
+        ? `?location_id=${activeLocation.location_id}`
+        : '';
+      const result = await apiRequest(`/admin/branch-users${branchQuery}`);
+      const activeUsers = (result.users || []).filter(user => Number(user.active) === 1);
+      setRoleDashboardUsers({
+        manager: activeUsers.filter(user => user.role === 'reception'),
+        visitor: activeUsers.filter(user => user.role === 'visitor')
       });
-      if (res && res.token) {
-        setStoredToken(res.token);
-        setStoredUser(res.user);
-        if (res.location || activeLocation) {
-          setStoredLocation(res.location || activeLocation);
-        }
-        setShowAdminMenu(false);
-        setShowDashboardRoleMenu(false);
-        setActiveSection('visits');
-        window.dispatchEvent(new Event('auth_change'));
-      } else {
-        alert(res?.error || 'Failed to switch role');
-      }
-    } catch (err) {
-      console.error('Switch role error:', err);
-      alert(err.message || 'Failed to switch role');
+    } catch (error) {
+      setRoleDashboardUsers({ manager: [], visitor: [] });
     }
   };
 
   useEffect(() => {
+    if (!isActualAdmin) return undefined;
+    loadAvailableRoleDashboards();
+    const handleBranchUsersUpdated = () => loadAvailableRoleDashboards();
+    window.addEventListener('branch_users_updated', handleBranchUsersUpdated);
+    return () => window.removeEventListener('branch_users_updated', handleBranchUsersUpdated);
+  }, [isActualAdmin, currentUser?.role, activeLocation?.location_id]);
+
+  useEffect(() => {
     function handleClickOutside(event) {
-      if (adminMenuRef.current && !adminMenuRef.current.contains(event.target)) {
+      if (
+        adminMenuRef.current && !adminMenuRef.current.contains(event.target) &&
+        !adminMenuPortalRef.current?.contains(event.target)
+      ) {
         setShowAdminMenu(false);
         setShowDashboardRoleMenu(false);
       }
@@ -69,25 +97,37 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   }, []);
 
   useEffect(() => {
+    const handleOpenStudioModules = event => {
+      if (Number.isFinite(event.detail?.top) && Number.isFinite(event.detail?.right)) {
+        setAdminMenuPosition({ top: event.detail.top, right: event.detail.right });
+      }
+      setShowAdminMenu(true);
+    };
+    window.addEventListener('open_studio_modules', handleOpenStudioModules);
+    return () => window.removeEventListener('open_studio_modules', handleOpenStudioModules);
+  }, []);
+
+  useEffect(() => {
     setCurrentLocation(activeLocation);
   }, [activeLocation]);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ summary: {}, visits: [] });
   const [error, setError] = useState('');
 
-  // In-dashboard sub-module section switcher ('visits' | 'clients' | 'services' | 'staff' | 'reports')
-  const [activeSection, setActiveSection] = useState('visits');
-  const sectionContentRef = useRef(null);
+  const initialSection = hasModuleAccess('visits') ? 'visits'
+    : ['clients', 'services', 'team', 'membership', 'reports', 'user_management'].find(key => hasModuleAccess(key)) || 'visits';
+  // In-dashboard sub-module section switcher.
+  const [activeSection, setActiveSection] = useState(initialSection);
 
   useEffect(() => {
-    setActiveSection('visits');
-  }, [activeLocation?.location_id]);
+    setActiveSection(initialSection);
+  }, [activeLocation?.location_id, initialSection]);
 
   useEffect(() => {
-    const handleResetDashboard = () => setActiveSection('visits');
+    const handleResetDashboard = () => setActiveSection(initialSection);
     window.addEventListener('reset_dashboard_section', handleResetDashboard);
     return () => window.removeEventListener('reset_dashboard_section', handleResetDashboard);
-  }, []);
+  }, [initialSection]);
 
   // Staff allocation & Payment verification state for Reception
   const [staffList, setStaffList] = useState([]);
@@ -130,8 +170,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         try {
           res = await apiRequest('/memberships');
         } catch (e) {
-          const publicRes = await fetch('/api/memberships/public');
-          if (publicRes.ok) res = await publicRes.json();
+          res = await apiRequest('/memberships/public');
         }
         if (res && res.plans && res.plans.length > 0) {
           setDynamicMembershipPlans(res.plans);
@@ -186,12 +225,18 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
   useEffect(() => {
     setData({ summary: {}, visits: [] });
-    setLoading(true);
-    fetchDashboardData();
-    // Load staff options for assignment strictly for this location
-    apiRequest('/staff')
-      .then(res => setStaffList(res.staff || []))
-      .catch(e => console.error('Staff fetch error:', e));
+    const canLoadDashboardData = hasModuleAccess('dashboard') || hasModuleAccess('visits') || hasModuleAccess('clients') || hasModuleAccess('membership');
+    const canLoadStaff = hasModuleAccess('team') || hasModuleAccess('visits') || hasModuleAccess('visitor_intake');
+    setLoading(canLoadDashboardData);
+    if (canLoadDashboardData) fetchDashboardData();
+    else setLoading(false);
+    if (canLoadStaff) {
+      apiRequest('/staff')
+        .then(res => setStaffList(res.staff || []))
+        .catch(e => console.error('Staff fetch error:', e));
+    } else {
+      setStaffList([]);
+    }
 
     const handleVisitCreated = () => {
       fetchDashboardData(true);
@@ -199,14 +244,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
     window.addEventListener('visit_created', handleVisitCreated);
 
     // Smooth auto-refresh every 10 seconds so new visitor submissions appear in real-time
-    const pollInterval = setInterval(() => {
-      fetchDashboardData(true);
-    }, 10000);
+    const pollInterval = canLoadDashboardData ? setInterval(() => fetchDashboardData(true), 10000) : null;
     return () => {
-      clearInterval(pollInterval);
+      if (pollInterval) clearInterval(pollInterval);
       window.removeEventListener('visit_created', handleVisitCreated);
     };
-  }, [activeLocation?.location_id]);
+  }, [activeLocation?.location_id, currentUser?.user_id, currentUser?.permissions, currentUser?.permission_profile_exists, dashboardUser?.user_id, dashboardUser?.permissions, dashboardUser?.permission_profile_exists]);
 
   const handleManualRefresh = async () => {
     try {
@@ -441,12 +484,13 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+    <div className="animate-fade-in dashboard-reference-style" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
 
       {isOriginalMasterAdmin && onSwitchLocation && (
         <div style={{ display: 'flex', alignItems: 'center', marginTop: '14px', marginBottom: '-6px' }}>
           <button
             type="button"
+            className="dashboard-reference-button"
             onClick={onSwitchLocation}
             title="Back to All Studios"
             style={{
@@ -459,8 +503,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               fontWeight: '700',
               letterSpacing: '0.02em',
               color: '#9F7335',
-              background: '#FAF6EE',
-              border: '1.5px solid #DAC493',
+              background: '#FFFFFF',
+              border: '1.5px solid #D99A64',
               boxShadow: '0 2px 10px rgba(184, 139, 74, 0.10)',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
@@ -473,9 +517,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               e.currentTarget.style.boxShadow = '0 4px 14px rgba(184, 139, 74, 0.28)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#FAF6EE';
+              e.currentTarget.style.background = '#FFFFFF';
               e.currentTarget.style.color = '#9F7335';
-              e.currentTarget.style.borderColor = '#DAC493';
+              e.currentTarget.style.borderColor = '#D99A64';
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 2px 10px rgba(184, 139, 74, 0.10)';
             }}
@@ -486,60 +530,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         </div>
       )}
 
-      {/* Top Banner / Hero with Search & Quick Action */}
+      {/* Dashboard controls without the branch hero tab */}
       <div style={{
-        background: '#FFFFFF',
-        borderRadius: 'var(--radius-xl)',
-        padding: '28px 32px',
-        border: '1px solid var(--border-color)',
-        boxShadow: 'var(--shadow-sm)',
-        display: 'flex',
-        flexWrap: 'wrap',
+        display: isActualAdmin && !isManagerDashboardPreview ? 'none' : 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '20px',
+        justifyContent: 'flex-end',
+        gap: '14px',
         width: '100%',
-        boxSizing: 'border-box'
+        marginBottom: '16px'
       }}>
-        <div style={{ maxWidth: '520px', minWidth: '240px' }}>
-          <div style={{
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.14em',
-            color: '#B88B4A',
-            fontWeight: '700',
-            marginBottom: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            {activeLocation ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                {activeLocation.type === 'franchise' ? <Handshake size={14} color="#B88B4A" /> : <Building2 size={14} color="#B88B4A" />}
-                {activeLocation.type === 'franchise' ? 'Franchise Studio Operations' : 'Branch Studio Operations'}
-              </span>
-            ) : (
-              <span>{isAdmin ? 'Admin Studio Operations' : 'Reception Desk Operations'}</span>
-            )}
-            {activeLocation && (
-              <span style={{
-                background: '#FAF6EE',
-                border: '1px solid #DAC493',
-                color: '#9F7335',
-                padding: '3px 10px',
-                borderRadius: '6px',
-                fontSize: '10.5px',
-                fontWeight: '800'
-              }}>
-                {activeLocation.code || `MB-${activeLocation.type === 'franchise' ? 'F' : 'B'}-${(activeLocation.city || 'LOC').slice(0, 3).toUpperCase()}-001`}
-              </span>
-            )}
-          </div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', lineHeight: 1.2, margin: 0 }}>
-            {activeLocation ? activeLocation.name : (isAdmin ? "Admin Studio Overview" : "Reception Desk Dashboard")}
-          </h1>
-        </div>
-
         {/* Right Corner Controls: Quick Module Navigation */}
         <div style={{
           display: 'flex',
@@ -551,43 +550,49 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           minWidth: 0
         }}>
           {/* Quick Module Navigation Menu (Services, Membership, Team, Clients, Reports, KYC Details) */}
-          {(isAdmin || currentUser?.role === 'reception') && (
+          {(isAdmin || ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => hasModuleAccess(module))) && (
             <div ref={adminMenuRef} style={{ position: 'relative' }}>
-              <button
-                type="button"
-                onClick={() => setShowAdminMenu(prev => !prev)}
-                title="Studio Modules Menu"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '9999px',
-                  color: '#44403C',
-                  background: showAdminMenu ? '#F5ECE0' : '#FAF6EE',
-                  border: `1.5px solid ${showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)'}`,
-                  cursor: 'pointer',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#F5ECE0';
-                  e.currentTarget.style.borderColor = '#B88B4A';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = showAdminMenu ? '#F5ECE0' : '#FAF6EE';
-                  e.currentTarget.style.borderColor = showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)';
-                }}
-              >
-                <Menu size={18} color="#B88B4A" />
-              </button>
+              {!isActualAdmin && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setAdminMenuPosition({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+                    setShowAdminMenu(prev => !prev);
+                  }}
+                  title="Studio Modules Menu"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '9999px',
+                    color: '#44403C',
+                    background: showAdminMenu ? '#F5ECE0' : '#FAF6EE',
+                    border: `1.5px solid ${showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)'}`,
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#F5ECE0';
+                    e.currentTarget.style.borderColor = '#B88B4A';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = showAdminMenu ? '#F5ECE0' : '#FAF6EE';
+                    e.currentTarget.style.borderColor = showAdminMenu ? '#B88B4A' : 'rgba(218, 196, 147, 0.45)';
+                  }}
+                >
+                  <Menu size={18} color="#B88B4A" />
+                </button>
+              )}
 
-              {showAdminMenu && (
-                <div style={{
-                  position: 'absolute',
-                  right: 0,
-                  top: 'calc(100% + 8px)',
+              {showAdminMenu && createPortal(
+                <div ref={adminMenuPortalRef} style={{
+                  position: 'fixed',
+                  right: `${adminMenuPosition.right}px`,
+                  top: `${adminMenuPosition.top}px`,
                   width: '230px',
                   background: '#FFFFFF',
                   borderRadius: 'var(--radius-md)',
@@ -601,25 +606,81 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   gap: '4px'
                 }}>
                   <div style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    color: '#B88B4A',
-                    padding: '6px 10px 8px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: '7px',
+                    padding: '6px 10px 10px',
                     borderBottom: '1px solid var(--border-color)',
-                    marginBottom: '4px'
+                    marginBottom: '4px',
+                    minWidth: 0
                   }}>
-                    Studio Modules
+                    <span
+                      title={activeLocation?.name || 'Branch Dashboard'}
+                      style={{
+                        width: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#29231E'
+                      }}
+                    >
+                      {activeLocation?.name || 'Branch Dashboard'}
+                    </span>
+                    <span style={{
+                      background: '#FAF6EE',
+                      border: '1px solid #DAC493',
+                      borderRadius: '9999px',
+                      padding: '3px 8px',
+                      color: '#9F7335',
+                      fontSize: '10px',
+                      fontWeight: '700',
+                      letterSpacing: '0.06em'
+                    }}>
+                      {activeLocation?.code || `MB-${activeLocation?.type === 'franchise' ? 'F' : 'B'}-${(activeLocation?.city || 'LOC').slice(0, 3).toUpperCase()}-001`}
+                    </span>
                   </div>
 
+                  {((isMasterAdminContext && currentUser?.role === 'master_admin' && activeLocation) ||
+                    dashboardViewRole === 'manager' ||
+                    (isMasterAdminContext && currentUser?.role === 'reception')) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminMenu(false);
+                        setShowDashboardRoleMenu(false);
+                        if (isMasterAdminContext) {
+                          onBackToMasterDashboard?.();
+                        } else {
+                          setDashboardViewRole(null);
+                          setActiveSection('visits');
+                        }
+                      }}
+                      style={{
+                        ...roleDashboardButtonStyle,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        fontWeight: '700',
+                        color: '#9F7335'
+                      }}
+                    >
+                      <LayoutDashboard size={16} color="#B88B4A" />
+                      <span>{isMasterAdminContext ? 'Main Admin Dashboard' : 'Branch Admin Dashboard'}</span>
+                    </button>
+                  )}
+
                   {[
-                    { id: 'visits', label: 'Dashboard', icon: LayoutDashboard, show: true },
-                    { id: 'services', label: 'Services', icon: Scissors, show: isAdmin },
-                    { id: 'membership', label: 'Membership', icon: Crown, show: true },
-                    { id: 'staff', label: 'Team', icon: Award, show: isAdmin },
-                    { id: 'clients', label: 'Clients', icon: Users, show: true },
-                    { id: 'reports', label: 'Reports', icon: BarChart3, show: isAdmin }
+                    { id: 'visits', label: dashboardViewRole === 'manager' || dashboardUser?.role === 'reception' ? 'Manager Dashboard' : 'Dashboard', icon: LayoutDashboard, show: hasModuleAccess('dashboard') || hasModuleAccess('visits') },
+                    { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
+                    { id: 'services', label: 'Services', icon: Scissors, show: hasModuleAccess('services') },
+                    { id: 'staff', label: 'Team', icon: Award, show: hasModuleAccess('team') },
+                    { id: 'users', label: 'User Access', icon: ShieldCheck, show: isAdmin },
+                    { id: 'membership', label: 'Membership', icon: Crown, show: hasModuleAccess('membership') },
+                    { id: 'reports', label: 'Reports', icon: BarChart3, show: hasModuleAccess('reports') },
+                    { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) }
                   ].filter(item => item.show).map(item => {
                     const Icon = item.icon;
                     const isActive = activeSection === item.id;
@@ -633,10 +694,13 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           <button
                             type="button"
                             onClick={() => {
-                              if (activeSection !== 'visits') {
-                                setActiveSection('visits');
+                              setActiveSection('visits');
+                              if (isAdmin && (availableRoleDashboards.manager || availableRoleDashboards.visitor)) {
+                                setShowDashboardRoleMenu(value => !value);
+                              } else {
+                                setShowAdminMenu(false);
+                                setShowDashboardRoleMenu(false);
                               }
-                              setShowDashboardRoleMenu(prev => !prev);
                             }}
                             style={{
                               width: '100%',
@@ -668,14 +732,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               <Icon size={16} color="#B88B4A" />
                               <span>{item.label}</span>
                             </span>
-                            <ChevronDown
-                              size={14}
-                              color="#B88B4A"
-                              style={{
-                                transform: showDashboardRoleMenu ? 'rotate(90deg)' : 'rotate(0deg)',
-                                transition: 'transform 0.2s ease'
-                              }}
-                            />
+                            {isAdmin && (availableRoleDashboards.manager || availableRoleDashboards.visitor) && (
+                              <ChevronDown size={14} style={{ transform: showDashboardRoleMenu ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }} />
+                            )}
                           </button>
 
                           {showDashboardRoleMenu && (
@@ -683,11 +742,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               position: 'absolute',
                               right: 'calc(100% + 12px)',
                               top: '-4px',
-                              width: '235px',
-                              background: '#FAF7F2',
+                              width: '220px',
+                              padding: '8px',
+                              background: '#FFFFFF',
                               border: '1px solid #E5D8C6',
                               borderRadius: '10px',
-                              padding: '8px',
                               boxShadow: 'var(--shadow-lg)',
                               display: 'flex',
                               flexDirection: 'column',
@@ -695,93 +754,46 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               zIndex: 120,
                               animation: 'fadeIn 0.15s ease-out'
                             }}>
-                              {/* Branch Admin option: shown if logged in as Master Admin, OR if Branch Admin currently switched to Manager */}
-                              {(isOriginalMasterAdmin || (isOriginalBranchAdmin && currentUser?.role !== 'admin')) && (
+                              {isAdmin && (
                                 <button
                                   type="button"
-                                  onClick={() => handleDashboardSwitchRole('admin')}
-                                  style={{
-                                    width: '100%',
-                                    textAlign: 'left',
-                                    padding: '8px 10px',
-                                    borderRadius: '6px',
-                                    fontSize: '12.5px',
-                                    background: currentUser?.role === 'admin' ? '#F3EDE4' : 'transparent',
-                                    border: 'none',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    cursor: 'pointer'
+                                  onClick={() => {
+                                    setDashboardViewRole(null);
+                                    setActiveSection('visits');
+                                    setShowDashboardRoleMenu(false);
+                                    setShowAdminMenu(false);
                                   }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'admin' ? '#F3EDE4' : 'transparent'; }}
+                                  style={roleDashboardButtonStyle}
                                 >
-                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
-                                    🏢 Branch Admin
-                                  </span>
-                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
-                                    Admin • Full Studio Operations & Reports
-                                  </span>
+                                  Branch Admin Dashboard
                                 </button>
                               )}
-
-                              {/* Manager option: shown if logged in as Master Admin or Branch Admin */}
-                              {(isOriginalMasterAdmin || isOriginalBranchAdmin) && (
+                              {availableRoleDashboards.manager && (
                                 <button
                                   type="button"
-                                  onClick={() => handleDashboardSwitchRole('reception')}
-                                  style={{
-                                    width: '100%',
-                                    textAlign: 'left',
-                                    padding: '8px 10px',
-                                    borderRadius: '6px',
-                                    fontSize: '12.5px',
-                                    background: currentUser?.role === 'reception' ? '#F3EDE4' : 'transparent',
-                                    border: 'none',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    cursor: 'pointer'
+                                  onClick={() => {
+                                    setDashboardViewRole('manager');
+                                    setActiveSection('visits');
+                                    setShowDashboardRoleMenu(false);
+                                    setShowAdminMenu(false);
                                   }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'reception' ? '#F3EDE4' : 'transparent'; }}
+                                  style={roleDashboardButtonStyle}
                                 >
-                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
-                                    🛎️ Manager
-                                  </span>
-                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
-                                    Staff • Dashboard, Billing & Visits
-                                  </span>
+                                  Manager Dashboard
                                 </button>
                               )}
-
-                              {/* Visitor option: shown for Master Admin, Branch Admin, and Manager/Reception */}
-                              {(isOriginalMasterAdmin || isOriginalBranchAdmin || isOriginalReception) && (
+                              {availableRoleDashboards.visitor && (
                                 <button
                                   type="button"
-                                  onClick={() => handleDashboardSwitchRole('visitor')}
-                                  style={{
-                                    width: '100%',
-                                    textAlign: 'left',
-                                    padding: '8px 10px',
-                                    borderRadius: '6px',
-                                    fontSize: '12.5px',
-                                    background: currentUser?.role === 'visitor' ? '#F3EDE4' : 'transparent',
-                                    border: 'none',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    cursor: 'pointer'
+                                  onClick={() => {
+                                    setDashboardViewRole('visitor');
+                                    setShowDashboardRoleMenu(false);
+                                    setShowAdminMenu(false);
+                                    onNavigateTab?.('new-visit');
                                   }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#EFE6D8'; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.background = currentUser?.role === 'visitor' ? '#F3EDE4' : 'transparent'; }}
+                                  style={roleDashboardButtonStyle}
                                 >
-                                  <span style={{ fontWeight: '700', color: '#1C1917' }}>
-                                    📋 Visitor
-                                  </span>
-                                  <span style={{ fontSize: '10.5px', color: '#78716C' }}>
-                                    Visitor • Client Check-in & Intake Flow
-                                  </span>
+                                  Visitor Dashboard
                                 </button>
                               )}
                             </div>
@@ -797,15 +809,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         onClick={() => {
                           setShowAdminMenu(false);
                           setShowDashboardRoleMenu(false);
-                          setActiveSection(prev => {
-                            const next = prev === item.id ? 'visits' : item.id;
-                            setTimeout(() => {
-                              if (sectionContentRef.current) {
-                                sectionContentRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                              }
-                            }, 50);
-                            return next;
-                          });
+                          if (item.id === 'branch_details') {
+                            setIsKycModalOpen(true);
+                            return;
+                          }
+                          if (item.id === 'visitor_intake') {
+                            onNavigateTab?.('new-visit');
+                            return;
+                          }
+                          setActiveSection(item.id === 'visits' ? 'visits' : item.id);
                         }}
                         style={{
                           width: '100%',
@@ -838,47 +850,36 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     );
                   })}
 
-                  {activeLocation && (
-                    <>
-                      <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAdminMenu(false);
-                          setIsKycModalOpen(true);
-                        }}
-                        title="View or update Statutory KYC Details for this location"
-                        style={{
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '9px 12px',
-                          borderRadius: 'var(--radius-sm)',
-                          fontSize: '13.5px',
-                          fontWeight: '700',
-                          color: '#9F7335',
-                          background: 'transparent',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                          border: 'none'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = '#F5ECE0';
-                          e.currentTarget.style.color = '#1C1917';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                          e.currentTarget.style.color = '#9F7335';
-                        }}
-                      >
-                        <ShieldCheck size={16} color="#B88B4A" />
-                        <span>KYC Details</span>
-                      </button>
-                    </>
-                  )}
-                </div>
+                  <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminMenu(false);
+                      window.dispatchEvent(new Event('request_app_logout'));
+                    }}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '13.5px',
+                      fontWeight: '600',
+                      color: '#B42318',
+                      background: 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      cursor: 'pointer',
+                      border: 'none'
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <LogOut size={16} />
+                    <span>Sign Out</span>
+                  </button>
+                </div>,
+                document.body
               )}
             </div>
           )}
@@ -886,13 +887,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       </div>
 
       {/* Today's Summary Grid (Section 3 Requirement) */}
+      {(hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 style={{ fontSize: '18px', color: 'var(--text-main)', margin: 0, paddingLeft: '22px' }}>TODAY'S SUMMARY</h2>
+            <h2 style={{ fontSize: '26px', color: 'var(--text-main)', margin: 0, paddingLeft: '22px' }}>TODAY'S SUMMARY</h2>
           </div>
           <button
             type="button"
+            className="dashboard-reference-button dashboard-refresh-button"
             onClick={handleManualRefresh}
             disabled={isRefreshing}
             title="Refresh dashboard metrics and latest visits"
@@ -903,8 +906,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: isRefreshing ? 'var(--primary-subtle)' : 'transparent',
-              border: 'none',
+              background: isRefreshing ? '#F8EEE4' : '#FFFFFF',
+              border: '1px solid #D99A64',
               cursor: isRefreshing ? 'wait' : 'pointer',
               padding: '6px 12px',
               borderRadius: '9999px',
@@ -914,7 +917,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               if (!isRefreshing) e.currentTarget.style.background = 'var(--primary-subtle)';
             }}
             onMouseLeave={(e) => {
-              if (!isRefreshing) e.currentTarget.style.background = 'transparent';
+              if (!isRefreshing) e.currentTarget.style.background = '#FFFFFF';
             }}
           >
             <RotateCw
@@ -929,12 +932,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           </button>
         </div>
 
-        <div style={{
+        <div className="dashboard-summary-grid" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
           gap: '16px',
-          alignItems: 'stretch'
+          alignItems: 'stretch',
+          marginBottom: '30px'
         }}>
+          {/* Client summary cards are shown only when Client Records is assigned. */}
+          {hasModuleAccess('clients') && <>
           {/* Total Clients */}
           <div className="card" style={{
             padding: '20px 22px 24px 22px',
@@ -979,9 +985,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             </div>
           </div>
 
-          {/* Regular Clients, Total Services & Revenue Today (Admin only) */}
-          {isAdmin && (
-            <>
+          {/* Regular Clients */}
               {/* Returning / Regular Clients */}
               <div className="card" style={{
                 padding: '20px 22px 24px 22px',
@@ -1004,7 +1008,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
               </div>
 
-              {/* Membership Credits / Earned Through Membership */}
+          </>}
+
+          {/* Membership Credits / Earned Through Membership */}
+          {hasModuleAccess('membership') && (
               <div className="card" style={{
                 padding: '20px 22px 24px 22px',
                 display: 'flex',
@@ -1025,8 +1032,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   {formatCurrency(summary.membership_revenue || 0)}
                 </div>
               </div>
+          )}
 
               {/* Total Revenue */}
+          {hasModuleAccess('visits') && <>
               <div className="card" style={{
                 padding: '20px 22px 24px 22px',
                 display: 'flex',
@@ -1047,8 +1056,6 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   {formatCurrency(summary.total_revenue)}
                 </div>
               </div>
-            </>
-          )}
 
           {/* Pending Balance */}
           <div className="card" style={{
@@ -1071,15 +1078,14 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               {formatCurrency(summary.pending_balance)}
             </div>
           </div>
+          </>}
         </div>
       </div>
-
-      {/* Anchor Ref for smooth scrolling into Section 3 */}
-      <div ref={sectionContentRef} style={{ scrollMarginTop: '80px' }} />
+      )}
 
       {/* Dynamic Section 3: Today's Visits Table or Selected Sub-Module */}
-      {activeSection === 'visits' && (
-      <div className="card" style={{ overflow: 'hidden' }}>
+      {activeSection === 'visits' && hasModuleAccess('visits') && (
+      <div className="card dashboard-visits-panel" style={{ overflow: 'hidden' }}>
         <div style={{
           padding: '20px 24px',
           borderBottom: '1px solid var(--border-color)',
@@ -1089,7 +1095,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         }}>
           <div>
             <h2 style={{ fontSize: '18px', color: 'var(--text-main)' }}>
-              {isAdmin ? "TODAY'S VISITS" : "TODAY'S INTAKE QUEUE • RECEPTION DESK"}
+              {isAdmin ? "TODAY'S VISITS" : "TODAY'S INTAKE QUEUE • MANAGER"}
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {isAdmin
@@ -1521,7 +1527,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             }}
                             onMouseLeave={(e) => {
                               e.currentTarget.style.background = '#FAF6EE';
-                              e.currentTarget.style.borderColor = '#DAC493';
+              e.currentTarget.style.borderColor = '#D99A64';
                             }}
                           >
                             <Clock size={13} color="#B88B4A" />
@@ -1591,193 +1597,48 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       )}
 
       {/* Clients Section (Rendered inside Dashboard Section 3) */}
-      {activeSection === 'clients' && (
+      {activeSection === 'clients' && hasModuleAccess('clients') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px' }}>
-            <button
-              type="button"
-              onClick={() => setActiveSection('visits')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-              }}
-            >
-              ← Back to Today's Visits
-            </button>
-          </div>
           <ClientsList
             onOpenClient={(id) => onOpenClient(id, 'dashboard')}
-            onBackToDashboard={() => setActiveSection('visits')}
           />
         </div>
       )}
 
       {/* Services Section (Rendered inside Dashboard Section 3) */}
-      {activeSection === 'services' && (
+      {activeSection === 'services' && hasModuleAccess('services') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
-            <button
-              type="button"
-              onClick={() => setActiveSection('visits')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-              }}
-            >
-              ← Back to Today's Visits
-            </button>
-          </div>
           <ServiceManagement />
         </div>
       )}
 
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
-      {activeSection === 'staff' && (
+      {activeSection === 'staff' && hasModuleAccess('team') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
-            <button
-              type="button"
-              onClick={() => setActiveSection('visits')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-              }}
-            >
-              ← Back to Today's Visits
-            </button>
-          </div>
           <StaffManagement />
         </div>
       )}
 
       {/* Membership Section (Rendered inside Dashboard Section 3) */}
-      {activeSection === 'membership' && (
+      {activeSection === 'users' && isAdmin && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
-            <button
-              type="button"
-              onClick={() => setActiveSection('visits')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-              }}
-            >
-              ← Back to Today's Visits
-            </button>
-          </div>
+          <BranchUserManagement activeLocation={activeLocation} />
+        </div>
+      )}
+
+      {activeSection === 'membership' && hasModuleAccess('membership') && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
           <MembershipManagement
             onOpenClient={onOpenClient}
             activeLocation={activeLocation}
-            currentUser={currentUser}
+            currentUser={dashboardUser}
           />
         </div>
       )}
 
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
-      {activeSection === 'reports' && (
+      {activeSection === 'reports' && hasModuleAccess('reports') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', paddingLeft: '20px', marginBottom: '6px' }}>
-            <button
-              type="button"
-              onClick={() => setActiveSection('visits')}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 16px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-              }}
-            >
-              ← Back to Today's Visits
-            </button>
-          </div>
           <ReportsView onOpenClient={onOpenClient} />
         </div>
       )}
@@ -2191,7 +2052,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
               {/* Dynamic Cards Grid (synced in real-time with backend plans) */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '20px' }}>
-                {(dynamicMembershipPlans && dynamicMembershipPlans.length > 0 ? dynamicMembershipPlans : MEMBERSHIP_PLANS).map(plan => {
+                {dynamicMembershipPlans.map(plan => {
                   const isSelected = pendingUpgradePlan?.id === plan.id;
                   const planBenefits = Array.isArray(plan.benefits) ? plan.benefits : [];
                   return (

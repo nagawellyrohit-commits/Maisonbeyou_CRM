@@ -6,8 +6,9 @@ import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import { PNG } from 'pngjs';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'url';
-import db, { initDatabase, recordAuditLog, ensureLocationAccounts, generateLocationCode } from './db.js';
+import db, { initDatabase, recordAuditLog, generateLocationCode } from './db.js';
 import {
   calculateNextDueDate,
   formatSessionMessage,
@@ -150,6 +151,71 @@ function validateCategoryImageUrlOnDisk(imageUrl) {
 // Initialize database
 initDatabase();
 
+function getUserPermissions(userId) {
+  const profile = db.prepare(`
+    SELECT p.location_id, p.permissions, u.role
+    FROM USER_ACCESS_PROFILES p
+    JOIN USERS u ON u.user_id = p.user_id
+    WHERE p.user_id = ?
+  `).get(userId);
+  if (!profile) return { permission_profile_exists: false, permissions: null };
+  let permissions = [];
+  try {
+    const parsed = JSON.parse(profile.permissions || '[]');
+    if (Array.isArray(parsed)) permissions = parsed.filter(value => typeof value === 'string');
+  } catch (e) {}
+  if (profile.role === 'reception') permissions = permissions.filter(permission => permission !== 'visitor_intake');
+  return { permission_profile_exists: true, permissions, permission_location_id: profile.location_id };
+}
+
+function permissionModulesForRequest(req) {
+  const route = req.path || '';
+  const method = String(req.method || 'GET').toUpperCase();
+  if (/^\/api\/admin\/branch-users(?:\/|$)/.test(route)) return ['user_management'];
+  if (/^\/api\/locations(?:\/|$)/.test(route) && !route.startsWith('/api/locations-list')) return ['user_management'];
+  if (/^\/api\/auth\/switch-role$/.test(route)) return ['user_management'];
+  if (route === '/api/kyc/upload') return ['user_management'];
+  if (route === '/api/admin/upload') return ['services', 'team', 'clients', 'visitor_intake', 'membership'];
+  if (/^\/api\/reports(?:\/|$)/.test(route)) return ['reports'];
+  if (/^\/api\/dashboard(?:\/|$)/.test(route)) return ['dashboard', 'visits'];
+  if (/^\/api\/admin\/(?:categories|services)(?:\/|$)/.test(route)) return ['services'];
+  if (route === '/api/categories') return method === 'GET' ? ['services', 'visitor_intake', 'visits'] : ['services'];
+  if (/^\/api\/memberships(?:\/|$)/.test(route)) return ['membership'];
+  if (/^\/api\/clients\/[^/]+\/membership(?:$|-)/.test(route)) return ['membership', 'clients'];
+  if (/^\/api\/staff$/.test(route) || /^\/api\/admin\/staff(?:\/|$)/.test(route)) {
+    return method === 'GET' ? ['team', 'visits', 'visitor_intake'] : ['team'];
+  }
+  if (/^\/api\/clients(?:\/|$)/.test(route)) {
+    if (/^\/api\/clients\/(?:search|check-phone)$/.test(route)) return ['clients', 'visitor_intake'];
+    if (route === '/api/clients' && method === 'POST') return ['clients', 'visitor_intake'];
+    return ['clients'];
+  }
+  if (/^\/api\/visits(?:\/|$)/.test(route)) {
+    if (method === 'GET') return ['visits', 'dashboard', 'clients'];
+    if (method === 'POST' && route === '/api/visits') return ['visitor_intake'];
+    return ['visits', 'visitor_intake'];
+  }
+  if (/^\/api\/(?:treatment-courses|treatment-sessions)(?:\/|$)/.test(route)) return ['visits', 'clients'];
+  return [];
+}
+
+function userCanAccessAnyModule(user, modules) {
+  if (!modules.length || user.role === 'master_admin') return true;
+  if (user.role === 'visitor') return modules.includes('visitor_intake');
+  if (user.role === 'reception' && modules.includes('visitor_intake')) return true;
+  // Branch Admins always manage users for their assigned branch, even when
+  // they also have a saved dashboard permission profile.
+  if (user.role === 'admin' && modules.includes('user_management')) return true;
+  if (user.role === 'admin' && !user.permission_profile_exists) return true;
+  if (user.permission_profile_exists) return modules.some(module => user.permissions.includes(module));
+  const defaults = {
+    reception: ['dashboard', 'visits', 'clients'],
+    visitor: ['visitor_intake'],
+    staff: ['dashboard', 'visits', 'visitor_intake']
+  };
+  return modules.some(module => (defaults[user.role] || []).includes(module));
+}
+
 // Auth Middleware
 export function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -165,14 +231,16 @@ export function authenticateToken(req, res, next) {
     }
 
     // Verify user exists and is active in the database (revocation check)
-    const dbUser = db.prepare('SELECT user_id, name, email, phone, role, active, location_id FROM USERS WHERE user_id = ?').get(decodedUser.user_id);
-    if (!dbUser || dbUser.active !== 1) {
+    const dbUser = db.prepare('SELECT user_id, name, email, phone, designation, role, active, location_id, deleted_at FROM USERS WHERE user_id = ?').get(decodedUser.user_id);
+    if (!dbUser || dbUser.active !== 1 || dbUser.deleted_at) {
       return res.status(401).json({ error: 'Account is deactivated, deleted, or session revoked.' });
     }
 
+    const accessProfile = getUserPermissions(dbUser.user_id);
     req.user = {
       ...dbUser,
-      original_role: decodedUser.original_role || dbUser.role
+      original_role: decodedUser.original_role || dbUser.role,
+      ...accessProfile
     };
 
     // Check for header / query / body tampering for non-master users
@@ -202,6 +270,15 @@ export function authenticateToken(req, res, next) {
       req.locationId = dbUser.location_id;
     }
 
+    if (accessProfile.permission_profile_exists && Number(accessProfile.permission_location_id) !== Number(dbUser.location_id)) {
+      return res.status(403).json({ error: 'Access denied: the saved permissions do not belong to this branch.' });
+    }
+
+    const requiredModules = permissionModulesForRequest(req);
+    if (!userCanAccessAnyModule(req.user, requiredModules)) {
+      return res.status(403).json({ error: 'Access denied: this account has not been granted access to this module.' });
+    }
+
     next();
   });
 }
@@ -212,7 +289,15 @@ export function authorizeRoles(...allowedRoles) {
     if (req.user && req.user.role === 'master_admin') {
       return next();
     }
+    // A Branch Admin's user-management capability is role-based and remains
+    // available even if the account has a restricted dashboard profile.
+    if (req.user?.role === 'admin' && allowedRoles.includes('admin')) {
+      return next();
+    }
     if (!req.user || !allowedRoles.includes(req.user.role)) {
+      if (req.user?.permission_profile_exists && userCanAccessAnyModule(req.user, permissionModulesForRequest(req))) {
+        return next();
+      }
       return res.status(403).json({
         error: `Access denied. Role '${req.user?.role}' does not have sufficient permissions.`
       });
@@ -551,6 +636,18 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
   return user;
 }
 
+function resolveSelectedLoginAccount(identifier, role, locationId, accountUserId) {
+  if (!accountUserId) return findUserByIdentifier(identifier, role, locationId);
+  const user = db.prepare('SELECT * FROM USERS WHERE user_id = ? AND active = 1').get(Number(accountUserId));
+  if (!user || (locationId && Number(user.location_id) !== Number(locationId)) || (role && user.role !== role)) return null;
+  const rawIdentifier = String(identifier || '').trim();
+  const digits = rawIdentifier.replace(/\D/g, '');
+  const storedDigits = String(user.phone || '').replace(/\D/g, '');
+  const phoneMatch = digits.length >= 7 && storedDigits && (digits === storedDigits || digits.endsWith(storedDigits) || storedDigits.endsWith(digits));
+  const emailMatch = rawIdentifier.includes('@') && rawIdentifier.toLowerCase() === String(user.email || '').toLowerCase();
+  return phoneMatch || emailMatch ? user : null;
+}
+
 // Detect account by phone number or identifier (Auto-detection API)
 app.post('/api/auth/detect-account', (req, res) => {
   try {
@@ -560,14 +657,15 @@ app.post('/api/auth/detect-account', (req, res) => {
     }
 
     const digits = rawInput.replace(/\D/g, '');
-    const isPhone = digits.length >= 7;
+    const normalizedPhone = digits.length >= 10 ? digits.slice(-10) : '';
+    const isPhone = Boolean(normalizedPhone);
 
     if (isPhone) {
       // 1. Check Master Admin by phone
       const masterUser = db.prepare("SELECT user_id, name, email, phone, role, location_id FROM USERS WHERE role = 'master_admin' AND active = 1 AND phone IS NOT NULL").get();
       if (masterUser && masterUser.phone) {
-        const mDigits = masterUser.phone.replace(/\D/g, '');
-        if (mDigits === digits || mDigits.endsWith(digits) || digits.endsWith(mDigits)) {
+        const mDigits = masterUser.phone.replace(/\D/g, '').slice(-10);
+        if (mDigits === normalizedPhone) {
           return res.json({
             found: true,
             type: 'single',
@@ -589,7 +687,7 @@ app.post('/api/auth/detect-account', (req, res) => {
 
       // 2. Query all active users with phone numbers
       const usersWithPhone = db.prepare(`
-        SELECT u.user_id, u.name, u.email, u.phone, u.role, u.location_id,
+        SELECT u.user_id, u.name, u.email, u.phone, u.designation, u.role, u.location_id,
                l.name as location_name, l.code as location_code, l.city as location_city
         FROM USERS u
         LEFT JOIN LOCATIONS l ON u.location_id = l.location_id
@@ -599,13 +697,13 @@ app.post('/api/auth/detect-account', (req, res) => {
       const matchedUsers = usersWithPhone.filter(u => {
         if (!u.phone) return false;
         const uDigits = u.phone.replace(/\D/g, '');
-        return uDigits === digits || uDigits.endsWith(digits) || digits.endsWith(uDigits);
+        return uDigits.length >= 10 && uDigits.slice(-10) === normalizedPhone;
       });
 
       if (matchedUsers.length === 1) {
         const u = matchedUsers[0];
-        const roleLabel = u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : u.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor Desk';
-        const roleSubtitle = u.role === 'admin' ? 'Studio Management & Operational Control' : u.role === 'reception' ? 'Front-Desk Billing & Appointments' : 'Client Self-Intake Tablet';
+        const roleLabel = u.role === 'admin' ? 'Branch Admin' : u.role === 'reception' ? 'Manager' : u.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor';
+        const roleSubtitle = u.role === 'admin' ? 'Branch Operations & User Access' : u.role === 'reception' ? 'Branch Manager' : 'Visitor Registration & Check-in';
         return res.json({
           found: true,
           type: 'single',
@@ -615,6 +713,7 @@ app.post('/api/auth/detect-account', (req, res) => {
             email: u.email,
             phone: u.phone,
             role: u.role,
+            designation: u.designation,
             location_id: u.location_id
           },
           roleLabel,
@@ -645,45 +744,14 @@ app.post('/api/auth/detect-account', (req, res) => {
             user_id: u.user_id,
             role: u.role,
             name: u.name,
-            roleLabel: u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : 'Visitor Desk',
+            location_id: u.location_id,
+            branch_name: u.location_name,
+            roleLabel: u.role === 'admin' ? 'Branch Admin' : u.role === 'reception' ? 'Manager' : 'Visitor',
             roleSubtitle: u.role === 'admin' ? 'Management & Reports' : u.role === 'reception' ? 'Billing & Intake' : 'Client Tablet'
           }))
         });
       }
 
-      // Check LOCATIONS table for common studio phone
-      const locMatch = db.prepare(`
-        SELECT location_id, name, code, city, phone, primary_login_phone 
-        FROM LOCATIONS 
-        WHERE phone IS NOT NULL OR primary_login_phone IS NOT NULL
-      `).all().find(l => {
-        const pDigits = (l.primary_login_phone || l.phone || '').replace(/\D/g, '');
-        return pDigits && (pDigits === digits || pDigits.endsWith(digits) || digits.endsWith(pDigits));
-      });
-
-      if (locMatch) {
-        const locUsers = db.prepare('SELECT user_id, name, email, phone, role, location_id FROM USERS WHERE location_id = ? AND active = 1').all(locMatch.location_id);
-        if (locUsers.length > 0) {
-          return res.json({
-            found: true,
-            type: 'multiple',
-            location: {
-              location_id: locMatch.location_id,
-              name: locMatch.name,
-              code: locMatch.code
-            },
-            branchName: locMatch.name,
-            branchCode: locMatch.code,
-            accounts: locUsers.map(u => ({
-              user_id: u.user_id,
-              role: u.role,
-              name: u.name,
-              roleLabel: u.role === 'admin' ? 'Branch Main Admin' : u.role === 'reception' ? 'Reception Desk' : 'Visitor Desk',
-              roleSubtitle: u.role === 'admin' ? 'Management & Reports' : u.role === 'reception' ? 'Billing & Intake' : 'Client Tablet'
-            }))
-          });
-        }
-      }
     } else {
       // Non-phone input (e.g. master@maisonbeyou.com or desk id)
       const user = findUserByIdentifier(rawInput);
@@ -692,7 +760,7 @@ app.post('/api/auth/detect-account', (req, res) => {
         if (user.location_id) {
           loc = db.prepare('SELECT location_id, name, code FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
         }
-        const roleLabel = user.role === 'admin' ? 'Branch Main Admin' : user.role === 'reception' ? 'Reception Desk' : user.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor Desk';
+        const roleLabel = user.role === 'admin' ? 'Branch Admin' : user.role === 'reception' ? 'Manager' : user.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor';
         return res.json({
           found: true,
           type: 'single',
@@ -722,12 +790,12 @@ app.post('/api/auth/detect-account', (req, res) => {
 // Send OTP for direct Login
 app.post('/api/auth/send-login-otp', (req, res) => {
   try {
-    const { identifier, role, location_id } = req.body;
+    const { identifier, role, location_id, account_user_id } = req.body;
     if ((!identifier || !identifier.trim()) && !location_id) {
       return res.status(400).json({ error: 'Please enter your registered mobile number' });
     }
 
-    const user = findUserByIdentifier(identifier, role, location_id);
+    const user = resolveSelectedLoginAccount(identifier, role, location_id, account_user_id);
     if (!user) {
       return res.status(404).json({ error: 'No active account found with this mobile number. Please check or contact studio support.' });
     }
@@ -770,12 +838,12 @@ app.post('/api/auth/send-login-otp', (req, res) => {
 // Verify OTP & Sign In
 app.post('/api/auth/login-otp', (req, res) => {
   try {
-    const { identifier, otp, role, location_id } = req.body;
+    const { identifier, otp, role, location_id, account_user_id } = req.body;
     if (!otp) {
       return res.status(400).json({ error: 'OTP code is required' });
     }
 
-    const user = findUserByIdentifier(identifier, role, location_id);
+    const user = resolveSelectedLoginAccount(identifier, role, location_id, account_user_id);
     if (!user) {
       return res.status(404).json({ error: 'Studio account not found' });
     }
@@ -822,9 +890,11 @@ app.post('/api/auth/login-otp', (req, res) => {
         name: user.name,
         email: user.email,
         phone: user.phone,
+        designation: user.designation,
         role: user.role,
         original_role: user.role,
-        location_id: user.location_id
+        location_id: user.location_id,
+        ...getUserPermissions(user.user_id)
       },
       location
     });
@@ -900,6 +970,12 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
 
     const effectiveOriginalRole = req.user.original_role || req.user.role;
     const isOriginalMaster = effectiveOriginalRole === 'master_admin';
+    if (!isOriginalMaster) {
+      return res.status(403).json({ error: 'Only the Master Admin can switch between branch desk accounts. Branch users must sign in with their own account and assigned permissions.' });
+    }
+    if (role !== 'master_admin') {
+      return res.status(403).json({ error: 'Select a branch to open its Admin Dashboard. Manager and Visitor access must use their own accounts and saved permissions.' });
+    }
     const isOriginalBranchAdmin = effectiveOriginalRole === 'admin';
     const isOriginalReception = effectiveOriginalRole === 'reception';
     const isOriginalVisitor = effectiveOriginalRole === 'visitor';
@@ -932,14 +1008,6 @@ app.post('/api/auth/switch-role', authenticateToken, (req, res) => {
       targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
     } else {
       return res.status(400).json({ error: `Invalid role: ${role}` });
-    }
-
-    if (!targetUser && role !== 'master_admin') {
-      const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
-      if (loc) {
-        ensureLocationAccounts(loc);
-        targetUser = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1').get(targetLocId, role);
-      }
     }
 
     if (!targetUser) {
@@ -1089,11 +1157,12 @@ app.post('/api/auth/reset-password', (req, res) => {
 });
 
 app.get('/api/auth/me', authenticateToken, (req, res) => {
-  const user = db.prepare('SELECT user_id, name, email, phone, role, location_id FROM USERS WHERE user_id = ?').get(req.user.user_id);
+  const user = db.prepare('SELECT user_id, name, email, phone, designation, role, location_id FROM USERS WHERE user_id = ?').get(req.user.user_id);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
   user.original_role = req.user.original_role || user.role;
+  Object.assign(user, getUserPermissions(user.user_id));
   let location = null;
   if (user.location_id) {
     location = db.prepare('SELECT location_id, name, code, type, city, state, status FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
@@ -1181,6 +1250,14 @@ app.get('/api/locations', authenticateToken, (req, res) => {
 
       let kyc = null;
       let stakeholders = [];
+      const branchManager = db.prepare(`
+        SELECT name
+        FROM USERS
+        WHERE location_id = ? AND role = 'reception' AND active = 1
+          AND (deleted_at IS NULL OR deleted_at = '')
+        ORDER BY user_id ASC
+        LIMIT 1
+      `).get(loc.location_id)?.name || '';
       try {
         const kycRow = db.prepare('SELECT * FROM LOCATION_KYC WHERE location_id = ?').get(loc.location_id);
         if (kycRow) {
@@ -1259,6 +1336,7 @@ app.get('/api/locations', authenticateToken, (req, res) => {
 
       return {
         ...loc,
+        manager_name: branchManager,
         client_count: clientCount,
         staff_count: staffCount,
         visits_today: branchVisits.length,
@@ -1338,7 +1416,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     const {
       name, type, code, status, manager_name, daily_income, return_tier,
       firm_type, firm_name, address_line1, address_line2, pincode, city, state,
-      mobile_numbers, email_ids,
+      mobile_numbers, email_ids, office_phone,
       firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
       cin_number, incorporation_doc, aoa_moa_doc, aoa_doc, moa_doc,
       bank_firm_name, bank_name, bank_account_number, bank_ifsc_code,
@@ -1353,13 +1431,37 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     }
 
     const cleanType = type.trim().toLowerCase();
+    const cleanFirmType = (firm_type || '').trim();
+    const stakeholderAdmins = (Array.isArray(stakeholders) ? stakeholders : []).filter(s => s && (s.name || '').trim());
+    if (cleanFirmType) {
+      const minimumStakeholders = cleanFirmType === 'Proprietor' ? 1 : cleanFirmType === 'Partnership' ? 2 : 3;
+      if (stakeholderAdmins.length < minimumStakeholders) {
+        return res.status(400).json({ error: `${cleanFirmType} registration requires at least ${minimumStakeholders} proprietor, partner, or director account(s).` });
+      }
+      const normalizedEmails = stakeholderAdmins.map(s => (s.primary_login_email || s.email || '').trim().toLowerCase());
+      const normalizedPhones = stakeholderAdmins.map(s => String(s.primary_login_phone || s.mobile || '').replace(/\D/g, '').slice(-10));
+      if (normalizedEmails.some(email => !/^\S+@\S+\.\S+$/.test(email))) {
+        return res.status(400).json({ error: 'Each proprietor, partner, or director needs a valid registered email for their branch admin account.' });
+      }
+      if (normalizedPhones.some(phone => phone.length !== 10)) {
+        return res.status(400).json({ error: 'Each proprietor, partner, or director needs a valid registered mobile number for OTP login.' });
+      }
+      if (new Set(normalizedEmails).size !== normalizedEmails.length || new Set(normalizedPhones).size !== normalizedPhones.length) {
+        return res.status(400).json({ error: 'Each proprietor, partner, or director must have a unique login mobile number and email address.' });
+      }
+      const emailTaken = normalizedEmails.find(email => db.prepare('SELECT 1 FROM USERS WHERE LOWER(email) = ?').get(email));
+      if (emailTaken) {
+        return res.status(409).json({ error: `The email ${emailTaken} already belongs to an account. Each branch admin account needs its own registered email.` });
+      }
+    }
     let generatedCode = code ? code.trim().toUpperCase() : null;
     if (!generatedCode || !/^MB-[BF]-[A-Z]{3}-\d{3}$/.test(generatedCode)) {
       generatedCode = generateLocationCode(db, { type: cleanType, city });
     }
 
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || '').trim();
-    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || '')).trim();
+    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || '').trim();
+    const officePhone = String(office_phone || '').trim();
     const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || '')).trim();
 
     // Backend validation: Ensure single primary preference matches entered lists
@@ -1383,11 +1485,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const derivedManager = (
-      manager_name ||
-      (Array.isArray(stakeholders) && stakeholders[0]?.name) ||
-      'Ayesha Khan'
-    ).trim();
+    const assignedManager = String(manager_name || '').trim();
 
     const result = insertLocStmt.run(
       name.trim(),
@@ -1397,10 +1495,10 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       (city || '').trim(),
       (state || '').trim(),
       (pincode || '').trim(),
-      primaryPhone,
+      officePhone,
       primaryEmail,
       status || 'Active',
-      derivedManager,
+      assignedManager || null,
       (firm_type || '').trim() || null,
       (firm_name || '').trim() || null,
       primaryPhone,
@@ -1504,15 +1602,20 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     const savedKyc = db.prepare('SELECT * FROM LOCATION_KYC WHERE location_id = ?').get(newLocId);
     const savedStakeholders = parseStakeholders(db.prepare('SELECT * FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC').all(newLocId));
 
-    // Automatically provision independent accounts for the 3 roles for this new branch or franchise
-    ensureLocationAccounts(savedLocation);
-
-    // Synchronize location admin user account with primary login preference
-    try {
-      if (primaryPhone) {
-        db.prepare('UPDATE USERS SET phone = ? WHERE location_id = ? AND role = "admin"').run(primaryPhone, newLocId);
-      }
-    } catch (e) {}
+    // Automatically create a branch-admin login for every registered owner/director.
+    const provisionedDirectors = [];
+    const stakeholderAdminInsert = db.prepare(`
+      INSERT INTO USERS (name, email, phone, designation, password_hash, role, active, location_id)
+      VALUES (?, ?, ?, ?, ?, 'admin', 1, ?)
+    `);
+    for (const stakeholder of stakeholderAdmins) {
+      const accountName = stakeholder.name.trim();
+      const accountEmail = (stakeholder.primary_login_email || stakeholder.email).trim().toLowerCase();
+      const accountPhone = (stakeholder.primary_login_phone || stakeholder.mobile).trim();
+      const designation = (stakeholder.role_type || (cleanFirmType === 'Proprietor' ? 'Proprietor' : cleanFirmType === 'Partnership' ? 'Partner' : 'Director')).trim();
+      const info = stakeholderAdminInsert.run(accountName, accountEmail, accountPhone, designation, bcrypt.hashSync(randomBytes(32).toString('hex'), 10), newLocId);
+      provisionedDirectors.push({ user_id: info.lastInsertRowid, name: accountName, email: accountEmail, phone: accountPhone, role_type: designation, role: 'admin', location_id: newLocId });
+    }
 
     // Record audit log
     recordAuditLog({
@@ -1536,7 +1639,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
           email_ids: savedKyc.email_ids ? JSON.parse(savedKyc.email_ids) : []
         } : null,
         stakeholders: savedStakeholders || []
-      }
+      },
+      admin_users: provisionedDirectors
     });
   } catch (error) {
     console.error('Create location error:', error);
@@ -1556,7 +1660,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
     const {
       name, type, status, manager_name, daily_income, return_tier,
       firm_type, firm_name, address_line1, address_line2, pincode, city, state,
-      mobile_numbers, email_ids,
+      mobile_numbers, email_ids, office_phone,
       firm_pan, firm_pan_doc, gst_number, gst_doc, gumastha_number, gumastha_doc,
       cin_number, incorporation_doc, aoa_moa_doc, aoa_doc, moa_doc,
       bank_firm_name, bank_name, bank_account_number, bank_ifsc_code,
@@ -1565,7 +1669,8 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
 
     const cleanType = (type || existing.type).trim().toLowerCase();
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || existing.address || '').trim();
-    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || (req.body.phone || existing.phone || '')).trim();
+    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || existing.primary_login_phone || '').trim();
+    const officePhone = office_phone !== undefined ? String(office_phone || '').trim() : String(existing.phone || '').trim();
     const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || existing.email || '')).trim();
 
     // Backend validation: Ensure single primary preference matches entered lists
@@ -1620,11 +1725,9 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       WHERE location_id = ?
     `);
 
-    const updatedManager = (
-      manager_name !== undefined && String(manager_name).trim()
-        ? manager_name
-        : existing.manager_name || (Array.isArray(stakeholders) && stakeholders[0]?.name) || 'Ayesha Khan'
-    ).trim();
+    const updatedManager = manager_name !== undefined
+      ? String(manager_name || '').trim()
+      : (existing.manager_name || '').trim();
 
     updateLocStmt.run(
       updatedName,
@@ -1634,7 +1737,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       updatedCity,
       (state !== undefined ? state : existing.state || '').trim(),
       (pincode !== undefined ? pincode : existing.pincode || '').trim(),
-      primaryPhone,
+      officePhone,
       primaryEmail,
       primaryPhone,
       primaryEmail,
@@ -1959,30 +2062,69 @@ app.post('/api/locations/:id/admin-users', authenticateToken, authorizeRoles('ma
   }
 });
 
-// ==================== BRANCH USER MANAGEMENT (Master Admin) ====================
-// List all users for a specific branch or all branches
+const DASHBOARD_PERMISSION_KEYS = new Set(['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports']);
+
+function serializeBranchUser(user) {
+  const access = getUserPermissions(user.user_id);
+  const permissions = user.role === 'visitor' ? ['visitor_intake'] : (access.permissions || []);
+  return { ...user, permissions, permission_profile_exists: access.permission_profile_exists };
+}
+
+function isManagedBranchUser(user, locationId) {
+  return user && Number(user.location_id) === Number(locationId) &&
+    !user.deleted_at &&
+    ['reception', 'visitor'].includes(user.role) &&
+    Boolean(db.prepare('SELECT 1 FROM USER_ACCESS_PROFILES WHERE user_id = ? AND location_id = ?').get(user.user_id, locationId));
+}
+
+// ==================== BRANCH USER MANAGEMENT ====================
+// Master Admin can list all branches; Branch Admin is restricted to their own Manager/Visitor accounts.
+function isRegisteredTeamMember(phone, locationId) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length < 10) return false;
+  const teamPhones = db.prepare(`
+    SELECT phone FROM STAFF
+    WHERE active = 1 AND location_id = ? AND phone IS NOT NULL
+  `).all(locationId);
+
+  return teamPhones.some(({ phone: staffPhone }) => {
+    const staffDigits = String(staffPhone || '').replace(/\D/g, '');
+    if (staffDigits === digits) return true;
+    // Accept a local 10-digit number when the Team record includes its country code.
+    return digits.length === 10 && staffDigits.length > 10 && staffDigits.endsWith(digits);
+  });
+}
+
+const managerTeamMembershipError = 'This person is not registered as a team member at this branch. Add them under Team first, then create their Manager account.';
+
 app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
   try {
     let targetLocId = req.locationId;
     if (req.user.role === 'master_admin') {
       targetLocId = req.query.location_id ? Number(req.query.location_id) : null;
+    } else if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only a Branch Admin or Master Admin can manage branch users.' });
     }
 
     let query = `
-      SELECT u.user_id, u.name, u.email, u.phone, u.role, u.active, u.location_id, u.created_at, u.updated_at,
+      SELECT u.user_id, u.name, u.email, u.phone, u.designation, u.role, u.active, u.location_id, u.created_at, u.updated_at,
              l.name as location_name, l.code as location_code, l.type as location_type
       FROM USERS u
       LEFT JOIN LOCATIONS l ON u.location_id = l.location_id
+      WHERE u.deleted_at IS NULL
     `;
     let params = [];
 
     if (targetLocId) {
-      query += ' WHERE u.location_id = ?';
+      query += ' AND u.location_id = ?';
       params.push(targetLocId);
+    }
+    if (req.user.role !== 'master_admin') {
+      query += ` AND u.role IN ('reception', 'visitor') AND EXISTS (SELECT 1 FROM USER_ACCESS_PROFILES p WHERE p.user_id = u.user_id AND p.location_id = u.location_id)`;
     }
     query += ' ORDER BY u.location_id ASC, u.role ASC, u.user_id ASC';
 
-    const users = db.prepare(query).all(...params);
+    const users = db.prepare(query).all(...params).map(serializeBranchUser);
     res.json({ users });
   } catch (error) {
     console.error('Fetch branch users error:', error);
@@ -1990,50 +2132,62 @@ app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
   }
 });
 
-// Create a branch user account for any of the 3 roles (Master Admin only)
-app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+// Branch Admin can create Manager/Visitor accounts only in their own branch.
+app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    const { name, email, phone, password, role, location_id } = req.body;
-    if (!name || !email || !password || !role || !location_id) {
-      return res.status(400).json({ error: 'Name, email, password, role, and location_id are required' });
+    const { name, email, phone, role, location_id, designation } = req.body;
+    const targetLocId = req.user.role === 'master_admin' ? Number(location_id) : Number(req.locationId);
+    const requestedPermissions = role === 'visitor' ? ['visitor_intake'] : req.body.permissions;
+    if (!name || !email || !phone || !role || !targetLocId || !Array.isArray(requestedPermissions)) {
+      return res.status(400).json({ error: 'Name, email, mobile, role, and a permissions list are required.' });
     }
 
-    if (!['admin', 'reception', 'visitor'].includes(role)) {
-      return res.status(400).json({ error: 'Role must be admin, reception, or visitor' });
+    if (!['reception', 'visitor'].includes(role)) {
+      return res.status(400).json({ error: 'Branch Admins can create Manager or Visitor accounts only.' });
     }
 
-    const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(Number(location_id));
+    const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
     if (!loc) {
       return res.status(400).json({ error: 'Invalid location_id: Location does not exist' });
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const existing = db.prepare('SELECT user_id FROM USERS WHERE email = ?').get(cleanEmail);
+    const cleanPhone = phone.trim();
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (cleanPhone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a valid mobile number for OTP sign-in.' });
+    if (role === 'reception' && !isRegisteredTeamMember(cleanPhone, targetLocId)) {
+      return res.status(400).json({ error: managerTeamMembershipError });
+    }
+    if (new Set(requestedPermissions).size !== requestedPermissions.length || requestedPermissions.some(key => !DASHBOARD_PERMISSION_KEYS.has(key)) || (role === 'reception' && requestedPermissions.includes('visitor_intake'))) {
+      return res.status(400).json({ error: 'The selected dashboard permissions are invalid.' });
+    }
+    const existing = db.prepare('SELECT user_id FROM USERS WHERE LOWER(email) = ?').get(cleanEmail);
     if (existing) {
-      return res.status(400).json({ error: `An account with email ${cleanEmail} already exists` });
+      return res.status(400).json({ error: `An account with email ${cleanEmail} already exists.` });
     }
 
-    const salt = bcrypt.genSaltSync(10);
-    const hash = bcrypt.hashSync(password, salt);
+    const hash = bcrypt.hashSync(randomBytes(32).toString('hex'), 10);
 
     const info = db.prepare(`
-      INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
-      VALUES (?, ?, ?, ?, ?, 1, ?)
-    `).run(name.trim(), cleanEmail, phone ? phone.trim() : null, hash, role, Number(location_id));
+      INSERT INTO USERS (name, email, phone, designation, password_hash, role, active, location_id)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(name.trim(), cleanEmail, cleanPhone, (designation || (role === 'reception' ? 'Manager' : 'Visitor')).trim(), hash, role, targetLocId);
 
     const newUserId = info.lastInsertRowid;
+    db.prepare('INSERT INTO USER_ACCESS_PROFILES (user_id, location_id, permissions) VALUES (?, ?, ?)')
+      .run(newUserId, targetLocId, JSON.stringify(requestedPermissions));
 
     recordAuditLog({
       userId: req.user.user_id,
       action: 'CREATE_BRANCH_USER',
       targetType: 'USER',
       targetId: newUserId,
-      locationId: Number(location_id),
-      details: { name: name.trim(), email: cleanEmail, role, location_id: Number(location_id) },
+      locationId: targetLocId,
+      details: { name: name.trim(), email: cleanEmail, role, location_id: targetLocId, permissions: requestedPermissions },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
-    const createdUser = db.prepare('SELECT user_id, name, email, phone, role, active, location_id, created_at FROM USERS WHERE user_id = ?').get(newUserId);
+    const createdUser = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, role, active, location_id, created_at FROM USERS WHERE user_id = ?').get(newUserId));
     res.status(201).json({ success: true, user: createdUser });
   } catch (error) {
     console.error('Create branch user error:', error);
@@ -2041,49 +2195,73 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
   }
 });
 
-// Update branch user details (Master Admin only)
-app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+// Branch Admin may edit only their own Manager/Visitor accounts.
+app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     const userId = Number(req.params.id);
-    const { name, phone, role, location_id } = req.body;
+    const { name, phone, email, designation, role, location_id } = req.body;
+    let { permissions } = req.body;
 
     const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
     if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (role && !['admin', 'reception', 'visitor', 'master_admin'].includes(role)) {
-      return res.status(400).json({ error: 'Invalid role specified' });
+    const targetLocId = req.user.role === 'master_admin' ? (location_id ? Number(location_id) : existingUser.location_id) : Number(req.locationId);
+    if (req.user.role !== 'master_admin' && !isManagedBranchUser(existingUser, targetLocId)) {
+      return res.status(403).json({ error: 'You can only manage Manager or Visitor accounts created for your own branch.' });
     }
 
-    if (location_id) {
-      const loc = db.prepare('SELECT location_id FROM LOCATIONS WHERE location_id = ?').get(Number(location_id));
-      if (!loc) {
-        return res.status(400).json({ error: 'Target location does not exist' });
-      }
+    if (role && !['reception', 'visitor'].includes(role)) {
+      return res.status(400).json({ error: 'Only Manager and Visitor roles can be assigned here.' });
+    }
+    const effectiveRole = role || existingUser.role;
+    if (effectiveRole === 'visitor') permissions = ['visitor_intake'];
+
+    if (Number(existingUser.location_id) !== Number(targetLocId)) {
+      return res.status(403).json({ error: 'Branch user accounts cannot be moved between branches.' });
+    }
+
+    const cleanEmail = email === undefined ? existingUser.email : String(email).trim().toLowerCase();
+    const cleanPhone = phone === undefined ? existingUser.phone : String(phone).trim();
+    if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a valid mobile number for OTP sign-in.' });
+    if (effectiveRole === 'reception' && !isRegisteredTeamMember(cleanPhone, targetLocId)) {
+      return res.status(400).json({ error: managerTeamMembershipError });
+    }
+    const emailOwner = db.prepare('SELECT user_id FROM USERS WHERE LOWER(email) = ? AND user_id != ?').get(cleanEmail, userId);
+    if (emailOwner) return res.status(409).json({ error: 'That email address is already assigned to another account.' });
+    if (permissions !== undefined && (!Array.isArray(permissions) || new Set(permissions).size !== permissions.length || permissions.some(key => !DASHBOARD_PERMISSION_KEYS.has(key)) || (effectiveRole === 'reception' && permissions.includes('visitor_intake')))) {
+      return res.status(400).json({ error: 'The selected dashboard permissions are invalid.' });
     }
 
     db.prepare(`
       UPDATE USERS
       SET name = COALESCE(?, name),
           phone = COALESCE(?, phone),
+          email = COALESCE(?, email),
+          designation = COALESCE(?, designation),
           role = COALESCE(?, role),
-          location_id = COALESCE(?, location_id),
           updated_at = CURRENT_TIMESTAMP
       WHERE user_id = ?
-    `).run(name ? name.trim() : null, phone ? phone.trim() : null, role || null, location_id ? Number(location_id) : null, userId);
+    `).run(name ? name.trim() : null, cleanPhone, cleanEmail, designation === undefined ? null : designation.trim(), role || null, userId);
+
+    if (permissions !== undefined) {
+      db.prepare(`UPDATE USER_ACCESS_PROFILES SET permissions = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND location_id = ?`)
+        .run(JSON.stringify(permissions), userId, targetLocId);
+    }
 
     recordAuditLog({
       userId: req.user.user_id,
       action: 'UPDATE_BRANCH_USER',
       targetType: 'USER',
       targetId: userId,
-      locationId: location_id ? Number(location_id) : existingUser.location_id,
-      details: { old: { name: existingUser.name, role: existingUser.role, location_id: existingUser.location_id }, updated: { name, phone, role, location_id } },
+      locationId: targetLocId,
+      details: { old: { name: existingUser.name, role: existingUser.role, location_id: existingUser.location_id }, updated: { name, phone, email, designation, role, permissions } },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
-    const updated = db.prepare('SELECT user_id, name, email, phone, role, active, location_id, updated_at FROM USERS WHERE user_id = ?').get(userId);
+    const updated = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, role, active, location_id, updated_at FROM USERS WHERE user_id = ?').get(userId));
     res.json({ success: true, user: updated });
   } catch (error) {
     console.error('Update branch user error:', error);
@@ -2091,8 +2269,42 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
   }
 });
 
-// Activate or Deactivate account (Master Admin only)
-app.patch('/api/admin/branch-users/:id/status', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+// Remove a Manager/Visitor from branch access while preserving historical records.
+app.delete('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
+    if (!existingUser || existingUser.deleted_at) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const targetLocId = req.user.role === 'master_admin' ? Number(existingUser.location_id) : Number(req.locationId);
+    if (!isManagedBranchUser(existingUser, targetLocId)) {
+      return res.status(403).json({ error: 'You can only delete Manager or Visitor accounts in your own branch.' });
+    }
+
+    db.prepare(`UPDATE USERS SET active = 0, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`)
+      .run(userId);
+
+    recordAuditLog({
+      userId: req.user.user_id,
+      action: 'DELETE_BRANCH_USER',
+      targetType: 'USER',
+      targetId: userId,
+      locationId: targetLocId,
+      details: { name: existingUser.name, email: existingUser.email, role: existingUser.role },
+      ipAddress: req.ip || req.connection?.remoteAddress
+    });
+
+    res.json({ success: true, message: 'User removed from branch access.' });
+  } catch (error) {
+    console.error('Delete branch user error:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete branch user' });
+  }
+});
+
+// Activate or Deactivate account
+app.patch('/api/admin/branch-users/:id/status', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     const userId = Number(req.params.id);
     const { active } = req.body;
@@ -2104,6 +2316,10 @@ app.patch('/api/admin/branch-users/:id/status', authenticateToken, authorizeRole
     const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
     if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (req.user.role !== 'master_admin' && !isManagedBranchUser(existingUser, req.locationId)) {
+      return res.status(403).json({ error: 'You can only manage users in your own branch.' });
     }
 
     // Do not allow deactivating the currently logged in master admin account
@@ -2131,8 +2347,8 @@ app.patch('/api/admin/branch-users/:id/status', authenticateToken, authorizeRole
   }
 });
 
-// Reset branch user password (Master Admin only)
-app.post('/api/admin/branch-users/:id/reset-password', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+// Reset branch user password
+app.post('/api/admin/branch-users/:id/reset-password', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     const userId = Number(req.params.id);
     const { new_password } = req.body;
@@ -2144,6 +2360,10 @@ app.post('/api/admin/branch-users/:id/reset-password', authenticateToken, author
     const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
     if (!existingUser) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (req.user.role !== 'master_admin' && !isManagedBranchUser(existingUser, req.locationId)) {
+      return res.status(403).json({ error: 'You can only reset users in your own branch.' });
     }
 
     const salt = bcrypt.genSaltSync(10);
@@ -2646,7 +2866,7 @@ export function computeClientActivity(client) {
 }
 
 // Search clients by phone or name (isolated by active location) with 90-day Active/Inactive status
-app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
+app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'reception', 'visitor'), (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const statusFilter = (req.query.status || '').trim().toLowerCase(); // 'active', 'inactive', or ''
@@ -2734,6 +2954,8 @@ app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'recep
 // Check if phone number already exists
 app.get('/api/clients/check-phone', authenticateToken, (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to check this number.' });
     const rawPhone = req.query.phone || '';
     let phone = rawPhone.replace(/\D/g, '');
     if (phone.startsWith('91') && phone.length > 10) {
@@ -2748,12 +2970,9 @@ app.get('/api/clients/check-phone', authenticateToken, (req, res) => {
     const client = db.prepare(`
       SELECT client_id, name, surname, phone, primary_login_phone, location_id 
       FROM CLIENTS 
-      WHERE phone = ? OR phone = ? OR primary_login_phone = ? OR mobile_numbers LIKE ?
-    `).get(phone, rawPhone.replace(/\D/g, ''), phone, `%"${phone}"%`);
+      WHERE location_id = ? AND (phone = ? OR phone = ? OR primary_login_phone = ? OR mobile_numbers LIKE ?)
+    `).get(locId, phone, rawPhone.replace(/\D/g, ''), phone, `%"${phone}"%`);
     if (client) {
-      if (req.user.role !== 'master_admin' && client.location_id !== req.locationId) {
-        return res.json({ exists: true, isCrossBranch: true });
-      }
       return res.json({ exists: true, client });
     }
     return res.json({ exists: false });
@@ -3127,10 +3346,11 @@ export function getFullClientRecord(clientId) {
 }
 
 // Helper to ensure MEMBERSHIP_PLANS table exists and has default tiers
-function ensureMembershipPlansTable() {
+function ensureMembershipPlansTable(locationId) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS MEMBERSHIP_PLANS (
       plan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       id TEXT UNIQUE NOT NULL,
       tier TEXT NOT NULL,
       tierNumber TEXT,
@@ -3158,6 +3378,14 @@ function ensureMembershipPlansTable() {
     );
   `);
 
+  try { db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id)'); } catch (e) {}
+  db.prepare('UPDATE MEMBERSHIP_PLANS SET location_id = 1 WHERE location_id IS NULL').run();
+  db.prepare(`
+    INSERT OR IGNORE INTO MEMBERSHIP_SETTINGS (key, value)
+    SELECT '1:program_title', value FROM MEMBERSHIP_SETTINGS WHERE key = 'program_title'
+  `).run();
+  db.prepare("DELETE FROM MEMBERSHIP_SETTINGS WHERE key = 'program_title'").run();
+
   let discountColumnAdded = false;
   try {
     db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN discount_percent REAL NOT NULL DEFAULT 0');
@@ -3177,135 +3405,24 @@ function ensureMembershipPlansTable() {
     `).run();
   }
 
-  const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+  const titleKey = `${locationId}:program_title`;
+  const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get(titleKey);
   if (!titleRow) {
-    db.prepare('INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES (?, ?)').run('program_title', 'WORLD OF PRIVILEGES');
+    db.prepare('INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES (?, ?)').run(titleKey, 'WORLD OF PRIVILEGES');
   }
 
-  const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
-  if (count === 0) {
-    const defaultCanonicalPlans = [
-      {
-        id: 'eclat',
-        tier: 'Éclat',
-        tierNumber: '01 — SERVICE',
-        validity: 'Valid for 3 months',
-        validityBadge: 'VALID FOR 3 MONTHS',
-        name: 'ECLAT MEMBER',
-        fullName: 'ECLAT PRIVILEGE MEMBERSHIP',
-        durationLabel: '(per 3 months)',
-        price: 6000,
-        credits: 6000,
-        image: '/memberships/card_eclat_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Your introduction to thoughtful skincare.',
-        benefits: JSON.stringify([
-          'Complimentary skin analysis (basic)',
-          'Priority booking on weekends',
-          'Birthday month: ₹1000 voucher / free add-on',
-          'Access to member-only packages',
-          'Free consultation during tenure'
-        ])
-      },
-      {
-        id: 'eternal',
-        tier: 'Eternal',
-        tierNumber: '02 — SERVICE',
-        validity: 'Valid for 6 months',
-        validityBadge: 'VALID FOR 6 MONTHS',
-        name: 'ETERNAL MEMBER',
-        fullName: 'ETERNAL ELEVATION MEMBERSHIP',
-        durationLabel: '(per 6 months)',
-        price: 15000,
-        credits: 15000,
-        image: '/memberships/card_eternal_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Elevated care for your evolving beauty journey.',
-        benefits: JSON.stringify([
-          'Free advanced skin analysis (worth ₹1500–₹2000)',
-          '1 Free express facial / peel quarterly or 2 per year',
-          'Priority booking + peak hour preference',
-          'Birthday: ₹2500 Voucher / Complimentary Services',
-          'Exclusive pricing on laser packages',
-          'Early access to new treatments & offers'
-        ])
-      },
-      {
-        id: 'infini',
-        tier: 'Infini',
-        tierNumber: '03 — SERVICE',
-        validity: 'Valid for 1 year',
-        validityBadge: 'VALID FOR 1 YEAR',
-        name: 'INFINI MEMBER',
-        fullName: 'INFINI EXCLUSIVITY MEMBERSHIP',
-        durationLabel: '(per year)',
-        price: 25000,
-        credits: 25000,
-        image: '/memberships/card_infini_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'Unmatched luxury and precision-tailored aesthetic care.',
-        benefits: JSON.stringify([
-          'FREE premium skin consultation + AI analysis',
-          '3–4 complimentary treatments / year',
-          'Dedicated skin advisor / therapist priority',
-          'VIP booking (no waiting)',
-          'Special pricing on full programs & packages',
-          'Birthday: Luxury facial / treatment complimentary',
-          'Exclusive invites to private clinic events',
-          'Complimentary aftercare kits (select treatments)'
-        ])
-      },
-      {
-        id: 'lumiere',
-        tier: 'Lumière',
-        tierNumber: '04 — SERVICE',
-        validity: 'Valid for 1 year',
-        validityBadge: 'VALID FOR 1 YEAR',
-        name: 'LUMIERE MEMBER',
-        fullName: 'LUMIERE SIGNATURE MEMBERSHIP',
-        durationLabel: '(per year)',
-        price: 50000,
-        credits: 50000,
-        image: '/memberships/card_lumiere_3d.jpg',
-        color: '#B88B4A',
-        bg: '#FAF6EE',
-        tagline: 'The pinnacle of beauty, exclusivity, and personalized attention.',
-        benefits: JSON.stringify([
-          'Unlimited expert aesthetic consultations',
-          '4 Complimentary premium medi-facials or laser sessions',
-          '20% Off all services & homecare product lines',
-          'Personal aesthetician of choice for all visits',
-          'VIP private lounge booking & companion guest passes',
-          'Birthday: ₹10,000 voucher + luxury wellness package'
-        ])
-      }
-    ];
-
-    const insertStmt = db.prepare(`
-      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, validity, validityBadge, name, fullName, durationLabel, price, credits, image, color, bg, tagline, benefits, discount_percent, is_custom)
-      VALUES (@id, @tier, @tierNumber, @validity, @validityBadge, @name, @fullName, @durationLabel, @price, @credits, @image, @color, @bg, @tagline, @benefits, CASE
-        WHEN LOWER(@tier) LIKE '%clat%' THEN 5
-        WHEN LOWER(@tier) LIKE '%eternal%' THEN 10
-        WHEN LOWER(@tier) LIKE '%infini%' THEN 15
-        WHEN LOWER(@tier) LIKE '%lum%' THEN 20
-        ELSE 0
-      END, 0)
-    `);
-    defaultCanonicalPlans.forEach(p => insertStmt.run(p));
-  }
+  // Plans are branch-owned. A newly launched branch starts with no plans;
+  // plans are added explicitly from that branch's Membership screen.
 }
 
 // Studio Membership Intelligence & Roster endpoint
 app.get('/api/memberships', authenticateToken, (req, res) => {
   try {
-    ensureMembershipPlansTable();
     const locId = req.locationId;
     if (!locId) {
       return res.status(400).json({ error: 'Branch context (x-location-id) is required to view studio memberships.' });
     }
+    ensureMembershipPlansTable(locId);
     const query = `
       SELECT client_id, name, surname, phone, email, location_id,
              membership_tier, membership_status, membership_started_at,
@@ -3322,7 +3439,7 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
     const params = [locId];
     const memberRows = db.prepare(query).all(...params);
 
-    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
+    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? ORDER BY price ASC').all(locId);
     const canonicalPlans = planRows.map(p => ({
       ...p,
       priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
@@ -3385,7 +3502,7 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
       };
     });
 
-    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get(`${locId}:program_title`);
     const programTitle = titleRow ? titleRow.value : 'WORLD OF PRIVILEGES';
 
     res.json({
@@ -3410,8 +3527,12 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
 // Public Membership Plans & Program Title (for kiosk / visitor wizard)
 app.get('/api/memberships/public', (req, res) => {
   try {
-    ensureMembershipPlansTable();
-    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS ORDER BY price ASC').all();
+    const locId = Number(req.headers['x-location-id'] || req.query.location_id);
+    if (!locId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locId)) {
+      return res.status(400).json({ error: 'Branch context is required to load membership plans.' });
+    }
+    ensureMembershipPlansTable(locId);
+    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? ORDER BY price ASC').all(locId);
     const canonicalPlans = planRows.map(p => {
       const { discount_percent: _discountPercent, ...clientPlan } = p;
       return {
@@ -3420,7 +3541,7 @@ app.get('/api/memberships/public', (req, res) => {
         benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
       };
     });
-    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get('program_title');
+    const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get(`${locId}:program_title`);
     const programTitle = titleRow ? titleRow.value : 'WORLD OF PRIVILEGES';
     res.json({
       plans: canonicalPlans,
@@ -3435,16 +3556,18 @@ app.get('/api/memberships/public', (req, res) => {
 // Master & Main Admin: Update Membership Program Title
 app.put('/api/memberships/title', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    ensureMembershipPlansTable();
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to update the membership title.' });
+    ensureMembershipPlansTable(locId);
     const { title } = req.body;
     if (!title || !title.trim()) {
       return res.status(400).json({ error: 'Program title is required' });
     }
     const cleanTitle = title.trim().toUpperCase();
     db.prepare(`
-      INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES ('program_title', ?)
+      INSERT INTO MEMBERSHIP_SETTINGS (key, value) VALUES (?, ?)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(cleanTitle);
+    `).run(`${locId}:program_title`, cleanTitle);
     res.json({ success: true, program_title: cleanTitle });
   } catch (err) {
     console.error('Update membership title error:', err);
@@ -3455,7 +3578,9 @@ app.put('/api/memberships/title', authenticateToken, authorizeRoles('master_admi
 // Master & Main Admin: Add New Membership Plan endpoint
 app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    ensureMembershipPlansTable();
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to add a membership plan.' });
+    ensureMembershipPlansTable(locId);
     const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
     if (!name || !price) {
       return res.status(400).json({ error: 'Membership tier name and price are required' });
@@ -3464,19 +3589,20 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
     if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
       return res.status(400).json({ error: 'Membership discount must be between 0 and 100 percent' });
     }
-    const cleanId = (tier || name).toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
+    const cleanId = `loc${locId}_` + (tier || name).toLowerCase().replace(/[^a-z0-9]/g, '_') + '_' + Date.now().toString(36);
     const benefitsList = Array.isArray(benefits) 
       ? benefits 
       : (typeof benefits === 'string' ? benefits.split('\n').map(s => s.trim()).filter(Boolean) : []);
     const benefitsJson = JSON.stringify(benefitsList.length > 0 ? benefitsList : ['Exclusive tailored beauty treatment privileges']);
     const cardImg = image || '/memberships/card_infini_3d.jpg';
     const tierVal = tier ? tier.trim() : name.trim();
-    const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS').get().cnt;
+    const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS WHERE location_id = ?').get(locId).cnt;
 
     const insert = db.prepare(`
-      INSERT INTO MEMBERSHIP_PLANS (id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, discount_percent, is_custom)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      INSERT INTO MEMBERSHIP_PLANS (location_id, id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, discount_percent, is_custom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
+      locId,
       cleanId,
       tierVal,
       tierNumber || `0${count + 1} — SERVICE`,
@@ -3513,7 +3639,9 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
 // Master & Main Admin: Edit Membership Plan endpoint
 app.put('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    ensureMembershipPlansTable();
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to edit a membership plan.' });
+    ensureMembershipPlansTable(locId);
     const { id } = req.params;
     const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
     if (!name || !price) {
@@ -3530,7 +3658,7 @@ const benefitsList = Array.isArray(benefits)
     const cardImg = image || '/memberships/card_infini_3d.jpg';
     const tierVal = tier ? tier.trim() : name.trim();
 
-    const planExists = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)').get(id, id, id);
+    const planExists = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?))').get(locId, id, id, id);
     if (!planExists) {
       return res.status(404).json({ error: 'Plan not found' });
     }
@@ -3551,7 +3679,7 @@ const benefitsList = Array.isArray(benefits)
           benefits = ?,
           discount_percent = ?,
           updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
+      WHERE id = ? AND location_id = ?
     `).run(
       tierVal,
       tierNumber || planExists.tierNumber,
@@ -3566,7 +3694,8 @@ const benefitsList = Array.isArray(benefits)
       tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitsJson,
       discountPercent,
-      planExists.id
+      planExists.id,
+      locId
     );
 
     const updatedPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE id = ?').get(planExists.id);
@@ -3587,9 +3716,11 @@ const benefitsList = Array.isArray(benefits)
 // Master & Main Admin: Delete Membership Plan endpoint
 app.delete('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    ensureMembershipPlansTable();
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to delete a membership plan.' });
+    ensureMembershipPlansTable(locId);
     const { id } = req.params;
-    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)').run(id, id, id);
+    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?))').run(locId, id, id, id);
     res.json({ success: true, message: 'Membership plan deleted successfully' });
   } catch (err) {
     console.error('Delete membership plan error:', err);
@@ -3685,6 +3816,13 @@ app.post('/api/treatment-courses', authenticateToken, authorizeRoles('admin', 'r
     if (!client || Number(client.location_id) !== Number(activeLocId)) {
       return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
+    const service = db.prepare(`
+      SELECT s.service_id
+      FROM SERVICES s
+      JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
+      WHERE s.service_id = ? AND c.location_id = ?
+    `).get(service_id, activeLocId);
+    if (!service) return res.status(403).json({ error: 'Access denied: Service belongs to another studio location' });
 
     const course = createTreatmentCourse(db, client_id, service_id, {
       total_planned_sessions,
@@ -3842,8 +3980,8 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
           SET phone = ?,
               email = ?,
               name = COALESCE(?, name)
-          WHERE (phone = ? OR LOWER(email) = ?) AND role = 'visitor'
-        `).run(newPhone, newEmail, name ? `${name} ${surname || existingClient.surname || ''}`.trim() : null, oldPhone, oldEmail);
+          WHERE location_id = ? AND (phone = ? OR LOWER(email) = ?) AND role = 'visitor'
+        `).run(newPhone, newEmail, name ? `${name} ${surname || existingClient.surname || ''}`.trim() : null, existingClient.location_id, oldPhone, oldEmail);
       }
     } catch (e) {}
 
@@ -4074,7 +4212,11 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       return res.status(400).json({ error: 'A valid Email Address is compulsory' });
     }
 
-    const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ? OR primary_login_phone = ?').get(cleanPrimaryPhone, cleanPrimaryPhone);
+    const targetLocId = req.locationId;
+    if (!targetLocId) {
+      return res.status(400).json({ error: 'Branch context (x-location-id) is required to register a client.' });
+    }
+    const existing = db.prepare('SELECT * FROM CLIENTS WHERE location_id = ? AND (phone = ? OR primary_login_phone = ?)').get(targetLocId, cleanPrimaryPhone, cleanPrimaryPhone);
     if (existing) {
       return res.status(400).json({
         error: `Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`,
@@ -4082,10 +4224,6 @@ app.post('/api/clients', authenticateToken, (req, res) => {
       });
     }
 
-    const targetLocId = req.locationId;
-    if (!targetLocId) {
-      return res.status(400).json({ error: 'Branch context (x-location-id) is required to register a client.' });
-    }
     const insertRes = db.prepare(`
       INSERT INTO CLIENTS (
         name, surname, gender, marital_status, dob, anniversary_date, address_line1, address_line2, pincode, city, state,
@@ -4122,7 +4260,7 @@ app.post('/api/clients', authenticateToken, (req, res) => {
 
     // Synchronize authorized visitor login account in USERS
     try {
-      const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE phone = ? OR LOWER(email) = ?').get(cleanPrimaryPhone, cleanPrimaryEmail);
+      const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE location_id = ? AND (phone = ? OR LOWER(email) = ?)').get(targetLocId, cleanPrimaryPhone, cleanPrimaryEmail);
       if (!existingVisitor) {
         const vSalt = bcrypt.genSaltSync(10);
         const vHash = bcrypt.hashSync(`Visitor@${cleanPrimaryPhone.slice(-4)}`, vSalt);
@@ -4565,11 +4703,13 @@ app.post('/api/concierge/returning-client/resend', async (req, res) => {
 // Public/Reception catalog: only active categories and active services
 app.get('/api/categories', authenticateToken, (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to load services.' });
     const categories = db.prepare(`
       SELECT * FROM SERVICE_CATEGORIES
-      WHERE active = 1
+      WHERE active = 1 AND location_id = ?
       ORDER BY display_order ASC, category_id ASC
-    `).all();
+    `).all(locId);
 
     const result = categories.map(cat => {
       const services = db.prepare(`
@@ -4593,10 +4733,13 @@ app.get('/api/categories', authenticateToken, (req, res) => {
 // Admin catalog: all categories & all services (active & inactive)
 app.get('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to manage services.' });
     const categories = db.prepare(`
       SELECT * FROM SERVICE_CATEGORIES
+      WHERE location_id = ?
       ORDER BY display_order ASC, category_id ASC
-    `).all();
+    `).all(locId);
 
     const result = categories.map(cat => {
       const services = db.prepare(`
@@ -4620,6 +4763,8 @@ app.get('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (re
 // Admin: Add Category
 app.post('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to add a service category.' });
     const { category_name, description, icon, image_url, image_position, display_order } = req.body;
     if (!category_name) {
       return res.status(400).json({ error: 'Category name is required' });
@@ -4634,10 +4779,10 @@ app.post('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (r
     const resolvedIcon = icon || 'Sparkles';
     const resolvedPosition = image_position || null;
     const stmt = db.prepare(`
-      INSERT INTO SERVICE_CATEGORIES (category_name, description, icon, image_url, image_position, display_order, active)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
+      INSERT INTO SERVICE_CATEGORIES (category_name, location_id, description, icon, image_url, image_position, display_order, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
     `);
-    const info = stmt.run(category_name.trim(), description || '', resolvedIcon, resolvedImage, resolvedPosition, order);
+    const info = stmt.run(category_name.trim(), locId, description || '', resolvedIcon, resolvedImage, resolvedPosition, order);
 
     const created = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ?').get(info.lastInsertRowid);
     res.status(201).json({ category: { ...created, services: [] } });
@@ -4650,8 +4795,12 @@ app.post('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (r
 // Admin: Update Category (edit name, order, image_url, image_position, toggle active)
 app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to edit a service category.' });
     const { category_name, description, icon, image_url, image_position, display_order, active } = req.body;
     const catId = req.params.id;
+    const existing = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES WHERE category_id = ? AND location_id = ?').get(catId, locId);
+    if (!existing) return res.status(404).json({ error: 'Service category not found in this branch.' });
     if (image_url) {
       const imgValidation = validateCategoryImageUrlOnDisk(image_url);
       if (!imgValidation.valid) {
@@ -4669,8 +4818,8 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
           display_order = COALESCE(?, display_order),
           active = COALESCE(?, active),
           updated_at = CURRENT_TIMESTAMP
-      WHERE category_id = ?
-    `).run(category_name, description, icon, image_url, image_position, display_order, active, catId);
+      WHERE category_id = ? AND location_id = ?
+    `).run(category_name, description, icon, image_url, image_position, display_order, active, catId, locId);
 
     const updated = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ?').get(catId);
     res.json({ category: updated });
@@ -4683,8 +4832,10 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
 // Admin: Delete Category (and its sub-services)
 app.delete('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to delete a service category.' });
     const catId = req.params.id;
-    const existing = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ?').get(catId);
+    const existing = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ? AND location_id = ?').get(catId, locId);
     if (!existing) {
       return res.status(404).json({ error: 'Category not found' });
     }
@@ -4695,7 +4846,7 @@ app.delete('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin
       const deleteTx = db.transaction((id) => {
         db.prepare('DELETE FROM SERVICES WHERE category_id = ?').run(id);
         db.prepare('DELETE FROM SERVICE_CATEGORIES WHERE category_id = ?').run(id);
-        const remaining = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES ORDER BY display_order ASC, category_id ASC').all();
+        const remaining = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES WHERE location_id = ? ORDER BY display_order ASC, category_id ASC').all(locId);
         const reseqStmt = db.prepare('UPDATE SERVICE_CATEGORIES SET display_order = ? WHERE category_id = ?');
         remaining.forEach((row, idx) => {
           reseqStmt.run(idx + 1, row.category_id);
@@ -4716,19 +4867,25 @@ app.delete('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin
 // Admin: Reorder Categories (drag-and-drop sequence update)
 app.put('/api/admin/categories-reorder', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to reorder service categories.' });
     const { orderedCategoryIds } = req.body;
     if (!Array.isArray(orderedCategoryIds) || orderedCategoryIds.length === 0) {
       return res.status(400).json({ error: 'orderedCategoryIds array is required' });
     }
 
+    const ownedIds = db.prepare(`SELECT category_id FROM SERVICE_CATEGORIES WHERE location_id = ?`).all(locId).map(row => Number(row.category_id));
+    if (orderedCategoryIds.some(id => !ownedIds.includes(Number(id)))) {
+      return res.status(403).json({ error: 'One or more service categories belong to another branch.' });
+    }
     const updateOrderStmt = db.prepare(`
       UPDATE SERVICE_CATEGORIES
       SET display_order = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE category_id = ?
+      WHERE category_id = ? AND location_id = ?
     `);
     const reorderTx = db.transaction((ids) => {
       ids.forEach((catId, index) => {
-        updateOrderStmt.run(index + 1, Number(catId));
+          updateOrderStmt.run(index + 1, Number(catId), locId);
       });
     });
     reorderTx(orderedCategoryIds);
@@ -4743,6 +4900,8 @@ app.put('/api/admin/categories-reorder', authenticateToken, authorizeRoles('admi
 // Admin: Add Sub-Service
 app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to add a service.' });
     const {
       category_id,
       service_name,
@@ -4768,6 +4927,8 @@ app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req
     }
     try { db.exec('ALTER TABLE SERVICES ADD COLUMN vsp_badges TEXT;'); } catch (e) {}
     }
+    const category = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES WHERE category_id = ? AND location_id = ?').get(category_id, locId);
+    if (!category) return res.status(404).json({ error: 'Service category not found in this branch.' });
 
     const stmt = db.prepare(`
       INSERT INTO SERVICES (
@@ -4809,6 +4970,8 @@ app.post('/api/admin/services', authenticateToken, authorizeRoles('admin'), (req
 // Admin: Update Sub-Service (edit name, price, active, order, spotlight details, sessions)
 app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to edit a service.' });
     const {
       service_name,
       price,
@@ -4830,6 +4993,13 @@ app.put('/api/admin/services/:id', authenticateToken, authorizeRoles('admin'), (
       session_interval_unit
     } = req.body;
     const serviceId = req.params.id;
+    const existing = db.prepare(`
+      SELECT s.service_id
+      FROM SERVICES s
+      JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
+      WHERE s.service_id = ? AND c.location_id = ?
+    `).get(serviceId, locId);
+    if (!existing) return res.status(404).json({ error: 'Service not found in this branch.' });
     try { db.exec('ALTER TABLE SERVICES ADD COLUMN vsp_badges TEXT;'); } catch (e) {}
 
     db.prepare(`
@@ -4912,7 +5082,7 @@ app.get('/api/staff', authenticateToken, (req, res) => {
     if (!locId) {
       return res.status(400).json({ error: 'Branch context (x-location-id) is required to view staff.' });
     }
-    const staff = db.prepare('SELECT staff_id, name, role, phone, location_id, salary_type, salary_amount, incentive_percentage FROM STAFF WHERE active = 1 AND location_id = ? ORDER BY name ASC').all(locId);
+    const staff = db.prepare('SELECT staff_id, name, role, phone, location_id FROM STAFF WHERE active = 1 AND location_id = ? ORDER BY name ASC').all(locId);
     res.json({ staff });
   } catch (error) {
     console.error('Staff error:', error);
@@ -5169,14 +5339,13 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       const cleanPrimaryEmail = (req.body.primary_login_email ? req.body.primary_login_email.trim().toLowerCase() : (req.body.email ? req.body.email.trim().toLowerCase() : emailList[0])) || '';
 
       // Check duplicate phone
-      const existing = db.prepare('SELECT * FROM CLIENTS WHERE phone = ? OR primary_login_phone = ?').get(cleanPrimaryPhone, cleanPrimaryPhone);
-      if (existing) {
-        throw new Error(`Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`);
-      }
-
       const targetLocId = req.locationId;
       if (!targetLocId) {
         throw new Error('Branch context (x-location-id) is required to record a visit');
+      }
+      const existing = db.prepare('SELECT * FROM CLIENTS WHERE location_id = ? AND (phone = ? OR primary_login_phone = ?)').get(targetLocId, cleanPrimaryPhone, cleanPrimaryPhone);
+      if (existing) {
+        throw new Error(`Client already exists with number ${cleanPrimaryPhone}. Please use Regular Client.`);
       }
       const clientInfo = db.prepare(`
         INSERT INTO CLIENTS (
@@ -5210,7 +5379,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 
       // Provision visitor user account in USERS
       try {
-        const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE phone = ? OR LOWER(email) = ?').get(cleanPrimaryPhone, cleanPrimaryEmail);
+        const existingVisitor = db.prepare('SELECT user_id FROM USERS WHERE location_id = ? AND (phone = ? OR LOWER(email) = ?)').get(targetLocId, cleanPrimaryPhone, cleanPrimaryEmail);
         if (!existingVisitor) {
           const vSalt = bcrypt.genSaltSync(10);
           const vHash = bcrypt.hashSync(`Visitor@${cleanPrimaryPhone.slice(-4)}`, vSalt);
@@ -5233,12 +5402,30 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       }
     }
 
+    const clientLocationId = req.locationId;
+    if (!clientLocationId) {
+      throw new Error('Branch context (x-location-id) is required to record a visit');
+    }
+
     // Validate assigned staff belongs to current studio location
     if (services && services.length > 0) {
       for (const s of services) {
+        const serviceId = Number(s.service_id || s.id);
+        if (!Number.isInteger(serviceId) || serviceId <= 0) {
+          throw new Error('Each selected service must belong to this branch. Refresh the service list and try again.');
+        }
+        const branchService = db.prepare(`
+          SELECT s.service_id
+          FROM SERVICES s
+          JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
+          WHERE s.service_id = ? AND c.location_id = ?
+        `).get(serviceId, req.locationId);
+        if (!branchService) {
+          throw new Error('Access denied: A selected service belongs to another studio location.');
+        }
         if (s.staff_id) {
           const staffRow = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(s.staff_id);
-          if (staffRow && Number(staffRow.location_id) !== Number(req.locationId)) {
+          if (!staffRow || Number(staffRow.location_id) !== Number(req.locationId)) {
             throw new Error('Access denied: Assigned staff member belongs to another studio location');
           }
         }
@@ -5253,6 +5440,17 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 
     const membershipTier = req.body.membership_tier || null;
     const membershipPrice = parseFloat(req.body.membership_price) || 0;
+    if (membershipPrice > 0 && membershipTier) {
+      ensureMembershipPlansTable(clientLocationId);
+      const branchPlan = db.prepare(`
+        SELECT plan_id
+        FROM MEMBERSHIP_PLANS
+        WHERE location_id = ? AND (
+          LOWER(tier) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(fullName) = LOWER(?)
+        )
+      `).get(clientLocationId, membershipTier, membershipTier, membershipTier);
+      if (!branchPlan) throw new Error('Selected membership plan is not available at this branch. Refresh the membership list and try again.');
+    }
 
     let subtotal = req.body.subtotal !== undefined && !isNaN(parseFloat(req.body.subtotal))
       ? parseFloat(req.body.subtotal)
@@ -5359,11 +5557,6 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       });
     }
 
-    const clientLocationId = req.locationId;
-    if (!clientLocationId) {
-      throw new Error('Branch context (x-location-id) is required to record a visit');
-    }
-
     // 3. Insert Visit
     const visitInfo = db.prepare(`
       INSERT INTO VISITS (
@@ -5413,8 +5606,16 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       let sName = s.service_name || s.name;
       let finalServiceId = s.service_id || null;
       if (finalServiceId) {
-        const found = db.prepare('SELECT service_id, service_name FROM SERVICES WHERE service_id = ?').get(finalServiceId);
+        const found = db.prepare(`
+          SELECT s.service_id, s.service_name, c.location_id
+          FROM SERVICES s
+          JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
+          WHERE s.service_id = ?
+        `).get(finalServiceId);
         if (found) {
+          if (Number(found.location_id) !== Number(clientLocationId)) {
+            throw new Error('Selected service does not belong to this branch. Refresh the service list and try again.');
+          }
           if (!sName) sName = found.service_name;
         } else {
           finalServiceId = null;
@@ -6455,6 +6656,7 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
       FROM SERVICES s
       LEFT JOIN SERVICE_CATEGORIES sc ON s.category_id = sc.category_id
       WHERE s.active = 1
+        AND sc.location_id = ?
         AND s.service_id NOT IN (
           SELECT DISTINCT vs.service_id
           FROM VISIT_SERVICES vs
@@ -6463,7 +6665,7 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
             AND vs.service_id IS NOT NULL
         )
       ORDER BY sc.category_name ASC, s.service_name ASC
-    `).all(...vLocSingleParams, filterStart, filterEnd, ...vLocParams);
+    `).all(...vLocSingleParams, locId, filterStart, filterEnd, ...vLocParams);
 
     // 6. Category Breakdown in Period
     const categoryStats = db.prepare(`
@@ -6496,19 +6698,19 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
     `).all(filterStart, filterEnd, ...vLocParams);
 
     // 7b. Membership Intelligence & Credits Audit
-    const catalogPlans = [
-      { id: 'infini', name: 'INFINI EXCLUSIVITY MEMBERSHIP', tier: 'Infini', price: 25000, validity: '1 year', code: 'IN', color: '#B88B4A', image: '/memberships/card_infini_3d.jpg' },
-      { id: 'lumiere', name: 'LUMIERE SIGNATURE MEMBERSHIP', tier: 'Lumière', price: 50000, validity: '1 year', code: 'LU', color: '#B88B4A', image: '/memberships/card_lumiere_3d.jpg' },
-      { id: 'eternal', name: 'ETERNAL ELEVATION MEMBERSHIP', tier: 'Eternal', price: 15000, validity: '6 months', code: 'ET', color: '#B88B4A', image: '/memberships/card_eternal_3d.jpg' },
-      { id: 'eclat', name: 'ECLAT PRIVILEGE MEMBERSHIP', tier: 'Éclat', price: 6000, validity: '3 months', code: 'EC', color: '#B88B4A', image: '/memberships/card_eclat_3d.jpg' }
-    ];
+    ensureMembershipPlansTable(locId);
+    const catalogPlans = db.prepare(`
+      SELECT id, name, fullName, tier, price, validity, validityBadge, color, image, discount_percent
+      FROM MEMBERSHIP_PLANS
+      WHERE location_id = ?
+      ORDER BY price DESC, plan_id ASC
+    `).all(locId).map(plan => ({
+      ...plan,
+      code: (plan.tier || plan.id || 'MB').replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase(),
+      color: plan.color || '#B88B4A'
+    }));
 
-    const standardTierCosts = {
-      'Infini': 25000,
-      'Lumière': 50000,
-      'Eternal': 15000,
-      'Éclat': 6000
-    };
+    const standardTierCosts = Object.fromEntries(catalogPlans.map(plan => [plan.tier, Number(plan.price) || 0]));
 
     function normalizeTier(tierName) {
       if (!tierName) return 'Other';
@@ -6553,7 +6755,12 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
 
     const membersRoster = memberClientsRaw.map(m => {
       const tierGroup = normalizeTier(m.membership_tier);
-      const allocated = m.membership_cost > 0 ? m.membership_cost : (standardTierCosts[tierGroup] || 25000);
+      const matchingPlan = catalogPlans.find(plan =>
+        (plan.tier && m.membership_tier.toLowerCase().includes(plan.tier.toLowerCase())) ||
+        (plan.name && m.membership_tier.toLowerCase().includes(plan.name.toLowerCase())) ||
+        (plan.id && m.membership_tier.toLowerCase().includes(plan.id.toLowerCase()))
+      );
+      const allocated = Number(m.membership_cost) > 0 ? Number(m.membership_cost) : (Number(standardTierCosts[tierGroup]) || Number(matchingPlan?.price) || 0);
       const used = m.visit_credits_used > 0 ? m.visit_credits_used : Math.max(0, allocated - (m.membership_balance || 0));
       const balance = (m.membership_balance !== null && m.membership_balance !== undefined && m.membership_balance > 0)
         ? m.membership_balance 
@@ -6580,16 +6787,16 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
     });
 
     const tierSummaryMap = {};
-    ['Infini', 'Lumière', 'Eternal', 'Éclat'].forEach(t => {
-      const planConfig = catalogPlans.find(p => p.tier === t);
+    catalogPlans.forEach(planConfig => {
+      const t = planConfig.tier;
       tierSummaryMap[t] = {
         tier: t,
-        plan_name: planConfig?.name || `${t} Membership`,
-        plan_price: planConfig?.price || standardTierCosts[t] || 25000,
-        validity: planConfig?.validity || '1 year',
-        code: planConfig?.code || t.slice(0, 2).toUpperCase(),
-        color: planConfig?.color || '#B88B4A',
-        image: planConfig?.image || '/memberships/card_infini_3d.jpg',
+        plan_name: planConfig.name || planConfig.fullName || `${t} Membership`,
+        plan_price: Number(planConfig.price) || 0,
+        validity: planConfig.validity || planConfig.validityBadge || '',
+        code: planConfig.code,
+        color: planConfig.color,
+        image: planConfig.image || '',
         member_count: 0,
         total_credits_allocated: 0,
         total_credits_used: 0,

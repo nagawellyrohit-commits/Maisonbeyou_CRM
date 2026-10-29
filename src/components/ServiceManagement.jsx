@@ -1085,14 +1085,15 @@ export default function ServiceManagement() {
                 onDragEnter={(e) => handleCatCardDragOver(e, cat.category_id)}
                 onDragOver={(e) => handleCatCardDragOver(e, cat.category_id)}
                 onDrop={(e) => handleCatCardDrop(e, cat.category_id)}
-                className="card"
+                className="card service-category-card"
                 style={{
                   overflow: 'hidden',
                   border: dragOverCatId === cat.category_id
                     ? '2px solid #B88B4A'
-                    : (draggedCatId === cat.category_id ? '1.5px dashed #B88B4A' : (isExpanded ? '1px solid var(--primary-border)' : '1px solid var(--border-color)')),
+                    : (draggedCatId === cat.category_id ? '1.5px dashed #B88B4A' : '1px solid #D99A64'),
                   opacity: draggedCatId === cat.category_id ? 0.65 : 1,
-                  boxShadow: isExpanded ? '0 10px 30px rgba(184, 139, 74, 0.12)' : 'var(--shadow-sm)',
+                  borderRadius: '22px',
+                  boxShadow: isExpanded ? '0 8px 24px rgba(87, 58, 32, 0.08)' : '0 6px 18px rgba(87, 58, 32, 0.06)',
                   transition: 'all 0.2s ease'
                 }}
               >
@@ -1113,9 +1114,9 @@ export default function ServiceManagement() {
                   style={{
                     padding: '18px 24px',
                     background: cat.active === 1
-                      ? (isExpanded ? 'var(--bg-surface)' : '#FFFFFF')
-                      : '#F9FAFB',
-                    borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none',
+                      ? '#FFFFFF'
+                      : '#FAF8F5',
+                    borderBottom: isExpanded ? '1px solid #EAD9C8' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',

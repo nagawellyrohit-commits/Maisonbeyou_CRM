@@ -178,7 +178,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard }) {
       </div>
 
       {/* Clients Table Card */}
-      <div className="card" style={{ overflow: 'hidden' }}>
+      <div className="card client-directory-table-card" style={{ overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
             Loading clients...

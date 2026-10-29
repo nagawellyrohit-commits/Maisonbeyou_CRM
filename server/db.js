@@ -93,6 +93,7 @@ export function initDatabase() {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       phone TEXT,
+      designation TEXT,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff', 'master_admin')),
       active INTEGER NOT NULL DEFAULT 1,
@@ -135,6 +136,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS SERVICE_CATEGORIES (
       category_id INTEGER PRIMARY KEY AUTOINCREMENT,
       category_name TEXT NOT NULL,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       description TEXT,
       icon TEXT,
       image_url TEXT,
@@ -167,7 +169,7 @@ export function initDatabase() {
       name TEXT NOT NULL,
       surname TEXT,
       gender TEXT,
-      phone TEXT UNIQUE NOT NULL,
+      phone TEXT NOT NULL,
       email TEXT,
       address_line1 TEXT,
       address_line2 TEXT,
@@ -188,6 +190,7 @@ export function initDatabase() {
       membership_expires_at TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      , UNIQUE(location_id, phone)
     );
 
     CREATE TABLE IF NOT EXISTS VISITS (
@@ -431,6 +434,45 @@ export function initDatabase() {
 
   // Safe migrations for location_id columns
   try { db.exec(`ALTER TABLE USERS ADD COLUMN location_id INTEGER;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE USERS ADD COLUMN designation TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE USERS ADD COLUMN deleted_at DATETIME;`); } catch(e) {}
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS USER_ACCESS_PROFILES (
+      user_id INTEGER PRIMARY KEY REFERENCES USERS(user_id) ON DELETE CASCADE,
+      location_id INTEGER NOT NULL REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,
+      permissions TEXT NOT NULL DEFAULT '[]',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  // Give existing desk accounts the intended access profile when upgrading
+  // from the legacy role-only setup. Admin accounts are intentionally excluded.
+  db.prepare(`
+    INSERT OR IGNORE INTO USER_ACCESS_PROFILES (user_id, location_id, permissions)
+    SELECT user_id, location_id,
+      CASE WHEN role = 'visitor' THEN '["visitor_intake"]'
+           ELSE '["dashboard","visits","clients"]' END
+    FROM USERS
+    WHERE role IN ('reception', 'visitor') AND location_id IS NOT NULL
+  `).run();
+  const managerProfiles = db.prepare(`
+    SELECT p.user_id, p.location_id, p.permissions
+    FROM USER_ACCESS_PROFILES p
+    JOIN USERS u ON u.user_id = p.user_id
+    WHERE u.role = 'reception'
+  `).all();
+  const saveManagerPermissions = db.prepare(`
+    UPDATE USER_ACCESS_PROFILES
+    SET permissions = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ? AND location_id = ?
+  `);
+  for (const profile of managerProfiles) {
+    try {
+      const permissions = JSON.parse(profile.permissions || '[]');
+      if (Array.isArray(permissions) && permissions.includes('visitor_intake')) {
+        saveManagerPermissions.run(JSON.stringify(permissions.filter(permission => permission !== 'visitor_intake')), profile.user_id, profile.location_id);
+      }
+    } catch (e) {}
+  }
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_number TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_doc TEXT;`); } catch(e) {}
@@ -444,6 +486,36 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_type TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_name TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE SERVICE_CATEGORIES ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id);`); } catch(e) {}
+
+  // Replace the legacy global client-phone uniqueness with per-branch uniqueness.
+  // Rebuild in place so existing visit and membership foreign keys continue to target CLIENTS.
+  try {
+    const clientsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'CLIENTS'").get()?.sql || '';
+    if (/phone\s+TEXT\s+UNIQUE\s+NOT\s+NULL/i.test(clientsSql)) {
+      const columns = db.pragma('table_info(CLIENTS)').map(column => `\"${column.name}\"`).join(', ');
+      const branchScopedClientsSql = clientsSql
+        .replace(/^CREATE TABLE\s+CLIENTS/i, 'CREATE TABLE CLIENTS_branch_scoped')
+        .replace(/phone\s+TEXT\s+UNIQUE\s+NOT\s+NULL/i, 'phone TEXT NOT NULL')
+        .replace(/\)\s*$/, ', UNIQUE(location_id, phone))');
+      db.pragma('foreign_keys = OFF');
+      try {
+        db.exec('BEGIN IMMEDIATE');
+        db.exec(branchScopedClientsSql);
+        db.exec(`INSERT INTO CLIENTS_branch_scoped (${columns}) SELECT ${columns} FROM CLIENTS`);
+        db.exec('DROP TABLE CLIENTS');
+        db.exec('ALTER TABLE CLIENTS_branch_scoped RENAME TO CLIENTS');
+        db.exec('COMMIT');
+      } catch (migrationError) {
+        try { db.exec('ROLLBACK'); } catch (e) {}
+        throw migrationError;
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+    }
+  } catch (e) {
+    console.error('Branch-scoped client phone migration notice:', e.message);
+  }
 
   // Safe migration to support 'master_admin' in USERS role constraint if needed
   try {
@@ -547,6 +619,7 @@ export function initDatabase() {
       UPDATE STAFF SET location_id = 1 WHERE location_id IS NULL;
       UPDATE CLIENTS SET location_id = 1 WHERE location_id IS NULL;
       UPDATE VISITS SET location_id = 1 WHERE location_id IS NULL;
+      UPDATE SERVICE_CATEGORIES SET location_id = 1 WHERE location_id IS NULL;
     `);
   } catch (e) {
     console.error('Locations migration notice:', e.message);
@@ -699,8 +772,8 @@ function seedData() {
   if (catCount === 0) {
     console.log('Seeding 6 main service categories & sub-services...');
     const insertCat = db.prepare(`
-      INSERT INTO SERVICE_CATEGORIES (category_name, description, icon, display_order, active)
-      VALUES (?, ?, ?, ?, 1)
+      INSERT INTO SERVICE_CATEGORIES (category_name, location_id, description, icon, display_order, active)
+      VALUES (?, 1, ?, ?, ?, 1)
     `);
 
     const insertService = db.prepare(`
@@ -1135,6 +1208,60 @@ function seedData() {
     // Ignore
   }
 
+  // Give Juhu its own editable catalog when the branch has no categories yet.
+  // These are copied once from the existing catalog; later changes stay branch-local.
+  try {
+    const juhuBranch = db.prepare(`
+      SELECT location_id FROM LOCATIONS
+      WHERE type = 'branch' AND lower(name) LIKE '%juhu%'
+      ORDER BY location_id ASC LIMIT 1
+    `).get();
+    const sourceCategories = db.prepare(`
+      SELECT * FROM SERVICE_CATEGORIES WHERE location_id = 1
+      ORDER BY display_order ASC, category_id ASC
+    `).all();
+    const juhuCategoryCount = juhuBranch
+      ? db.prepare('SELECT COUNT(*) AS count FROM SERVICE_CATEGORIES WHERE location_id = ?').get(juhuBranch.location_id).count
+      : 0;
+
+    if (juhuBranch && juhuCategoryCount === 0 && sourceCategories.length > 0) {
+      const categoryColumns = db.prepare('PRAGMA table_info(SERVICE_CATEGORIES)').all()
+        .map(column => column.name)
+        .filter(name => !['category_id', 'location_id', 'created_at', 'updated_at'].includes(name));
+      const serviceColumns = db.prepare('PRAGMA table_info(SERVICES)').all()
+        .map(column => column.name)
+        .filter(name => !['service_id', 'category_id', 'created_at', 'updated_at'].includes(name));
+      const insertCategory = db.prepare(`
+        INSERT INTO SERVICE_CATEGORIES (${[...categoryColumns, 'location_id'].join(', ')})
+        VALUES (${[...categoryColumns, 'location_id'].map(() => '?').join(', ')})
+      `);
+      const insertService = db.prepare(`
+        INSERT INTO SERVICES (category_id, ${serviceColumns.join(', ')})
+        VALUES (${['category_id', ...serviceColumns].map(() => '?').join(', ')})
+      `);
+      const getServices = db.prepare('SELECT * FROM SERVICES WHERE category_id = ? ORDER BY display_order ASC, service_id ASC');
+      const copyJuhuCatalog = db.transaction(() => {
+        let copiedServices = 0;
+        for (const category of sourceCategories) {
+          const info = insertCategory.run(
+            ...categoryColumns.map(column => category[column]),
+            juhuBranch.location_id
+          );
+          const newCategoryId = info.lastInsertRowid;
+          for (const service of getServices.all(category.category_id)) {
+            insertService.run(newCategoryId, ...serviceColumns.map(column => service[column]));
+            copiedServices++;
+          }
+        }
+        return copiedServices;
+      });
+      const copiedServices = copyJuhuCatalog();
+      console.log(`Created Juhu's branch-specific catalog: ${sourceCategories.length} categories and ${copiedServices} sub-services.`);
+    }
+  } catch (error) {
+    console.error('Juhu catalog setup notice:', error.message);
+  }
+
   // Runtime migration: Normalize all branch & franchise codes to MB-B-<CITY>-001 / MB-F-<CITY>-001
   try {
     migrateLocationCodes(db);
@@ -1162,30 +1289,10 @@ export function generateLocationCode(dbInstance = db, { type = 'branch', city = 
   return candidateCode;
 }
 
-export function formatPhoneIndian(rawPhone) {
-  const raw = String(rawPhone || '').trim();
-  const digits = raw.replace(/\D/g, '');
-  const last10 = digits.length >= 10 ? digits.slice(-10) : '';
-  if (last10.length === 10) {
-    return `+91 ${last10.slice(0, 5)} ${last10.slice(5)}`;
-  }
-  return raw || '+91 98200 12345';
-}
-
 export function migrateLocationCodes(dbInstance = db) {
   const codePattern = /^MB-[BF]-[A-Z]{3}-\d{3}$/;
   const allLocs = dbInstance.prepare('SELECT * FROM LOCATIONS ORDER BY location_id ASC').all();
 
-  const fallbackManagers = [
-    'Ayesha Khan',
-    'Vikram Rathore',
-    'Karan Verma',
-    'Tanvi Deshmukh',
-    'Pooja Hegde',
-    'Rohan Kulkarni',
-    'Ananya Sharma',
-    'Siddharth Malhotra'
-  ];
   const defaultPinByCity = {
     hyderabad: '500033',
     mumbai: '400050',
@@ -1233,22 +1340,11 @@ export function migrateLocationCodes(dbInstance = db) {
         else pinStr = defaultPinByCity[cityStr.toLowerCase()] || '500033';
       }
 
-      const phoneStr = formatPhoneIndian(loc.phone || loc.primary_login_phone);
-
-      let mgrStr = (loc.manager_name || '').trim();
-      if (!mgrStr) {
-        const sh = dbInstance.prepare('SELECT name FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC LIMIT 1').get(loc.location_id);
-        if (sh?.name) {
-          mgrStr = sh.name
-            .replace(/^(?:Partner\s+(?:One|Two|Three|\d+)\s*[-–—:]\s*|Director\s+|Proprietor\s+)/i, '')
-            .replace(/\bUpdated\b/gi, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-        }
-      }
-      if (!mgrStr || /Test\s+Individual/i.test(mgrStr)) {
-        mgrStr = fallbackManagers[(Number(loc.location_id || 1) - 1) % fallbackManagers.length];
-      }
+      const storedPhone = String(loc.phone || '').trim();
+      const phoneStr = storedPhone.replace(/\D/g, '') === String(loc.primary_login_phone || '').replace(/\D/g, '')
+        ? ''
+        : storedPhone;
+      const mgrStr = String(loc.manager_name || '').trim();
 
       dbInstance.prepare(`
         UPDATE LOCATIONS

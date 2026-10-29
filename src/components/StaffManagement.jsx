@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, Edit2, Award, User, X, Upload, FileText, ExternalLink, Trash2, Camera, Phone, BriefcaseBusiness,
   ShieldCheck, Calculator, FileCheck, Landmark
@@ -296,14 +297,6 @@ export default function StaffManagement() {
           </h1>
         </div>
 
-        <button
-          onClick={() => handleOpenModal()}
-          className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px', marginRight: '20px' }}
-        >
-          <Plus size={16} />
-          Add Team Member
-        </button>
       </div>
 
       {/* Staff Grid */}
@@ -313,6 +306,45 @@ export default function StaffManagement() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', columnGap: '20px', rowGap: '28px' }}>
+          <button
+            type="button"
+            className="card"
+            onClick={() => handleOpenModal()}
+            style={{
+              padding: '28px',
+              minHeight: '250px',
+              boxSizing: 'border-box',
+              background: '#FFFFFF',
+              border: '1px solid #D99A64',
+              borderRadius: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '12px',
+              color: '#1C1917',
+              textAlign: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={event => {
+              event.currentTarget.style.borderColor = '#C6A36A';
+              event.currentTarget.style.boxShadow = '0 10px 24px rgba(198,163,106,0.14)';
+              event.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={event => {
+              event.currentTarget.style.borderColor = '#D99A64';
+              event.currentTarget.style.boxShadow = '0 6px 18px rgba(87, 58, 32, 0.06)';
+              event.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <span style={{ width: 56, height: 56, borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#B88B4A', background: '#FAF6EE', border: '1px solid #EADBBE' }}>
+              <Plus size={24} />
+            </span>
+            <span style={{ fontSize: '18px', fontWeight: 700 }}>Add Team Member</span>
+            <span style={{ maxWidth: 240, color: '#78716C', fontSize: '12.5px', lineHeight: 1.5 }}>Add a practitioner to this branch team.</span>
+          </button>
           {staff.map(s => {
             return (
               <div
@@ -322,24 +354,25 @@ export default function StaffManagement() {
                   padding: '28px',
                   minHeight: '250px',
                   opacity: s.active === 1 ? 1 : 0.65,
-                  border: s.active === 1 ? '1px solid #EADBBE' : '1px dashed #D6D3D1',
+                  border: '1px solid #D99A64',
                   background: '#FFFFFF',
-                  borderRadius: '14px',
+                  borderRadius: '22px',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
+                  position: 'relative',
                   gap: '20px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+                  boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)',
                   transition: 'box-shadow 0.2s ease'
                 }}
               >
                 <div>
                   {/* Card Header: Avatar, Name, Role, Status */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', minWidth: 0, paddingRight: '58px' }}>
+                    <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', minWidth: 0, width: '100%' }}>
                       <div style={{
-                        width: '44px',
-                        height: '44px',
+                        width: '48px',
+                        height: '48px',
                         borderRadius: '50%',
                         background: '#FAF8F5',
                         color: '#8C6228',
@@ -352,21 +385,28 @@ export default function StaffManagement() {
                       }}>
                         {s.photo_url ? <img src={s.photo_url} alt={`${s.name} profile`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : s.name.charAt(0)}
                       </div>
-                      <div>
-                        <h2 style={{ fontSize: '17px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
+                      <div style={{ minWidth: 0, paddingTop: '1px' }}>
+                        <h2 style={{ fontSize: '17px', color: '#1C1917', fontWeight: '700', margin: 0, lineHeight: 1.3 }}>
                           {s.name}
                         </h2>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '5px', fontSize: '12.5px', marginTop: '4px', minWidth: 0, lineHeight: 1.35 }}>
-                          <BriefcaseBusiness size={13} color="#8C6228" aria-hidden="true" style={{ flexShrink: 0, marginTop: '2px' }} />
-                          <span style={{ minWidth: 0 }}>
-                            <span style={{ display: 'block', color: '#78716C', fontWeight: 500 }}>Designation:</span>
-                            <span style={{ display: 'block', color: '#8C6228', fontWeight: 600 }}>{s.role || 'Not added'}</span>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', fontSize: '12.5px', marginTop: '6px', minWidth: 0, lineHeight: 1.35 }}>
+                          <BriefcaseBusiness size={13} color="#8C6228" aria-hidden="true" style={{ flexShrink: 0 }} />
+                          <span style={{ minWidth: 0, color: '#78716C' }}>
+                            <span style={{ whiteSpace: 'nowrap' }}>Designation: </span>
+                            <span style={{ display: 'inline', color: '#8C6228', fontWeight: 600 }}>{s.role || 'Not added'}</span>
                           </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginTop: '20px', fontSize: '13px', color: '#57534E', lineHeight: 1.4 }}>
+                          <Phone size={14} color="#8C6228" aria-hidden="true" />
+                          <span>{s.phone ? formatPhone(s.phone) : 'No phone number added'}</span>
                         </div>
                       </div>
                     </div>
 
                     <span style={{
+                      position: 'absolute',
+                      top: '28px',
+                      right: '28px',
                       fontSize: '11px',
                       fontWeight: '600',
                       padding: '3px 8px',
@@ -379,14 +419,10 @@ export default function StaffManagement() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '22px', fontSize: '13px', color: '#57534E' }}>
-                    <Phone size={14} color="#8C6228" aria-hidden="true" />
-                    <span>{s.phone ? formatPhone(s.phone) : 'No phone number added'}</span>
-                  </div>
                 </div>
 
                 {/* Actions: Clean unified buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '18px', borderTop: '1px solid #F0ECE4' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '16px', borderTop: '1px solid #EAD9C8' }}>
                   <button
                     onClick={() => handleToggleActive(s)}
                     style={{
@@ -431,7 +467,7 @@ export default function StaffManagement() {
 
       {/* Staff details popup */}
       {photoToCrop && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
+        createPortal(<div style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1200, padding: '28px 20px 20px', overflowY: 'auto', boxSizing: 'border-box' }}>
           <div role="dialog" aria-modal="true" aria-labelledby="photo-crop-title" style={{ width: '100%', maxWidth: 400, background: '#FFFDF9', border: '1px solid #EADBBE', borderRadius: 16, padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
             <h2 id="photo-crop-title" style={{ margin: '0 0 6px', fontSize: 19, color: '#1C1917' }}>Adjust team photo</h2>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: '#78716C' }}>Drag the photo to position it in the circle, then adjust the zoom.</p>
@@ -452,7 +488,7 @@ export default function StaffManagement() {
               <button type="button" onClick={handlePhotoUpload} disabled={photoUploading || !cropImageSize.width} style={{ padding: '9px 13px', border: '1px solid #DAC493', borderRadius: 7, background: '#FAF6EE', color: '#8C6228', fontWeight: 700, cursor: photoUploading ? 'wait' : 'pointer' }}>{photoUploading ? 'Saving…' : 'Use this photo'}</button>
             </div>
           </div>
-        </div>
+        </div>, document.body)
       )}
 
       {detailsStaff && (() => {
@@ -469,8 +505,8 @@ export default function StaffManagement() {
             <span style={{ color: '#1C1917', fontWeight: 600, textAlign: 'right' }}>{value}</span>
           </div>
         );
-        return (
-          <div onClick={() => setDetailsStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+        return createPortal(
+          <div onClick={() => setDetailsStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, padding: '28px 20px 20px', overflowY: 'auto', boxSizing: 'border-box' }}>
             <div role="dialog" aria-modal="true" aria-labelledby="staff-details-title" onClick={e => e.stopPropagation()} className="animate-fade-in" style={{ maxWidth: '540px', width: '100%', maxHeight: '90vh', overflowY: 'auto', background: '#FFFDF9', borderRadius: '16px', border: '1px solid #EADBBE', boxShadow: '0 20px 50px rgba(0,0,0,0.18)', padding: '26px 30px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
                 <div>
@@ -497,22 +533,25 @@ export default function StaffManagement() {
                 <button type="button" onClick={() => { setDetailsStaff(null); handleOpenModal(s); }} style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #DAC493', background: '#FAF8F5', color: '#8C6228', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><Edit2 size={14} />Edit Details</button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         );
       })()}
 
       {/* Staff Modal */}
       {modal.open && (
-        <div style={{
+        createPortal(<div style={{
           position: 'fixed',
           inset: 0,
           background: 'rgba(28,25,23,0.65)',
           backdropFilter: 'blur(4px)',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           justifyContent: 'center',
           zIndex: 1000,
-          padding: '20px'
+          padding: '28px 20px 20px',
+          overflowY: 'auto',
+          boxSizing: 'border-box'
         }}>
           <div
             className="animate-fade-in"
@@ -1122,7 +1161,7 @@ export default function StaffManagement() {
               </div>
             </form>
           </div>
-        </div>
+        </div>, document.body)
       )}
     </div>
   );

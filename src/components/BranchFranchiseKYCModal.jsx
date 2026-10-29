@@ -45,6 +45,11 @@ export default function BranchFranchiseKYCModal({
   const [pincode, setPincode] = useState(locationToEdit?.pincode || '');
   const [city, setCity] = useState(locationToEdit?.city || '');
   const [state, setState] = useState(locationToEdit?.state || '');
+  const [officePhone, setOfficePhone] = useState(() => {
+    const storedPhone = String(locationToEdit?.phone || '').trim();
+    const loginPhone = String(locationToEdit?.primary_login_phone || locationToEdit?.kyc?.primary_login_phone || '').replace(/\D/g, '');
+    return storedPhone && storedPhone.replace(/\D/g, '') !== loginPhone ? storedPhone : '';
+  });
 
   // Repeatable Business Mobiles
   const [mobileNumbers, setMobileNumbers] = useState(() => {
@@ -185,6 +190,7 @@ export default function BranchFranchiseKYCModal({
   const [uploadingDocKey, setUploadingDocKey] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
   const [viewingDocUrl, setViewingDocUrl] = useState(null);
+  const [viewingDocTop, setViewingDocTop] = useState(24);
 
   // Flow Step: 1 = KYC Form, 2 = Create Admin Logins, 3 = Confirmation / Summary
   const [currentStep, setCurrentStep] = useState(1);
@@ -243,6 +249,7 @@ export default function BranchFranchiseKYCModal({
         setStakeholders(items);
         setMobileNumbers(['']);
         setEmailIds(['']);
+        setOfficePhone('');
         setPrimaryLoginPhone('');
         setPrimaryLoginEmail('');
         setValidationErrors({});
@@ -265,6 +272,18 @@ export default function BranchFranchiseKYCModal({
           ? locationToEdit.kyc.mobile_numbers
           : ensureList(locationToEdit.phone, '');
         setMobileNumbers(initMobiles);
+
+        const loginPhones = [
+          locationToEdit.primary_login_phone,
+          locationToEdit.kyc?.primary_login_phone,
+          ...initMobiles
+        ].map(phone => String(phone || '').replace(/\D/g, '')).filter(Boolean);
+        const storedOfficePhone = String(locationToEdit.phone || '').trim();
+        setOfficePhone(
+          storedOfficePhone && !loginPhones.includes(storedOfficePhone.replace(/\D/g, ''))
+            ? storedOfficePhone
+            : ''
+        );
 
         const initEmails = locationToEdit.kyc?.email_ids?.length > 0
           ? locationToEdit.kyc.email_ids
@@ -794,6 +813,12 @@ export default function BranchFranchiseKYCModal({
     }
   };
 
+  const openDocumentPreview = (url, event) => {
+    const clickTop = event?.currentTarget?.getBoundingClientRect?.().top ?? 24;
+    setViewingDocTop(Math.max(24, Math.min(clickTop, window.innerHeight - 160)));
+    setViewingDocUrl(url);
+  };
+
   const handleDocumentFile = async (e, key, stakeholderIdx = null) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -809,22 +834,13 @@ export default function BranchFranchiseKYCModal({
 
     try {
       setUploadingDocKey(key);
-      const token = localStorage.getItem('token');
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/kyc/upload', {
+      const data = await apiRequest('/kyc/upload', {
         method: 'POST',
-        headers: {
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
         body: formData
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload document');
-      }
 
       // Assign uploaded URL
       if (stakeholderIdx !== null) {
@@ -1076,6 +1092,7 @@ export default function BranchFranchiseKYCModal({
         pincode: pincode.trim(),
         city: city.trim(),
         state: state.trim(),
+        office_phone: officePhone.trim(),
         mobile_numbers: mobileNumbers.filter(Boolean),
         email_ids: emailIds.filter(Boolean),
         primary_login_phone: primaryLoginPhone,
@@ -1138,34 +1155,14 @@ export default function BranchFranchiseKYCModal({
       if (res?.location) {
         const savedLoc = res.location;
         setSavedLocation(savedLoc);
-
-        // Populate initial Admin Login accounts directly based on registered stakeholders:
-        // - In Proprietor: 1 proprietor was registered -> 1 Admin Login pre-filled
-        // - In Partnership: 2 (or more if added) partners -> 2 (or more) Admin Logins pre-filled
-        // - In Pvt. Ltd. / LLP: 3 (or more if added) directors -> 3 (or more) Admin Logins pre-filled
-        const validStakeholders = (payload.stakeholders || []).filter(s => s && s.name && s.name.trim());
-        const sourceList = validStakeholders.length > 0
-          ? validStakeholders
-          : [{ name: '', email: '', mobile: '', role_type: 'Admin' }];
-
-        const initialAdmins = sourceList.map((s, idx) => {
-          const roleLabel = s.role_type || (firmType === 'Proprietor' ? 'Proprietor' : (firmType === 'Partnership' ? 'Partner' : 'Director'));
-          return {
-            id: `stk_${idx}_${Date.now()}`,
-            name: s.name || '',
-            email: s.primary_login_email || s.email || '',
-            phone: s.primary_login_phone || s.mobile || '',
-            password: 'Admin@' + Math.floor(100000 + Math.random() * 900000),
-            showPassword: false,
-            role_type: roleLabel,
-            isStakeholder: true,
-            stakeholderIndex: idx
-          };
-        });
-
-        setAdminAccounts(initialAdmins);
+        setCreatedAdminResult((res.admin_users || []).map(account => ({
+          ...account,
+          email: account.email || '',
+          phone: account.phone || '',
+          role_type: account.role_type || 'Branch Admin'
+        })));
         setAdminErrors({});
-        setCurrentStep(2);
+        setCurrentStep(3);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
@@ -1521,6 +1518,31 @@ export default function BranchFranchiseKYCModal({
                       {validationErrors.state}
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
+                  Office Phone Number <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={officePhone}
+                  onChange={(e) => setOfficePhone(e.target.value)}
+                  placeholder="Branch office contact number"
+                  style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1.5px solid var(--border-color)',
+                    background: 'var(--bg-card-subtle)',
+                    outline: 'none',
+                    fontSize: '14px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '5px' }}>
+                  This number appears on the branch card. Personal director numbers remain login contacts.
                 </div>
               </div>
 
@@ -2279,7 +2301,7 @@ export default function BranchFranchiseKYCModal({
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <button
                                   type="button"
-                                  onClick={() => setViewingDocUrl(sh.pan_doc)}
+                                  onClick={(event) => openDocumentPreview(sh.pan_doc, event)}
                                   style={{
                                     background: '#FFFFFF',
                                     border: '1px solid #DAC493',
@@ -2430,7 +2452,7 @@ export default function BranchFranchiseKYCModal({
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <button
                                   type="button"
-                                  onClick={() => setViewingDocUrl(sh.aadhaar_doc)}
+                                  onClick={(event) => openDocumentPreview(sh.aadhaar_doc, event)}
                                   style={{
                                     background: '#FFFFFF',
                                     border: '1px solid #DAC493',
@@ -2665,7 +2687,7 @@ export default function BranchFranchiseKYCModal({
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <button
                             type="button"
-                            onClick={() => setViewingDocUrl(firmPanDoc)}
+                            onClick={(event) => openDocumentPreview(firmPanDoc, event)}
                             style={{
                               background: '#FFFFFF',
                               border: '1px solid #DAC493',
@@ -2797,7 +2819,7 @@ export default function BranchFranchiseKYCModal({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
-                          onClick={() => setViewingDocUrl(incorporationDoc)}
+                          onClick={(event) => openDocumentPreview(incorporationDoc, event)}
                           style={{
                             background: '#FFFFFF',
                             border: '1px solid #DAC493',
@@ -2894,7 +2916,7 @@ export default function BranchFranchiseKYCModal({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
-                          onClick={() => setViewingDocUrl(aoaDoc)}
+                          onClick={(event) => openDocumentPreview(aoaDoc, event)}
                           style={{
                             background: '#FFFFFF',
                             border: '1px solid #DAC493',
@@ -2988,7 +3010,7 @@ export default function BranchFranchiseKYCModal({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
-                          onClick={() => setViewingDocUrl(moaDoc)}
+                          onClick={(event) => openDocumentPreview(moaDoc, event)}
                           style={{
                             background: '#FFFFFF',
                             border: '1px solid #DAC493',
@@ -3114,7 +3136,7 @@ export default function BranchFranchiseKYCModal({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
-                          onClick={() => setViewingDocUrl(gstDoc)}
+                          onClick={(event) => openDocumentPreview(gstDoc, event)}
                           style={{
                             background: '#FFFFFF',
                             border: '1px solid #DAC493',
@@ -3230,7 +3252,7 @@ export default function BranchFranchiseKYCModal({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
-                          onClick={() => setViewingDocUrl(gumasthaDoc)}
+                          onClick={(event) => openDocumentPreview(gumasthaDoc, event)}
                           style={{
                             background: '#FFFFFF',
                             border: '1px solid #DAC493',
@@ -4021,11 +4043,11 @@ export default function BranchFranchiseKYCModal({
             </div>
 
             <h3 style={{ fontFamily: 'var(--font-sans)', fontSize: '26px', fontWeight: '700', color: '#1C1917', marginBottom: '8px' }}>
-              Studio & Admin Logins Created Successfully!
+              {isEdit ? 'Branch Details Updated' : 'Branch & Admin Access Created'}
             </h3>
             <p style={{ fontSize: '15px', color: '#57534E', maxWidth: '640px', lineHeight: '1.6', margin: '0 0 28px 0' }}>
-              <strong>{savedLocation?.name || branchName}</strong> has been registered with complete KYC.
-              The following administrator accounts have been activated for official portal access:
+              <strong>{savedLocation?.name || branchName}</strong> {isEdit ? 'has been updated.' : 'has been registered with complete KYC.'}
+              {!isEdit && ' Every registered proprietor, partner, or director can now sign in to this branch with OTP using their registered mobile number.'}
             </p>
 
             {/* Credentials Card */}
@@ -4041,15 +4063,15 @@ export default function BranchFranchiseKYCModal({
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #EFE4D2' }}>
                 <span style={{ fontSize: '14px', fontWeight: '800', color: '#1C1917', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Activated Admin Credentials ({createdAdminResult.length})
+                  Branch Admin Accounts ({createdAdminResult.length})
                 </span>
                 <button
                   type="button"
                   onClick={() => {
                     const text = createdAdminResult.map((a, i) =>
-                      `Admin #${i + 1} (${a.role_type}):\nName: ${a.name}\nEmail: ${a.email}\nPhone: ${a.phone || 'N/A'}\nPassword: ${a.password}\n`
-                    ).join('\n---\n\n');
-                    handleCopyText('all', `Maison BeYou — ${savedLocation?.name || branchName} Admin Logins\n==========================================\n\n${text}`);
+                      `Admin #${i + 1} (${a.role_type}):\nName: ${a.name}\nEmail: ${a.email}\nRegistered mobile: ${a.phone || 'N/A'}\nSign in with OTP`
+                    ).join('\n\n');
+                    handleCopyText('all', `Maison BeYou — ${savedLocation?.name || branchName} Admin Accounts\n\n${text}`);
                   }}
                   style={{
                     background: '#FFFFFF',
@@ -4066,7 +4088,7 @@ export default function BranchFranchiseKYCModal({
                   }}
                 >
                   {copiedKey === 'all' ? <Check size={14} color="#16A34A" /> : <Copy size={14} />}
-                  <span>{copiedKey === 'all' ? 'Copied All!' : 'Copy All Credentials'}</span>
+                  <span>{copiedKey === 'all' ? 'Copied All!' : 'Copy Login Details'}</span>
                 </button>
               </div>
 
@@ -4093,17 +4115,14 @@ export default function BranchFranchiseKYCModal({
                           {adm.role_type}
                         </span>
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                        Login ID: <strong style={{ color: '#1C1917' }}>{adm.email}</strong>
-                      </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                        Password: <strong style={{ color: '#B88B4A', fontFamily: 'monospace' }}>{adm.password}</strong>
-                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Mobile: <strong style={{ color: '#1C1917' }}>{adm.phone || '—'}</strong></div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '2px' }}>Email: <strong style={{ color: '#1C1917' }}>{adm.email || '—'}</strong></div>
+                      <div style={{ fontSize: '12px', color: '#9F7335', marginTop: '4px', fontWeight: '700' }}>Sign in using OTP sent to the registered mobile</div>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => handleCopyText(`card_${idx}`, `Email: ${adm.email}\nPassword: ${adm.password}`)}
+                      onClick={() => handleCopyText(`card_${idx}`, `Name: ${adm.name}\nMobile: ${adm.phone}\nEmail: ${adm.email}\nSign in using OTP`)}
                       style={{
                         background: '#FAF6EE',
                         border: '1px solid #DAC493',
@@ -4159,16 +4178,19 @@ export default function BranchFranchiseKYCModal({
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
           zIndex: 2700,
-          padding: '24px'
+          padding: '24px',
+          overflowY: 'auto',
+          boxSizing: 'border-box'
         }}>
           <div style={{
             background: '#FFFFFF',
             borderRadius: '16px',
             maxWidth: '820px',
             width: '100%',
-            maxHeight: '90vh',
+            marginTop: `${Math.max(0, viewingDocTop - 24)}px`,
+            maxHeight: `calc(100vh - ${viewingDocTop + 24}px)`,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',

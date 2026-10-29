@@ -7,14 +7,16 @@ import {
   Upload
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
-import { MEMBERSHIP_PLANS } from './NewVisitWizard';
+import { canAccessModule } from '../utils/permissions';
 
 export default function MembershipManagement({ onOpenClient, activeLocation, currentUser }) {
   const user = currentUser || JSON.parse(localStorage.getItem('crm_user') || '{}');
   const effectiveRole = user?.original_role || user?.role;
-  const canManagePlans = effectiveRole === 'master_admin' || effectiveRole === 'admin';
+  const canManagePlans = effectiveRole === 'master_admin'
+    || effectiveRole === 'admin'
+    || (effectiveRole === 'reception' && canAccessModule(user, 'membership'));
 
-  const [plans, setPlans] = useState(MEMBERSHIP_PLANS);
+  const [plans, setPlans] = useState([]);
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({
     total_members: 0,
@@ -25,6 +27,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     tier_counts: { 'Éclat': 0, 'Eternal': 0, 'Infini': 0, 'Lumière': 0 }
   });
   const [loading, setLoading] = useState(true);
+  const membershipRequestId = useRef(0);
 
   const [selectedTier, setSelectedTier] = useState(null);
 
@@ -103,14 +106,20 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       'Special member discount on all treatments'
     ]
   });
+  const [newPlanDurationValue, setNewPlanDurationValue] = useState('1');
+  const [newPlanDurationUnit, setNewPlanDurationUnit] = useState('year');
 
   // Card Image File Upload State & Ref
   const [cardImageUploading, setCardImageUploading] = useState(false);
   const cardImageInputRef = useRef(null);
   const fetchMemberships = async () => {
+    const requestId = ++membershipRequestId.current;
     try {
       setLoading(true);
       const res = await apiRequest('/memberships');
+      // Ignore responses from a previous branch if the user switched locations
+      // while the request was in flight.
+      if (requestId !== membershipRequestId.current) return;
       if (res.plans) {
         setPlans(res.plans);
       }
@@ -128,9 +137,13 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         tier_counts: {}
       });
     } catch (err) {
-      console.error('Failed to load memberships:', err);
+      if (requestId === membershipRequestId.current) {
+        console.error('Failed to load memberships:', err);
+        setPlans([]);
+        setMembers([]);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === membershipRequestId.current) setLoading(false);
     }
   };
 
@@ -144,16 +157,25 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   };
 
   useEffect(() => {
+    // Never leave the previous branch's memberships visible during a switch.
+    setPlans([]);
+    setMembers([]);
+    setStats({ total_members: 0, total_allocated: 0, total_used: 0, total_balance: 0, overall_usage_pct: 0, tier_counts: {} });
+    setProgramTitle('WORLD OF PRIVILEGES');
+    setTempTitle('WORLD OF PRIVILEGES');
+    setLoading(true);
     fetchMemberships();
-  }, [activeLocation]);
+    return () => { membershipRequestId.current += 1; };
+  }, [activeLocation?.location_id, currentUser?.location_id]);
 
   const handleSelectPlanForEnroll = (plan) => {
     if (!plan) return;
     setSelectedPlanId(plan.id);
     setCustomCost(plan.price);
     let days = 365;
-    if (plan.id === 'eclat') days = 90;
-    else if (plan.id === 'eternal') days = 180;
+    const tierName = (plan.tier || plan.id || '').toLowerCase();
+    if (tierName.includes('eclat') || tierName.includes('éclat')) days = 90;
+    else if (tierName.includes('eternal')) days = 180;
     const expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setCustomExpiry(expiryDate);
   };
@@ -168,7 +190,11 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     if (preselectedPlan) {
       handleSelectPlanForEnroll(preselectedPlan);
     } else {
-      const defaultPlan = plans.find(p => p.id === 'infini') || plans[0] || MEMBERSHIP_PLANS[2];
+      if (!plans.length) {
+        alert('This branch has no membership plans configured yet.');
+        return;
+      }
+      const defaultPlan = plans.find(p => (p.tier || '').toLowerCase().includes('infini')) || plans[0];
       handleSelectPlanForEnroll(defaultPlan);
     }
     setEnrollModal(true);
@@ -305,6 +331,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     try {
       setSavingPlan(true);
       const tierVal = newPlanForm.tier.trim() || newPlanForm.name.trim();
+      const durationLimit = newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : Infinity;
+      const durationValue = Math.min(durationLimit, Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1));
+      const durationUnitLabel = durationValue === 1 ? newPlanDurationUnit : `${newPlanDurationUnit}s`;
+      const durationValidity = `Valid for ${durationValue} ${durationUnitLabel}`;
       const payload = {
         name: newPlanForm.name.trim(),
         fullName: newPlanForm.fullName.trim() || `${newPlanForm.name.trim().toUpperCase()} MEMBERSHIP`,
@@ -312,9 +342,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         tierNumber: newPlanForm.tierNumber.trim() || `0${plans.length + 1} — SERVICE`,
         price: Number(newPlanForm.price),
         credits: Number(newPlanForm.price),
-        validity: newPlanForm.validity,
-        validityBadge: newPlanForm.validityBadge || newPlanForm.validity.toUpperCase(),
-        durationLabel: newPlanForm.durationLabel || `(${newPlanForm.validity.toLowerCase()})`,
+        validity: durationValidity,
+        validityBadge: durationValidity.toUpperCase(),
+        durationLabel: `(per ${durationValue} ${durationUnitLabel})`,
         image: newPlanForm.image,
         tagline: newPlanForm.tagline,
         benefits: newPlanForm.benefits.map(benefit => benefit.trim()).filter(Boolean).length > 0
@@ -331,6 +361,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       if (res && res.success) {
         setShowAddPlanModal(false);
         setIsInlineAddingPlan(false);
+        setNewPlanDurationValue('1');
+        setNewPlanDurationUnit('year');
         setNewPlanForm({
           name: '',
           fullName: '',
@@ -364,6 +396,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   };
 
   const handleStartInlineAddPlan = () => {
+    setNewPlanDurationValue('1');
+    setNewPlanDurationUnit('year');
     setNewPlanForm({
       name: '',
       fullName: '',
@@ -382,15 +416,30 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     setIsInlineAddingPlan(true);
   };
 
-  const currentValidityMatch = (newPlanForm.validity || '').match(/(\d+)\s+(days?|months?|years?)/i);
-  const currentValidityValue = currentValidityMatch ? currentValidityMatch[1] : '1';
-  const currentValidityUnit = currentValidityMatch ? currentValidityMatch[2].replace(/s$/i, '').toLowerCase() : 'year';
   const updateNewPlanValidity = (value, unit) => {
-    const safeValue = Math.max(1, Number(value) || 1);
-    const pluralUnit = safeValue === 1 ? unit : `${unit}s`;
-    const validity = `Valid for ${safeValue} ${pluralUnit}`;
-    const durationLabel = `(per ${safeValue} ${pluralUnit})`;
+    const durationLimit = unit === 'day' ? 30 : unit === 'month' ? 12 : Infinity;
+    const isWholePositiveNumber = /^\d+$/.test(String(value)) && Number(value) >= 1;
+    const normalizedValue = isWholePositiveNumber ? String(Math.min(durationLimit, Number(value))) : value;
+    setNewPlanDurationValue(normalizedValue);
+    setNewPlanDurationUnit(unit);
+    if (!isWholePositiveNumber) return;
+    const pluralUnit = Number(normalizedValue) === 1 ? unit : `${unit}s`;
+    const validity = `Valid for ${normalizedValue} ${pluralUnit}`;
+    const durationLabel = `(per ${normalizedValue} ${pluralUnit})`;
     setNewPlanForm(prev => ({ ...prev, validity, validityBadge: validity.toUpperCase(), durationLabel }));
+  };
+  const normalizeNewPlanValidity = () => {
+    const durationLimit = newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : Infinity;
+    const safeValue = Math.min(durationLimit, Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1));
+    const pluralUnit = safeValue === 1 ? newPlanDurationUnit : `${newPlanDurationUnit}s`;
+    const validity = `Valid for ${safeValue} ${pluralUnit}`;
+    setNewPlanDurationValue(String(safeValue));
+    setNewPlanForm(prev => ({
+      ...prev,
+      validity,
+      validityBadge: validity.toUpperCase(),
+      durationLabel: `(per ${safeValue} ${pluralUnit})`
+    }));
   };
 
   const handleSaveTitle = async () => {
@@ -690,7 +739,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 300px))',
+          justifyContent: 'start',
           gap: '18px'
         }}>
           {plans.map(p => {
@@ -702,11 +752,11 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 key={p.id}
                 style={{
                   background: '#FFFFFF',
-                  borderRadius: '18px',
-                  border: isSelected ? '2px solid #B88B4A' : '1.5px solid #EADBCC',
+                  borderRadius: '22px',
+                  border: isSelected ? '2px solid #B88B4A' : '1px solid #D99A64',
                   boxShadow: isSelected
                     ? '0 10px 28px rgba(184, 139, 74, 0.22)'
-                    : '0 3px 14px rgba(184, 139, 74, 0.05)',
+                    : '0 6px 18px rgba(87, 58, 32, 0.06)',
                   transform: isSelected ? 'translateY(-3px)' : 'none',
                   display: 'flex',
                   flexDirection: 'column',
@@ -992,15 +1042,15 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 background: '#FFFFFF',
                 gridColumn: '1',
                 gridRow: '1',
-                borderRadius: '18px',
-                border: '1px solid #E8DCCB',
+                borderRadius: '22px',
+                border: '1px solid #D99A64',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
                 cursor: isInlineAddingPlan ? 'default' : 'pointer',
-                minHeight: '440px',
+                minHeight: '665px',
                 transition: 'all 0.22s ease',
-                boxShadow: '0 3px 14px rgba(184, 139, 74, 0.05)',
+                boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)',
                 userSelect: 'none'
               }}
               onMouseEnter={(e) => {
@@ -1009,9 +1059,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 e.currentTarget.style.boxShadow = '0 10px 28px rgba(184, 139, 74, 0.18)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#E8DCCB';
+                e.currentTarget.style.borderColor = '#D99A64';
                 e.currentTarget.style.transform = 'none';
-                e.currentTarget.style.boxShadow = '0 3px 14px rgba(184, 139, 74, 0.05)';
+                e.currentTarget.style.boxShadow = '0 6px 18px rgba(87, 58, 32, 0.06)';
               }}
             >
               {isInlineAddingPlan ? (
@@ -1074,21 +1124,23 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       onChange={(e) => setNewPlanForm(prev => ({ ...prev, price: e.target.value }))}
                       style={{ minWidth: 0, boxSizing: 'border-box', padding: '8px', border: '1px solid #E7D8C4', borderRadius: '7px', textAlign: 'center', fontWeight: '700', fontSize: '12px' }}
                     />
-                    <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF' }}>
+                    <div style={{ minWidth: 0, minHeight: '36px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF' }}>
                       <Calendar size={12} color="#9E7437" />
                       <input
                         aria-label="Membership duration"
                         type="number"
                         min="1"
-                        value={currentValidityValue}
-                        onChange={(e) => updateNewPlanValidity(e.target.value, currentValidityUnit)}
-                        style={{ width: '34px', minWidth: 0, border: 0, outline: 'none', padding: '8px 0', fontSize: '10px' }}
+                        max={newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : undefined}
+                        value={newPlanDurationValue}
+                        onChange={(e) => updateNewPlanValidity(e.target.value, newPlanDurationUnit)}
+                        onBlur={normalizeNewPlanValidity}
+                        style={{ width: '56px', minWidth: '56px', flex: '0 0 56px', boxSizing: 'border-box', border: 0, outline: 'none', padding: '8px 0', fontSize: '12px' }}
                       />
                       <select
                         aria-label="Membership duration unit"
-                        value={currentValidityUnit}
-                        onChange={(e) => updateNewPlanValidity(currentValidityValue, e.target.value)}
-                        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: '10px' }}
+                        value={newPlanDurationUnit}
+                        onChange={(e) => updateNewPlanValidity(newPlanDurationValue, e.target.value)}
+                        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: '12px' }}
                       >
                         <option value="day">days</option>
                         <option value="month">months</option>

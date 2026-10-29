@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, Check, Building2, ArrowLeft } from 'lucide-react';
 import { getStoredToken, getStoredUser, setStoredToken, setStoredUser, getStoredLocation, setStoredLocation, formatCurrency, formatDate, apiRequest } from '../utils/api';
+import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
@@ -88,6 +89,11 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     window.dispatchEvent(new Event('auth_change'));
   };
 
+  useEffect(() => {
+    window.addEventListener('request_app_logout', handleLogout);
+    return () => window.removeEventListener('request_app_logout', handleLogout);
+  }, [setCurrentUser]);
+
   const handleQuickSwitchRole = async (targetRole) => {
     try {
       const activeLocId = activeLocation?.location_id || currentUser?.location_id;
@@ -136,15 +142,13 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   const roleLabels = {
     master_admin: 'Master Administrator',
     admin: 'Administrator',
-    reception: 'Reception Desk',
+    reception: 'Manager',
     visitor: 'Visitor Desk',
     staff: 'Staff Member'
   };
 
   const effectiveOriginalRole = currentUser?.original_role || currentUser?.role;
   const isMasterAdmin = effectiveOriginalRole === 'master_admin';
-  const isBranchAdmin = effectiveOriginalRole === 'admin';
-  const isReception = effectiveOriginalRole === 'reception';
   const isVisitor = effectiveOriginalRole === 'visitor';
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
 
@@ -813,51 +817,6 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
             </button>
           )}
 
-          {/* Branch Admin / Reception (and Master Admin when on Visitor Desk or sub-page): Dashboard button in place of Switch Studio */}
-          {(isBranchAdmin || isReception || (isMasterAdmin && (currentUser?.role === 'visitor' || activeTab !== 'dashboard'))) && (
-            <button
-              type="button"
-              onClick={() => {
-                if (currentUser?.role === 'visitor') {
-                  handleQuickSwitchRole(isReception ? 'reception' : 'admin');
-                } else {
-                  if (onResetVisit && activeVisitClient) {
-                    onResetVisit();
-                  }
-                  setActiveTab('dashboard');
-                  window.dispatchEvent(new CustomEvent('reset_dashboard_section'));
-                }
-              }}
-              title="Return to Studio Dashboard"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '7px',
-                padding: '7px 15px',
-                borderRadius: '9999px',
-                fontSize: '12.5px',
-                fontWeight: '700',
-                color: '#9F7335',
-                background: '#FAF6EE',
-                border: '1.5px solid #DAC493',
-                cursor: 'pointer',
-                transition: 'all 0.18s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#B88B4A';
-                e.currentTarget.style.color = '#FFFFFF';
-                e.currentTarget.style.borderColor = '#B88B4A';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#FAF6EE';
-                e.currentTarget.style.color = '#9F7335';
-                e.currentTarget.style.borderColor = '#DAC493';
-              }}
-            >
-              <LayoutDashboard size={14} />
-              <span>Dashboard</span>
-            </button>
-          )}
           {/* Priority 1: When a Client is Active in the Visit Flow (visitor desk only)
               Display the Client Profile Pill (Image 2) in place of Visitor Desk (Image 3) */}
           {(currentUser?.role === 'visitor' || activeTab === 'new-visit') && activeVisitClient && activeVisitClient.name ? (
@@ -1182,6 +1141,51 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 </div>
               )}
             </div>
+          ) : activeTab === 'dashboard' && isAdmin ? (
+            <button
+              type="button"
+              onClick={e => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                window.dispatchEvent(new CustomEvent('open_studio_modules', {
+                  detail: {
+                    top: rect.bottom + 8,
+                    right: window.innerWidth - rect.right
+                  }
+                }));
+              }}
+              title="Open Studio Modules"
+              aria-label="Open Studio Modules"
+              style={{
+                width: '36px',
+                height: '36px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #D8BD91',
+                borderRadius: '6px',
+                color: '#A8793D',
+                background: '#FFFFFF',
+                cursor: 'pointer',
+                transition: 'background 0.15s ease, border-color 0.15s ease'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background = '#FAF6EE';
+                e.currentTarget.style.borderColor = '#B88B4A';
+                const rect = e.currentTarget.getBoundingClientRect();
+                window.dispatchEvent(new CustomEvent('open_studio_modules', {
+                  detail: {
+                    top: rect.bottom + 8,
+                    right: window.innerWidth - rect.right
+                  }
+                }));
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = '#FFFFFF';
+                e.currentTarget.style.borderColor = '#D8BD91';
+              }}
+            >
+              <Menu size={18} strokeWidth={1.8} />
+            </button>
           ) : (
             /* Visitor Desk or Dashboard User Profile pill (Image 3) */
             <div ref={switchMenuRef} style={{ position: 'relative' }}>
@@ -1203,7 +1207,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 </div>
                 <div className="navbar-user-info">
                   <div className="navbar-user-name">
-                    {currentUser?.name || (currentUser?.role === 'reception' ? 'Reception Desk' : 'Staff User')}
+                    {currentUser?.name || (currentUser?.role === 'reception' ? 'Manager' : 'Staff User')}
                   </div>
                   <div className="navbar-user-role">
                     {roleLabels[currentUser?.role] || currentUser?.role}
@@ -1507,7 +1511,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 }}>
                   <ShieldCheck size={16} color="#B88B4A" style={{ flexShrink: 0 }} />
                   <div>
-                    You will remain logged in to CRM as <strong>{currentUser?.name || 'Reception Desk'}</strong> ({roleLabels[currentUser?.role] || currentUser?.role}).
+                    You will remain logged in to CRM as <strong>{currentUser?.name || 'Manager'}</strong> ({roleLabels[currentUser?.role] || currentUser?.role}).
                   </div>
                 </div>
 
@@ -1585,7 +1589,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   Do you need to exit this page and return to the main Dashboard? Any unsaved progress will be cleared.
                   <br />
                   <span style={{ fontSize: '12.5px', color: '#B88B4A', marginTop: '8px', display: 'block', fontWeight: '600' }}>
-                    You will remain logged in as {currentUser?.name || 'Reception Desk'} on the Dashboard.
+                    You will remain logged in as {currentUser?.name || 'Manager'} on the Dashboard.
                   </span>
                 </p>
 
