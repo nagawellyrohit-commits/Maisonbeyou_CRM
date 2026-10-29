@@ -4983,6 +4983,7 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
       aadhaar_doc,
       pan_number,
       pan_doc,
+      photo_url,
       salary_type,
       salary_amount,
       incentive_percentage
@@ -5003,10 +5004,10 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
     const info = db.prepare(`
       INSERT INTO STAFF (
         name, role, phone, active, location_id,
-        aadhaar_number, aadhaar_doc, pan_number, pan_doc,
+        aadhaar_number, aadhaar_doc, pan_number, pan_doc, photo_url,
         salary_type, salary_amount, incentive_percentage
       )
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name.trim(),
       role.trim(),
@@ -5016,6 +5017,7 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
       aadhaar_doc || null,
       pan_number ? pan_number.trim().toUpperCase() : null,
       pan_doc || null,
+      photo_url || null,
       cleanSalaryType,
       cleanSalaryAmount,
       cleanIncentivePct
@@ -5041,6 +5043,7 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
       aadhaar_doc,
       pan_number,
       pan_doc,
+      photo_url,
       salary_type,
       salary_amount,
       incentive_percentage
@@ -5073,6 +5076,7 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
           aadhaar_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_doc END,
           pan_number = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_number END,
           pan_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_doc END,
+          photo_url = CASE WHEN ? IS NOT NULL THEN ? ELSE photo_url END,
           salary_type = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_type END,
           salary_amount = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_amount END,
           incentive_percentage = CASE WHEN ? IS NOT NULL THEN ? ELSE incentive_percentage END,
@@ -5091,6 +5095,8 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
       pan_number ? pan_number.trim().toUpperCase() : '',
       pan_doc !== undefined ? 1 : null,
       pan_doc || '',
+      photo_url !== undefined ? 1 : null,
+      photo_url || '',
       cleanSalaryType !== undefined ? 1 : null,
       cleanSalaryType || 'fixed',
       salary_amount !== undefined ? 1 : null,

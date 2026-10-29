@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Plus, Edit2, Phone, Award, Sparkles, User, Check, X,
-  Upload, FileText, ExternalLink, Trash2, ShieldCheck,
-  DollarSign, Percent, Calculator, AlertCircle, FileCheck, Landmark
+  Plus, Edit2, Award, User, X, Upload, FileText, ExternalLink, Trash2, Camera, Phone, BriefcaseBusiness,
+  ShieldCheck, Calculator, FileCheck, Landmark
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatPhone } from '../utils/api';
 
@@ -20,11 +19,21 @@ export default function StaffManagement() {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, mode: 'create', data: null });
+  const [detailsStaff, setDetailsStaff] = useState(null);
 
   // Form states
   const [name, setName] = useState('');
   const [role, setRole] = useState('Senior Aesthetician');
   const [phone, setPhone] = useState('');
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoToCrop, setPhotoToCrop] = useState('');
+  const [cropZoom, setCropZoom] = useState(1);
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 });
+  const [cropImageSize, setCropImageSize] = useState({ width: 0, height: 0 });
+  const [cropDragging, setCropDragging] = useState(false);
+  const cropDragStart = useRef(null);
+  const cropViewportSize = 260;
 
   // KYC & ID states
   const [aadhaarNumber, setAadhaarNumber] = useState('');
@@ -44,7 +53,13 @@ export default function StaffManagement() {
     try {
       setLoading(true);
       const res = await apiRequest('/admin/staff');
-      setStaff(res.staff || []);
+      setStaff(currentStaff => (res.staff || []).map(nextStaff => {
+        const current = currentStaff.find(item => item.staff_id === nextStaff.staff_id);
+        // Keep the just-saved photo visible if an older API response omits this field.
+        return nextStaff.photo_url === undefined && current?.photo_url
+          ? { ...nextStaff, photo_url: current.photo_url }
+          : nextStaff;
+      }));
     } catch (err) {
       console.error(err);
     } finally {
@@ -62,6 +77,7 @@ export default function StaffManagement() {
       setName(s.name || '');
       setRole(s.role || '');
       setPhone(s.phone || '');
+      setPhotoUrl(s.photo_url || '');
       setAadhaarNumber(s.aadhaar_number || '');
       setAadhaarDoc(s.aadhaar_doc || '');
       setPanNumber(s.pan_number || '');
@@ -74,6 +90,7 @@ export default function StaffManagement() {
       setName('');
       setRole('Senior Aesthetician');
       setPhone('');
+      setPhotoUrl('');
       setAadhaarNumber('');
       setAadhaarDoc('');
       setPanNumber('');
@@ -82,6 +99,96 @@ export default function StaffManagement() {
       setSalaryAmount('');
       setIncentivePercentage('');
     }
+  };
+
+  const handlePhotoSelection = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please choose an image file.');
+      e.target.value = '';
+      return;
+    }
+    const imageUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => setCropImageSize({ width: image.naturalWidth, height: image.naturalHeight });
+    image.src = imageUrl;
+    setPhotoToCrop(imageUrl);
+    setCropZoom(1);
+    setCropOffset({ x: 0, y: 0 });
+    e.target.value = '';
+  };
+
+  const closePhotoCrop = () => {
+    if (photoToCrop) URL.revokeObjectURL(photoToCrop);
+    setPhotoToCrop('');
+    setCropImageSize({ width: 0, height: 0 });
+    setCropDragging(false);
+    cropDragStart.current = null;
+  };
+
+  const handlePhotoUpload = async () => {
+    if (!photoToCrop || photoUploading) return;
+    const image = new Image();
+    image.src = photoToCrop;
+    try {
+      await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = reject;
+      });
+      const baseScale = Math.max(cropViewportSize / image.naturalWidth, cropViewportSize / image.naturalHeight);
+      const scale = baseScale * cropZoom;
+      const cropSize = cropViewportSize / scale;
+      const sourceX = Math.max(0, Math.min(image.naturalWidth - cropSize, (image.naturalWidth - cropSize) / 2 - cropOffset.x / scale));
+      const sourceY = Math.max(0, Math.min(image.naturalHeight - cropSize, (image.naturalHeight - cropSize) / 2 - cropOffset.y / scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+      context.drawImage(image, sourceX, sourceY, cropSize, cropSize, 0, 0, 512, 512);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+      if (!blob) throw new Error('Could not prepare the cropped image.');
+      setPhotoUploading(true);
+      const formData = new FormData();
+      formData.append('file', new File([blob], 'team-photo.jpg', { type: 'image/jpeg' }));
+      const res = await apiRequest('/admin/upload', { method: 'POST', body: formData });
+      if (res.url) setPhotoUrl(res.url);
+      closePhotoCrop();
+    } catch (err) {
+      alert('Photo upload failed: ' + (err.message || 'Please try another image'));
+    } finally {
+      setPhotoUploading(false);
+    }
+  };
+
+  const startCropDrag = (e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    cropDragStart.current = { x: e.clientX, y: e.clientY, offset: cropOffset };
+    setCropDragging(true);
+  };
+
+  const moveCrop = (e) => {
+    if (!cropDragStart.current) return;
+    const start = cropDragStart.current;
+    if (!cropImageSize.width) return;
+    const baseScale = Math.max(cropViewportSize / cropImageSize.width, cropViewportSize / cropImageSize.height);
+    const halfOverflowX = Math.max(0, (cropImageSize.width * baseScale * cropZoom - cropViewportSize) / 2);
+    const halfOverflowY = Math.max(0, (cropImageSize.height * baseScale * cropZoom - cropViewportSize) / 2);
+    setCropOffset({
+      x: Math.max(-halfOverflowX, Math.min(halfOverflowX, start.offset.x + e.clientX - start.x)),
+      y: Math.max(-halfOverflowY, Math.min(halfOverflowY, start.offset.y + e.clientY - start.y))
+    });
+  };
+
+  const handleCropZoom = (value) => {
+    const zoom = Number(value);
+    setCropZoom(zoom);
+    if (!cropImageSize.width) return;
+    const baseScale = Math.max(cropViewportSize / cropImageSize.width, cropViewportSize / cropImageSize.height);
+    const overflowX = Math.max(0, (cropImageSize.width * baseScale * zoom - cropViewportSize) / 2);
+    const overflowY = Math.max(0, (cropImageSize.height * baseScale * zoom - cropViewportSize) / 2);
+    setCropOffset(offset => ({ x: Math.max(-overflowX, Math.min(overflowX, offset.x)), y: Math.max(-overflowY, Math.min(overflowY, offset.y)) }));
   };
 
   const handleFileUpload = async (e, docType) => {
@@ -136,6 +243,7 @@ export default function StaffManagement() {
         name: name.trim(),
         role: role.trim(),
         phone: phone.trim(),
+        photo_url: photoUrl,
         aadhaar_number: aadhaarNumber.trim(),
         aadhaar_doc: aadhaarDoc,
         pan_number: panNumber.trim().toUpperCase(),
@@ -146,18 +254,22 @@ export default function StaffManagement() {
       };
 
       if (modal.mode === 'create') {
-        await apiRequest('/admin/staff', {
+        const res = await apiRequest('/admin/staff', {
           method: 'POST',
           body: JSON.stringify(payload)
         });
+        if (res.staff) setStaff(current => [...current, { ...res.staff, photo_url: res.staff.photo_url || photoUrl }]);
       } else {
-        await apiRequest(`/admin/staff/${modal.data.staff_id}`, {
+        const res = await apiRequest(`/admin/staff/${modal.data.staff_id}`, {
           method: 'PUT',
           body: JSON.stringify(payload)
         });
+        setStaff(current => current.map(item => item.staff_id === modal.data.staff_id
+          ? { ...item, ...(res.staff || {}), photo_url: res.staff?.photo_url || photoUrl }
+          : item));
       }
       setModal({ open: false, mode: 'create', data: null });
-      fetchStaff();
+      await fetchStaff();
     } catch (err) {
       alert(err.message);
     }
@@ -200,23 +312,15 @@ export default function StaffManagement() {
           Loading staff directory...
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', columnGap: '20px', rowGap: '28px' }}>
           {staff.map(s => {
-            const hasSalaryPlusIncentive = s.salary_type === 'salary_plus_incentive';
-            const incentivePct = Number(s.incentive_percentage) || 0;
-            const salaryAmt = Number(s.salary_amount) || 0;
-            const totalRevenue = Number(s.total_revenue) || 0;
-            const earnedIncentive = Number(s.earned_incentive) || (hasSalaryPlusIncentive ? Math.round((totalRevenue * incentivePct) / 100) : 0);
-            const totalPayout = Number(s.total_estimated_payout) || (hasSalaryPlusIncentive ? (salaryAmt + earnedIncentive) : salaryAmt);
-
-            const hasKyc = !!(s.aadhaar_number || s.aadhaar_doc || s.pan_number || s.pan_doc);
-
             return (
               <div
                 key={s.staff_id}
                 className="card"
                 style={{
-                  padding: '24px',
+                  padding: '28px',
+                  minHeight: '250px',
                   opacity: s.active === 1 ? 1 : 0.65,
                   border: s.active === 1 ? '1px solid #EADBBE' : '1px dashed #D6D3D1',
                   background: '#FFFFFF',
@@ -224,7 +328,7 @@ export default function StaffManagement() {
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  gap: '16px',
+                  gap: '20px',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
                   transition: 'box-shadow 0.2s ease'
                 }}
@@ -246,14 +350,18 @@ export default function StaffManagement() {
                         fontSize: '17px',
                         border: '1px solid #EADBBE'
                       }}>
-                        {s.name.charAt(0)}
+                        {s.photo_url ? <img src={s.photo_url} alt={`${s.name} profile`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : s.name.charAt(0)}
                       </div>
                       <div>
                         <h2 style={{ fontSize: '17px', color: '#1C1917', fontWeight: '700', margin: 0 }}>
                           {s.name}
                         </h2>
-                        <div style={{ fontSize: '12.5px', color: '#8C6228', fontWeight: '600', marginTop: '2px' }}>
-                          {s.role}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '5px', fontSize: '12.5px', marginTop: '4px', minWidth: 0, lineHeight: 1.35 }}>
+                          <BriefcaseBusiness size={13} color="#8C6228" aria-hidden="true" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: 'block', color: '#78716C', fontWeight: 500 }}>Designation:</span>
+                            <span style={{ display: 'block', color: '#8C6228', fontWeight: 600 }}>{s.role || 'Not added'}</span>
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -271,165 +379,19 @@ export default function StaffManagement() {
                     </span>
                   </div>
 
-                  {/* Contact & Remuneration Model Details (Single unified style, no blue/yellow boxes) */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginTop: '14px', fontSize: '12.5px', color: '#57534E' }}>
-                    {s.phone && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                        <Phone size={13} color="#8C6228" />
-                        <span>{formatPhone(s.phone)}</span>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#1C1917', fontWeight: '600' }}>
-                      <DollarSign size={13} color="#8C6228" />
-                      <span>
-                        {hasSalaryPlusIncentive
-                          ? `Base ${formatCurrency(salaryAmt)} + ${incentivePct}% Incentive`
-                          : `Fixed Salary: ${formatCurrency(salaryAmt)}/mo`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* KYC Details Strip (Clean inline border, single background color) */}
-                  <div style={{
-                    marginTop: '14px',
-                    padding: '12px 0',
-                    borderTop: '1px solid #F0ECE4',
-                    borderBottom: '1px solid #F0ECE4',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '6px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', fontWeight: '700', color: '#78716C', letterSpacing: '0.04em' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <ShieldCheck size={13} color="#8C6228" />
-                        KYC & IDENTIFICATION
-                      </span>
-                      <span style={{ color: hasKyc ? '#8C6228' : '#78716C', fontWeight: '600' }}>
-                        {hasKyc ? 'Verified' : 'Pending'}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '12px', color: '#44403C' }}>
-                      {/* Aadhaar */}
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ color: '#78716C' }}>Aadhaar:</span>
-                        <span style={{ fontWeight: '500' }}>{s.aadhaar_number ? s.aadhaar_number : 'Not added'}</span>
-                        {s.aadhaar_doc && (
-                          <a
-                            href={s.aadhaar_doc}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              marginLeft: '3px',
-                              color: '#8C6228',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '2px',
-                              textDecoration: 'underline'
-                            }}
-                          >
-                            <FileText size={11} />
-                            Doc
-                          </a>
-                        )}
-                      </div>
-
-                      {/* PAN */}
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ color: '#78716C' }}>PAN:</span>
-                        <span style={{ fontWeight: '500' }}>{s.pan_number ? s.pan_number : 'Not added'}</span>
-                        {s.pan_doc && (
-                          <a
-                            href={s.pan_doc}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{
-                              marginLeft: '3px',
-                              color: '#8C6228',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '2px',
-                              textDecoration: 'underline'
-                            }}
-                          >
-                            <FileText size={11} />
-                            Doc
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Performance & Payout Stats (Clean layout on card, no colored background block) */}
-                  <div style={{
-                    marginTop: '12px',
-                    display: 'grid',
-                    gridTemplateColumns: hasSalaryPlusIncentive ? '1fr 1fr' : '1fr 1fr 1fr',
-                    gap: '12px'
-                  }}>
-                    <div>
-                      <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
-                        Services Done
-                      </div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
-                        {s.total_services || 0}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
-                        Revenue Handled
-                      </div>
-                      <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
-                        {formatCurrency(totalRevenue)}
-                      </div>
-                    </div>
-
-                    {hasSalaryPlusIncentive ? (
-                      <>
-                        <div>
-                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
-                            Earned Inc. ({incentivePct}%)
-                          </div>
-                          <div style={{ fontSize: '16px', fontWeight: '700', color: '#8C6228', marginTop: '3px' }}>
-                            +{formatCurrency(earnedIncentive)}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
-                            Est. Total Payout
-                          </div>
-                          <div style={{ fontSize: '16px', fontWeight: '800', color: '#1C1917', marginTop: '3px' }}>
-                            {formatCurrency(totalPayout)}
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div>
-                        <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: '#78716C', fontWeight: '700', letterSpacing: '0.04em' }}>
-                          Monthly Salary
-                        </div>
-                        <div style={{ fontSize: '16px', fontWeight: '700', color: '#1C1917', marginTop: '3px' }}>
-                          {formatCurrency(salaryAmt)}
-                        </div>
-                      </div>
-                    )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '22px', fontSize: '13px', color: '#57534E' }}>
+                    <Phone size={14} color="#8C6228" aria-hidden="true" />
+                    <span>{s.phone ? formatPhone(s.phone) : 'No phone number added'}</span>
                   </div>
                 </div>
 
                 {/* Actions: Clean unified buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '14px', borderTop: '1px solid #F0ECE4' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '18px', borderTop: '1px solid #F0ECE4' }}>
                   <button
                     onClick={() => handleToggleActive(s)}
                     style={{
                       fontSize: '12px',
-                      padding: '6px 12px',
+                      padding: '8px 14px',
                       borderRadius: '6px',
                       border: '1px solid #E7E5E4',
                       background: '#FFFFFF',
@@ -442,10 +404,10 @@ export default function StaffManagement() {
                   </button>
 
                   <button
-                    onClick={() => handleOpenModal(s)}
+                    onClick={() => setDetailsStaff(s)}
                     style={{
                       fontSize: '12px',
-                      padding: '6px 14px',
+                      padding: '8px 16px',
                       borderRadius: '6px',
                       border: '1px solid #DAC493',
                       background: '#FAF8F5',
@@ -457,8 +419,8 @@ export default function StaffManagement() {
                       cursor: 'pointer'
                     }}
                   >
-                    <Edit2 size={13} />
-                    Edit Details
+                    <FileText size={13} />
+                    Details
                   </button>
                 </div>
               </div>
@@ -466,6 +428,78 @@ export default function StaffManagement() {
           })}
         </div>
       )}
+
+      {/* Staff details popup */}
+      {photoToCrop && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.65)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200, padding: 20 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="photo-crop-title" style={{ width: '100%', maxWidth: 400, background: '#FFFDF9', border: '1px solid #EADBBE', borderRadius: 16, padding: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.2)' }}>
+            <h2 id="photo-crop-title" style={{ margin: '0 0 6px', fontSize: 19, color: '#1C1917' }}>Adjust team photo</h2>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#78716C' }}>Drag the photo to position it in the circle, then adjust the zoom.</p>
+            <div
+              data-staff-photo-crop
+              onPointerDown={startCropDrag}
+              onPointerMove={moveCrop}
+              onPointerUp={() => { setCropDragging(false); cropDragStart.current = null; }}
+              onPointerCancel={() => { setCropDragging(false); cropDragStart.current = null; }}
+              style={{ position: 'relative', width: cropViewportSize, height: cropViewportSize, maxWidth: '100%', margin: '0 auto 18px', borderRadius: '50%', overflow: 'hidden', background: '#F5F5F4', touchAction: 'none', cursor: cropDragging ? 'grabbing' : 'grab', border: '2px solid #EADBBE' }}
+            >
+              {cropImageSize.width > 0 && <img src={photoToCrop} alt="Crop preview" draggable="false" style={{ position: 'absolute', maxWidth: 'none', width: cropImageSize.width * Math.max(cropViewportSize / cropImageSize.width, cropViewportSize / cropImageSize.height) * cropZoom, height: cropImageSize.height * Math.max(cropViewportSize / cropImageSize.width, cropViewportSize / cropImageSize.height) * cropZoom, left: `calc(50% + ${cropOffset.x}px)`, top: `calc(50% + ${cropOffset.y}px)`, transform: 'translate(-50%, -50%)', pointerEvents: 'none', userSelect: 'none' }} />}
+            </div>
+            <label style={{ display: 'block', color: '#57534E', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Zoom</label>
+            <input type="range" min="1" max="3" step="0.01" value={cropZoom} onChange={e => handleCropZoom(e.target.value)} style={{ width: '100%', accentColor: '#9F7335' }} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 20 }}>
+              <button type="button" onClick={closePhotoCrop} disabled={photoUploading} style={{ padding: '9px 13px', border: '1px solid #E7E5E4', borderRadius: 7, background: '#fff', color: '#57534E', cursor: 'pointer' }}>Cancel</button>
+              <button type="button" onClick={handlePhotoUpload} disabled={photoUploading || !cropImageSize.width} style={{ padding: '9px 13px', border: '1px solid #DAC493', borderRadius: 7, background: '#FAF6EE', color: '#8C6228', fontWeight: 700, cursor: photoUploading ? 'wait' : 'pointer' }}>{photoUploading ? 'Saving…' : 'Use this photo'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailsStaff && (() => {
+        const s = detailsStaff;
+        const incentive = s.salary_type === 'salary_plus_incentive';
+        const salary = Number(s.salary_amount) || 0;
+        const revenue = Number(s.total_revenue) || 0;
+        const pct = Number(s.incentive_percentage) || 0;
+        const earned = Number(s.earned_incentive) || Math.round(revenue * pct / 100);
+        const kycComplete = !!(s.aadhaar_number || s.aadhaar_doc || s.pan_number || s.pan_doc);
+        const detailRow = (label, value) => (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', padding: '10px 0', borderBottom: '1px solid #F0ECE4' }}>
+            <span style={{ color: '#78716C' }}>{label}</span>
+            <span style={{ color: '#1C1917', fontWeight: 600, textAlign: 'right' }}>{value}</span>
+          </div>
+        );
+        return (
+          <div onClick={() => setDetailsStaff(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(28,25,23,0.55)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+            <div role="dialog" aria-modal="true" aria-labelledby="staff-details-title" onClick={e => e.stopPropagation()} className="animate-fade-in" style={{ maxWidth: '540px', width: '100%', maxHeight: '90vh', overflowY: 'auto', background: '#FFFDF9', borderRadius: '16px', border: '1px solid #EADBBE', boxShadow: '0 20px 50px rgba(0,0,0,0.18)', padding: '26px 30px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px' }}>
+                <div>
+                  <h2 id="staff-details-title" style={{ margin: 0, color: '#1C1917', fontSize: '21px' }}>{s.name}</h2>
+                  <div style={{ color: '#8C6228', marginTop: '4px', fontWeight: 600 }}>{s.role}</div>
+                </div>
+                <button type="button" aria-label="Close details" onClick={() => setDetailsStaff(null)} style={{ border: 0, background: 'transparent', cursor: 'pointer', color: '#78716C', padding: 4 }}><X size={20} /></button>
+              </div>
+              {detailRow('Status', s.active === 1 ? 'Active' : 'Inactive')}
+              {s.photo_url && <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 14px' }}><img src={s.photo_url} alt={`${s.name} profile`} style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid #EADBBE' }} /></div>}
+              {detailRow('Phone', s.phone ? formatPhone(s.phone) : 'Not added')}
+              {detailRow('Compensation', incentive ? `Base ${formatCurrency(salary)} + ${pct}% incentive` : `Fixed salary: ${formatCurrency(salary)}/mo`)}
+              <h3 style={{ margin: '20px 0 4px', fontSize: '12px', color: '#78716C', letterSpacing: '0.05em' }}>KYC & IDENTIFICATION · {kycComplete ? 'VERIFIED' : 'PENDING'}</h3>
+              {detailRow('Aadhaar', s.aadhaar_number || 'Not added')}
+              {s.aadhaar_doc && <div style={{ padding: '6px 0' }}><a href={s.aadhaar_doc} target="_blank" rel="noopener noreferrer" style={{ color: '#8C6228' }}>View Aadhaar document</a></div>}
+              {detailRow('PAN', s.pan_number || 'Not added')}
+              {s.pan_doc && <div style={{ padding: '6px 0' }}><a href={s.pan_doc} target="_blank" rel="noopener noreferrer" style={{ color: '#8C6228' }}>View PAN document</a></div>}
+              <h3 style={{ margin: '20px 0 4px', fontSize: '12px', color: '#78716C', letterSpacing: '0.05em' }}>PERFORMANCE</h3>
+              {detailRow('Services done', s.total_services || 0)}
+              {detailRow('Revenue handled', formatCurrency(revenue))}
+              {incentive ? <>{detailRow(`Earned incentive (${pct}%)`, formatCurrency(earned))}{detailRow('Estimated total payout', formatCurrency(Number(s.total_estimated_payout) || salary + earned))}</> : detailRow('Monthly salary', formatCurrency(salary))}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '22px' }}>
+                <button type="button" onClick={() => setDetailsStaff(null)} style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #E7E5E4', background: '#fff', color: '#57534E', cursor: 'pointer' }}>Close</button>
+                <button type="button" onClick={() => { setDetailsStaff(null); handleOpenModal(s); }} style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid #DAC493', background: '#FAF8F5', color: '#8C6228', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}><Edit2 size={14} />Edit Details</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Staff Modal */}
       {modal.open && (
@@ -625,6 +659,18 @@ export default function StaffManagement() {
                     }}
                   />
                 </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#292524', marginBottom: '8px' }}>Team Photo</label>
+                  {photoUrl && <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}><img src={photoUrl} alt="Team member preview" style={{ width: 64, height: 64, borderRadius: '50%', objectFit: 'cover', border: '1px solid #EADBBE' }} /><button type="button" onClick={() => setPhotoUrl('')} style={{ border: 0, background: 'transparent', color: '#DC2626', cursor: 'pointer' }}>Remove photo</button></div>}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <input type="file" accept="image/*" capture="user" disabled={photoUploading} onChange={handlePhotoSelection} style={{ display: 'none' }} id="staff-camera-input" />
+                    <label htmlFor="staff-camera-input" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 12px', border: '1px solid #DAC493', borderRadius: 8, background: '#FAF6EE', color: '#8C6228', fontSize: 12, fontWeight: 700, cursor: photoUploading ? 'wait' : 'pointer' }}><Camera size={15} />Take photo</label>
+                    <input type="file" accept="image/*" disabled={photoUploading} onChange={handlePhotoSelection} style={{ display: 'none' }} id="staff-gallery-input" />
+                    <label htmlFor="staff-gallery-input" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 12px', border: '1px solid #E7E5E4', borderRadius: 8, background: '#fff', color: '#57534E', fontSize: 12, fontWeight: 700, cursor: photoUploading ? 'wait' : 'pointer' }}><Upload size={15} />Choose from device</label>
+                    {photoUploading && <span style={{ alignSelf: 'center', fontSize: 12, color: '#78716C' }}>Uploading photo…</span>}
+                  </div>
+                </div>
               </div>
 
               {/* SECTION 2: Aadhaar & PAN KYC Identification */}
@@ -639,7 +685,7 @@ export default function StaffManagement() {
               }}>
                 <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8C6228', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <ShieldCheck size={14} />
-                  KYC & Identification Details
+                  Branch Details
                 </div>
 
                 {/* Aadhaar Details Row */}

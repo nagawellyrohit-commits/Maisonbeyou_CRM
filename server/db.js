@@ -124,6 +124,7 @@ export function initDatabase() {
       aadhaar_doc TEXT,
       pan_number TEXT,
       pan_doc TEXT,
+      photo_url TEXT,
       salary_type TEXT DEFAULT 'fixed',
       salary_amount REAL DEFAULT 0.0,
       incentive_percentage REAL DEFAULT 0.0,
@@ -435,6 +436,7 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_doc TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_number TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_doc TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN photo_url TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_type TEXT DEFAULT 'fixed';`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_amount REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN incentive_percentage REAL DEFAULT 0.0;`); } catch(e) {}
