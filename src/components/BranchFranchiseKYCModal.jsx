@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Building2, Handshake, X, ArrowLeft, ArrowRight, Plus, Trash2,
   Upload, FileText, CheckCircle2, AlertCircle, Eye, RefreshCw,
@@ -4169,7 +4170,7 @@ export default function BranchFranchiseKYCModal({
       </div>
 
       {/* Document Viewer Modal */}
-      {viewingDocUrl && (
+      {viewingDocUrl && createPortal((
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -4256,7 +4257,7 @@ export default function BranchFranchiseKYCModal({
             </div>
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

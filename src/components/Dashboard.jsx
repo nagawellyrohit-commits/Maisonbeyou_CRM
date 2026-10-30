@@ -643,50 +643,26 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     </span>
                   </div>
 
-                  {((isMasterAdminContext && currentUser?.role === 'master_admin' && activeLocation) ||
-                    dashboardViewRole === 'manager' ||
-                    (isMasterAdminContext && currentUser?.role === 'reception')) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAdminMenu(false);
-                        setShowDashboardRoleMenu(false);
-                        if (isMasterAdminContext) {
-                          onBackToMasterDashboard?.();
-                        } else {
-                          setDashboardViewRole(null);
-                          setActiveSection('visits');
-                        }
-                      }}
-                      style={{
-                        ...roleDashboardButtonStyle,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        fontWeight: '700',
-                        color: '#9F7335'
-                      }}
-                    >
-                      <LayoutDashboard size={16} color="#B88B4A" />
-                      <span>{isMasterAdminContext ? 'Main Admin Dashboard' : 'Branch Admin Dashboard'}</span>
-                    </button>
-                  )}
-
                   {[
                     { id: 'visits', label: dashboardViewRole === 'manager' || dashboardUser?.role === 'reception' ? 'Manager Dashboard' : 'Dashboard', icon: LayoutDashboard, show: hasModuleAccess('dashboard') || hasModuleAccess('visits') },
-                    { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
+                    { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) },
                     { id: 'services', label: 'Services', icon: Scissors, show: hasModuleAccess('services') },
+                    { id: 'membership', label: 'Membership', icon: Crown, show: hasModuleAccess('membership') },
                     { id: 'staff', label: 'Team', icon: Award, show: hasModuleAccess('team') },
                     { id: 'users', label: 'User Access', icon: ShieldCheck, show: isAdmin },
-                    { id: 'membership', label: 'Membership', icon: Crown, show: hasModuleAccess('membership') },
+                    { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
                     { id: 'reports', label: 'Reports', icon: BarChart3, show: hasModuleAccess('reports') },
-                    { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) }
                   ].filter(item => item.show).map(item => {
                     const Icon = item.icon;
                     const isActive = activeSection === item.id;
                     const studioShortName = activeLocation
                       ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name)
                       : 'Studio';
+                    const dashboardLabel = isManagerDashboardPreview
+                      ? 'Back to Admin Dashboard'
+                      : dashboardViewRole === 'manager' || dashboardUser?.role === 'reception'
+                        ? 'Manager Dashboard'
+                        : 'Dashboard';
 
                     if (item.id === 'visits') {
                       return (
@@ -694,6 +670,13 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           <button
                             type="button"
                             onClick={() => {
+                              if (isManagerDashboardPreview) {
+                                setDashboardViewRole(null);
+                                setActiveSection('visits');
+                                setShowDashboardRoleMenu(false);
+                                setShowAdminMenu(false);
+                                return;
+                              }
                               setActiveSection('visits');
                               if (isAdmin && (availableRoleDashboards.manager || availableRoleDashboards.visitor)) {
                                 setShowDashboardRoleMenu(value => !value);
@@ -730,7 +713,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           >
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '10px' }}>
                               <Icon size={16} color="#B88B4A" />
-                              <span>{item.label}</span>
+                              <span>{dashboardLabel}</span>
                             </span>
                             {isAdmin && (availableRoleDashboards.manager || availableRoleDashboards.visitor) && (
                               <ChevronDown size={14} style={{ transform: showDashboardRoleMenu ? 'rotate(180deg)' : 'none', transition: 'transform .15s ease' }} />
@@ -754,20 +737,6 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               zIndex: 120,
                               animation: 'fadeIn 0.15s ease-out'
                             }}>
-                              {isAdmin && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setDashboardViewRole(null);
-                                    setActiveSection('visits');
-                                    setShowDashboardRoleMenu(false);
-                                    setShowAdminMenu(false);
-                                  }}
-                                  style={roleDashboardButtonStyle}
-                                >
-                                  Branch Admin Dashboard
-                                </button>
-                              )}
                               {availableRoleDashboards.manager && (
                                 <button
                                   type="button"

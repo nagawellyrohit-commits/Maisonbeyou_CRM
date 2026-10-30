@@ -788,7 +788,7 @@ app.post('/api/auth/detect-account', (req, res) => {
 });
 
 // Send OTP for direct Login
-app.post('/api/auth/send-login-otp', (req, res) => {
+app.post('/api/auth/send-login-otp', async (req, res) => {
   try {
     const { identifier, role, location_id, account_user_id } = req.body;
     if ((!identifier || !identifier.trim()) && !location_id) {
@@ -818,11 +818,19 @@ app.post('/api/auth/send-login-otp', (req, res) => {
       if (loc) locationName = loc.name;
     }
 
+    const smsDelivery = await dispatchSmsViaGateway(
+      user.phone,
+      otp,
+      user.name,
+      `Your Maison BeYou login OTP is ${otp}. Valid for 10 minutes. Do not share this code.`
+    );
+
     res.json({
       success: true,
-      message: 'OTP sent successfully to registered contact',
+      message: smsDelivery.sent ? 'OTP sent to registered mobile' : 'SMS delivery is not configured; use the demo code',
       maskedContact: maskedPhone || maskedEmail,
-      demoOtp: otp, // For ease of testing & demonstration
+      smsSent: smsDelivery.sent,
+      demoOtp: smsDelivery.sent ? null : otp,
       userId: user.user_id,
       userRole: user.role,
       userName: user.name,
@@ -4288,28 +4296,34 @@ app.post('/api/clients', authenticateToken, (req, res) => {
 const clientOtpStore = new Map();
 
 // Real SMS Dispatch Carrier Helper
-async function dispatchSmsViaGateway(phone, code, clientName) {
-  const message = `Your Maison BeYou verification OTP is ${code}. Valid for 5 minutes. Please share with reception to verify your visit.`;
+async function dispatchSmsViaGateway(phone, code, clientName, customMessage = null) {
+  const message = customMessage || `Your Maison BeYou verification OTP is ${code}. Valid for 5 minutes. Please share with reception to verify your visit.`;
 
   // 1. Fast2SMS (Indian Gateway)
   const fast2SmsKey = process.env.FAST2SMS_API_KEY;
-  if (fast2SmsKey) {
+  const fast2SmsOtpId = process.env.FAST2SMS_OTP_ID;
+  if (fast2SmsKey && fast2SmsOtpId) {
     try {
-      const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      const response = await fetch('https://www.fast2sms.com/dev/otp/send', {
         method: 'POST',
         headers: {
           'authorization': fast2SmsKey,
+          'accept': 'application/json',
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          route: 'otp',
-          variables_values: code,
-          numbers: phone
+          otp_id: fast2SmsOtpId,
+          mobile: String(phone).replace(/\D/g, '').slice(-10),
+          otp: code,
+          otp_expiry: 10,
+          otp_length: String(code).length
         })
       });
       const data = await response.json();
       console.log('[FAST2SMS Gateway Response]:', data);
-      return { sent: true, provider: 'Fast2SMS', data };
+      if (response.ok && data.return === true) {
+        return { sent: true, provider: 'Fast2SMS', data };
+      }
     } catch (e) {
       console.error('[FAST2SMS Error]:', e);
     }

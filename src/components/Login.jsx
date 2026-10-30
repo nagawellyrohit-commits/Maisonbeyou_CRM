@@ -19,6 +19,19 @@ import { setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
 import brandLogoImg from '../assets/brand-logo.png';
 import loginBg from '../assets/login-bg.jpg';
 
+async function readApiResponse(res, action) {
+  const body = await res.text();
+  if (!body.trim()) {
+    throw new Error(`${action} returned an empty response. Please check that the login service is running and try again.`);
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(`${action} returned an invalid response. Please try again or contact support.`);
+  }
+}
+
 export default function Login({ onLoginSuccess }) {
   // Mobile / Phone or ID input
   const [identifier, setIdentifier] = useState('');
@@ -64,7 +77,7 @@ export default function Login({ onLoginSuccess }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ identifier: trimmed })
         });
-        const data = await res.json();
+        const data = await readApiResponse(res, 'Account lookup');
         if (data.found) {
           setDetectedAccount(data);
           if (data.type === 'multiple' && data.accounts && data.accounts.length > 0) {
@@ -133,7 +146,7 @@ export default function Login({ onLoginSuccess }) {
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
+      const data = await readApiResponse(res, 'OTP request');
       if (!res.ok) {
         throw new Error(data.error || 'No active account found. Please check your mobile number.');
       }
@@ -147,9 +160,11 @@ export default function Login({ onLoginSuccess }) {
         data.userRole === 'admin' ? 'Branch Main Admin' :
         data.userRole === 'reception' ? 'Manager' : 'Visitor'
       );
-      setDemoOtp(data.demoOtp || '784920');
+      setDemoOtp(data.demoOtp || '');
       setOtpCooldown(60);
-      setSuccessMsg(`Verification code sent to registered mobile: ${data.maskedContact || 'Authorized contact'}`);
+      setSuccessMsg(data.smsSent
+        ? `Verification code sent to registered mobile: ${data.maskedContact || 'Authorized contact'}`
+        : `SMS delivery is not configured. Use the demo code shown below to continue.`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -193,7 +208,7 @@ export default function Login({ onLoginSuccess }) {
         body: JSON.stringify(payload)
       });
 
-      const data = await res.json();
+      const data = await readApiResponse(res, 'Login verification');
       if (!res.ok) {
         throw new Error(data.error || 'Invalid or expired verification code');
       }
