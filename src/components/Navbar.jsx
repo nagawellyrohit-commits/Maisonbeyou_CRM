@@ -5,7 +5,7 @@ import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
-export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation }) {
+export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, branding }) {
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [showDashboardConfirm, setShowDashboardConfirm] = useState(false);
   const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
@@ -769,9 +769,9 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
             style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
             title={currentUser?.role === 'visitor' ? "Visitor Reception Flow" : "Maison BeYou Dashboard"}
           >
-            <img 
-              src={brandLogoImg} 
-              alt="Maison BeYou" 
+            <img
+              src={branding?.logo_url || brandLogoImg}
+              alt={branding?.brand_name || 'Maison BeYou'}
               className="navbar-brand-logo"
             />
           </div>

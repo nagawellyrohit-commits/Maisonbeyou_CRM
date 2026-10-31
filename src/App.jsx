@@ -14,6 +14,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import StudioManagement from './components/StudioManagement';
 import LocationSelection from './components/LocationSelection';
 import { canAccessModule } from './utils/permissions';
+import { brandingCssVariables, DEFAULT_MASTER_PORTAL_BRANDING, getLocationBranding } from './utils/branding';
 
 const dashboardModuleKeys = ['dashboard', 'visits', 'clients', 'services', 'team', 'membership', 'reports'];
 const landingTabFor = (user) => user?.role === 'visitor' && canAccessModule(user, 'visitor_intake') &&
@@ -31,6 +32,10 @@ import {
 export default function App() {
   const [currentUser, setCurrentUser] = useState(getStoredUser());
   const [selectedLocation, setSelectedLocation] = useState(getStoredLocation());
+  const [branding, setBranding] = useState(() => getLocationBranding(getStoredLocation()));
+  const [brandingPreview, setBrandingPreview] = useState(null);
+  const [masterPortalBranding, setMasterPortalBranding] = useState(DEFAULT_MASTER_PORTAL_BRANDING);
+  const [masterPortalBrandingPreview, setMasterPortalBrandingPreview] = useState(null);
   const [masterAdminView, setMasterAdminView] = useState('types'); // 'types' | 'locations'
   const [selectedLocationType, setSelectedLocationType] = useState('branch'); // 'branch' | 'franchise'
 
@@ -55,6 +60,34 @@ export default function App() {
   });
   const [cartInfo, setCartInfo] = useState({ count: 0, openCart: null, visible: false });
 
+  useEffect(() => {
+    setBranding(getLocationBranding(selectedLocation));
+    setBrandingPreview(null);
+  }, [selectedLocation?.location_id]);
+
+  const activeBranding = brandingPreview || branding;
+  const activeMasterPortalBranding = masterPortalBrandingPreview || masterPortalBranding;
+  const saveBranchBranding = (nextBranding) => {
+    setBranding(nextBranding);
+    setBrandingPreview(null);
+    if (selectedLocation) {
+      const updatedLocation = { ...selectedLocation, branding_config: JSON.stringify(nextBranding), branding: nextBranding };
+      setSelectedLocation(updatedLocation);
+      setStoredLocation(updatedLocation);
+    }
+  };
+
+  const saveMasterPortalBranding = (nextBranding) => {
+    setMasterPortalBranding(nextBranding);
+    setMasterPortalBrandingPreview(null);
+  };
+
+  useEffect(() => {
+    apiRequest('/branding/master-portal')
+      .then(result => setMasterPortalBranding({ ...DEFAULT_MASTER_PORTAL_BRANDING, ...(result.branding || {}) }))
+      .catch(error => console.error('Could not load master portal branding:', error));
+  }, []);
+
   const handleLogout = () => {
     setStoredToken(null);
     setStoredUser(null);
@@ -71,6 +104,8 @@ export default function App() {
     setReceiptVisitId(null);
     setSelectedLocation(location);
     setStoredLocation(location);
+    setBranding(getLocationBranding(location));
+    setBrandingPreview(null);
     setActiveTab('dashboard');
     window.dispatchEvent(new Event('auth_change'));
   };
@@ -220,6 +255,7 @@ export default function App() {
   if (!currentUser) {
     return (
       <Login
+        masterPortalBranding={activeMasterPortalBranding}
         onLoginSuccess={(user, location) => {
           setCurrentUser(user);
           setActiveVisitClient(null);
@@ -254,6 +290,9 @@ export default function App() {
           onSelectLocation={handleSelectLocation}
           onBack={() => setMasterAdminView('types')}
           onLogout={handleLogout}
+          branding={activeMasterPortalBranding}
+          onPreviewBranding={setMasterPortalBrandingPreview}
+          onSaveBranding={saveMasterPortalBranding}
         />
       );
     }
@@ -266,15 +305,19 @@ export default function App() {
           setMasterAdminView('locations');
         }}
         onLogout={handleLogout}
+        branding={activeMasterPortalBranding}
+        onPreviewBranding={setMasterPortalBrandingPreview}
+        onSaveBranding={saveMasterPortalBranding}
       />
     );
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className={`app-shell app-branded${activeTab === 'dashboard' ? ' dashboard-branding-active' : ''}`} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', ...brandingCssVariables(activeBranding) }}>
       <Navbar
         activeTab={activeTab}
         activeLocation={selectedLocation}
+        branding={activeBranding}
         onSwitchLocation={handleSwitchLocation}
         setActiveTab={(tab) => {
           if (tab === 'new-visit' && !canAccessModule(currentUser, 'visitor_intake')) {
@@ -323,6 +366,9 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <Dashboard
             currentUser={currentUser}
+            branding={activeBranding}
+            onPreviewBranding={setBrandingPreview}
+            onSaveBranding={saveBranchBranding}
             activeLocation={selectedLocation}
             onSwitchLocation={handleSwitchLocation}
             onBackToMasterDashboard={handleReturnToMasterDashboard}
@@ -378,6 +424,7 @@ export default function App() {
           <ClientsList
             onOpenClient={(id) => handleOpenClient(id, 'clients')}
             onBackToDashboard={() => setActiveTab('dashboard')}
+            branding={activeBranding}
           />
         )}
 
@@ -390,19 +437,19 @@ export default function App() {
         )}
 
         {canAccessModule(currentUser, 'services') && activeTab === 'services' && (
-          <ServiceManagement />
+          <ServiceManagement branding={activeBranding} />
         )}
 
         {canAccessModule(currentUser, 'team') && activeTab === 'staff' && (
-          <StaffManagement />
+          <StaffManagement branding={activeBranding} currentUser={currentUser} />
         )}
 
         {canAccessModule(currentUser, 'membership') && activeTab === 'membership' && (
-          <MembershipManagement currentUser={currentUser} activeLocation={selectedLocation} />
+          <MembershipManagement currentUser={currentUser} activeLocation={selectedLocation} branding={activeBranding} />
         )}
 
         {canAccessModule(currentUser, 'reports') && activeTab === 'reports' && (
-          <ReportsView />
+          <ReportsView branding={activeBranding} />
         )}
       </main>
       </ErrorBoundary>

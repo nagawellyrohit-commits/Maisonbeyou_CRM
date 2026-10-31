@@ -9,6 +9,51 @@ const __dirname = path.dirname(__filename);
 const dbPath = path.join(__dirname, 'maison_beyou.db');
 const db = new Database(dbPath);
 
+const DEFAULT_TEAM_MASTER_OPTIONS = [
+  ['role', 'Manager'],
+  ['role', 'Laser Therapist'],
+  ['role', 'Aesthetician'],
+  ['role', 'Receptionist'],
+  ['role', 'Support Staff'],
+  ['role', 'Studio Manager'],
+  ['role', 'Aesthetic Physician'],
+  ['role', 'Consultant Dermatologist'],
+  ['role', 'Skin & Laser Specialist'],
+  ['role', 'Skin & Medi-Facial Specialist'],
+  ['role', 'Laser Technician'],
+  ['role', 'Hair & Scalp Specialist'],
+  ['role', 'Cosmetologist & Brow Artist'],
+  ['role', 'Body Contouring Therapist'],
+  ['role', 'Hair Stylist'],
+  ['role', 'Hair Colorist'],
+  ['role', 'Makeup Artist'],
+  ['role', 'Nail Technician'],
+  ['role', 'Client Coordinator'],
+  ['designation', 'Senior'],
+  ['designation', 'Junior'],
+  ['designation', 'Lead'],
+  ['designation', 'Trainee'],
+  ['designation', 'Associate'],
+  ['designation', 'Senior Specialist'],
+  ['designation', 'Lead Specialist'],
+  ['designation', 'Head of Department']
+];
+
+export function ensureTeamMasterOptions() {
+  const activeCount = Number(db.prepare('SELECT COUNT(*) AS count FROM TEAM_MASTER_OPTIONS WHERE active = 1').get()?.count || 0);
+  const findOption = db.prepare('SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE option_type = ? AND LOWER(option_name) = LOWER(?)');
+  const insertOption = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (option_type, option_name) VALUES (?, ?)');
+  const restoreOption = db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 1 WHERE option_id = ?');
+  const ensureOptions = db.transaction(() => {
+    for (const [type, name] of DEFAULT_TEAM_MASTER_OPTIONS) {
+      const existing = findOption.get(type, name);
+      if (!existing) insertOption.run(type, name);
+      else if (activeCount === 0) restoreOption.run(existing.option_id);
+    }
+  });
+  ensureOptions();
+}
+
 // Enable foreign keys and WAL mode for high performance
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
@@ -94,6 +139,7 @@ export function initDatabase() {
       email TEXT UNIQUE NOT NULL,
       phone TEXT,
       designation TEXT,
+      team_role TEXT,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff', 'master_admin')),
       active INTEGER NOT NULL DEFAULT 1,
@@ -118,13 +164,28 @@ export function initDatabase() {
       staff_id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       role TEXT NOT NULL,
+      designation TEXT,
+      department TEXT,
       phone TEXT,
+      email TEXT,
+      surname TEXT,
+      address TEXT,
+      pincode TEXT,
+      city TEXT,
+      state TEXT,
+      bank_account_name TEXT,
+      bank_name TEXT,
+      ifsc_code TEXT,
+      qr_code_url TEXT,
+      upi_id TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       location_id INTEGER REFERENCES LOCATIONS(location_id),
       aadhaar_number TEXT,
       aadhaar_doc TEXT,
+      aadhaar_back_doc TEXT,
       pan_number TEXT,
       pan_doc TEXT,
+      pan_back_doc TEXT,
       photo_url TEXT,
       salary_type TEXT DEFAULT 'fixed',
       salary_amount REAL DEFAULT 0.0,
@@ -132,6 +193,39 @@ export function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS TEAM_MASTER_OPTIONS (
+      option_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      option_type TEXT NOT NULL CHECK(option_type IN ('role', 'designation')),
+      option_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_MASTER_OPTIONS_UNIQUE
+      ON TEAM_MASTER_OPTIONS(option_type, LOWER(option_name));
+
+    CREATE TABLE IF NOT EXISTS TEAM_DEPARTMENTS (
+      department_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_DEPARTMENTS_UNIQUE
+      ON TEAM_DEPARTMENTS(LOWER(department_name));
+
+    CREATE TABLE IF NOT EXISTS TEAM_HIERARCHY (
+      hierarchy_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department_id INTEGER NOT NULL REFERENCES TEAM_DEPARTMENTS(department_id),
+      role_option_id INTEGER NOT NULL REFERENCES TEAM_MASTER_OPTIONS(option_id),
+      designation_option_id INTEGER NOT NULL REFERENCES TEAM_MASTER_OPTIONS(option_id),
+      reports_to_hierarchy_id INTEGER REFERENCES TEAM_HIERARCHY(hierarchy_id),
+      reports_to_staff_id INTEGER REFERENCES STAFF(staff_id),
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_HIERARCHY_UNIQUE
+      ON TEAM_HIERARCHY(department_id, role_option_id, designation_option_id)
+      WHERE active = 1;
 
     CREATE TABLE IF NOT EXISTS SERVICE_CATEGORIES (
       category_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -219,6 +313,7 @@ export function initDatabase() {
       service_id INTEGER REFERENCES SERVICES(service_id),
       service_name_snapshot TEXT NOT NULL,
       price_snapshot REAL NOT NULL,
+      retail_price_snapshot REAL DEFAULT 0.0,
       staff_id INTEGER REFERENCES STAFF(staff_id),
       course_id INTEGER,
       session_number INTEGER,
@@ -298,6 +393,7 @@ export function initDatabase() {
   // Safe migration for VISIT_SERVICES privilege tracking
   try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN is_privilege INTEGER DEFAULT 0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN privilege_id TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISIT_SERVICES ADD COLUMN retail_price_snapshot REAL DEFAULT 0.0;`); } catch(e) {}
 
   // Safe migrations for Service Session Planning & Tracking
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN has_sessions INTEGER DEFAULT 0;`); } catch(e) {}
@@ -374,6 +470,14 @@ export function initDatabase() {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS APP_SETTINGS (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   // Backfill CLIENT_MEMBERSHIPS for existing active member clients
   try {
     const existingMembers = db.prepare(`
@@ -435,6 +539,7 @@ export function initDatabase() {
   // Safe migrations for location_id columns
   try { db.exec(`ALTER TABLE USERS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE USERS ADD COLUMN designation TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE USERS ADD COLUMN team_role TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE USERS ADD COLUMN deleted_at DATETIME;`); } catch(e) {}
   db.exec(`
     CREATE TABLE IF NOT EXISTS USER_ACCESS_PROFILES (
@@ -476,12 +581,29 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_number TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_doc TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN aadhaar_back_doc TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_number TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_doc TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN pan_back_doc TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN photo_url TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_type TEXT DEFAULT 'fixed';`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN salary_amount REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN incentive_percentage REAL DEFAULT 0.0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN surname TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN address TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN pincode TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN city TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN state TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN email TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN bank_account_name TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN bank_name TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN ifsc_code TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN qr_code_url TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN upi_id TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN designation TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE STAFF ADD COLUMN department TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE TEAM_HIERARCHY ADD COLUMN reports_to_staff_id INTEGER REFERENCES STAFF(staff_id);`); } catch(e) {}
+  ensureTeamMasterOptions();
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_type TEXT;`); } catch(e) {}
@@ -527,15 +649,19 @@ export function initDatabase() {
           user_id INTEGER PRIMARY KEY AUTOINCREMENT,
           name TEXT NOT NULL,
           email TEXT UNIQUE NOT NULL,
+          phone TEXT,
+          designation TEXT,
+          team_role TEXT,
           password_hash TEXT NOT NULL,
           role TEXT NOT NULL CHECK(role IN ('admin', 'reception', 'visitor', 'staff', 'master_admin')),
           active INTEGER NOT NULL DEFAULT 1,
           location_id INTEGER,
+          deleted_at DATETIME,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO USERS_new (user_id, name, email, password_hash, role, active, location_id, created_at, updated_at)
-        SELECT user_id, name, email, password_hash, role, active, location_id, created_at, updated_at FROM USERS;
+        INSERT INTO USERS_new (user_id, name, email, phone, designation, team_role, password_hash, role, active, location_id, deleted_at, created_at, updated_at)
+        SELECT user_id, name, email, phone, designation, team_role, password_hash, role, active, location_id, deleted_at, created_at, updated_at FROM USERS;
         DROP TABLE USERS;
         ALTER TABLE USERS_new RENAME TO USERS;
         PRAGMA foreign_keys = ON;
@@ -545,6 +671,7 @@ export function initDatabase() {
   } catch (e) {
     console.error('Users migration notice:', e.message);
   }
+  try { db.exec(`ALTER TABLE USERS ADD COLUMN team_role TEXT;`); } catch(e) {}
 
   // Safe migration and seeding of default LOCATIONS
   try {
@@ -1154,6 +1281,7 @@ function seedData() {
   // Safe migrations for Login Preference columns
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN primary_login_phone TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN primary_login_email TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN branding_config TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATION_STAKEHOLDERS ADD COLUMN primary_login_phone TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATION_STAKEHOLDERS ADD COLUMN primary_login_email TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN mobile_numbers TEXT;`); } catch(e) {}

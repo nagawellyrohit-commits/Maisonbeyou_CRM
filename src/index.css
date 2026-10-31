@@ -2330,3 +2330,228 @@ textarea {
   color: #2C211B;
   stroke: #2C211B;
 }
+/* Branch customization is scoped to the active dashboard. */
+.dashboard-branding-active {
+  background-color: var(--tenant-page-bg, #F7F2E9) !important;
+  background-image: var(--tenant-page-image, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+  color: var(--tenant-text, #4B4038);
+}
+
+.dashboard-branding-active > header {
+  background-color: var(--tenant-card-bg, #FFFFFF) !important;
+  border-color: var(--tenant-border, #D99A64) !important;
+}
+
+.dashboard-branding-active .app-container {
+  background-color: transparent !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style .card,
+.dashboard-branding-active .dashboard-reference-style .dashboard-summary-grid > .card,
+.dashboard-branding-active .dashboard-reference-style .dashboard-visits-panel,
+.dashboard-branding-active .dashboard-reference-style .dashboard-visits-panel > div:first-child,
+.dashboard-branding-active .dashboard-reference-style .client-directory-table-card {
+  background-color: var(--tenant-card-bg, #FFFFFF) !important;
+  border-color: var(--tenant-border, #D99A64) !important;
+  border-width: var(--tenant-border-width, 1px) !important;
+  border-radius: var(--tenant-radius, 22px) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style .service-category-card {
+  background-color: var(--tenant-service-card-bg, #FFFFFF) !important;
+  border-color: var(--tenant-service-card-border, #D99A64) !important;
+  border-width: var(--tenant-service-card-border-width, 1px) !important;
+  border-radius: var(--tenant-service-card-radius, 22px) !important;
+}
+
+.dashboard-branding-active .membership-branding-scope .membership-plan-card {
+  background-color: var(--tenant-membership-card-bg, #FFFFFF) !important;
+  border-color: var(--tenant-membership-card-border, #D99A64) !important;
+  border-width: var(--tenant-membership-card-border-width, 1px) !important;
+  border-radius: var(--tenant-membership-card-radius, 22px) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style h1,
+.dashboard-branding-active .dashboard-reference-style h2,
+.dashboard-branding-active .dashboard-reference-style h3,
+.dashboard-branding-active .dashboard-reference-style h4 {
+  color: var(--tenant-heading, #2C211B) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style,
+.dashboard-branding-active .dashboard-reference-style :is(div, span, td, th, strong, small, a) {
+  color: var(--tenant-text, #4B4038) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style p,
+.dashboard-branding-active .dashboard-reference-style label,
+.dashboard-branding-active .dashboard-reference-style .text-muted {
+  color: var(--tenant-subtext, #796B5D) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style .btn-primary {
+  background-color: var(--tenant-primary, #B88B4A) !important;
+  border-color: var(--tenant-primary, #B88B4A) !important;
+}
+
+.dashboard-branding-active .dashboard-reference-style .btn-primary,
+.dashboard-branding-active .dashboard-reference-style .btn-primary * {
+  color: #FFFFFF !important;
+}
+
+.dashboard-branding-active .tenant-accent-button {
+  border-color: var(--tenant-primary, #B88B4A) !important;
+  color: var(--tenant-primary, #B88B4A) !important;
+  background-color: var(--tenant-card-bg, #FFFFFF) !important;
+}
+
+.dashboard-branding-active .branch-user-management-actions {
+  border-top-color: var(--tenant-border, #EEE7DD) !important;
+}
+
+.dashboard-branding-active .branch-user-management-description {
+  color: var(--tenant-subtext, #796B5D) !important;
+  font-family: var(--tenant-supporting-font, Inter, sans-serif) !important;
+  font-size: var(--tenant-supporting-size, 14px) !important;
+  font-style: var(--tenant-supporting-style, normal) !important;
+  font-weight: var(--tenant-supporting-weight, 400) !important;
+}
+
+.brand-login-shell {
+  background-color: var(--tenant-login-page-bg, var(--tenant-page-bg, #F7F2E9)) !important;
+  color: var(--tenant-login-text, var(--tenant-text, #4B4038));
+}
+
+.brand-login-shell h1,
+.brand-login-shell h2,
+.brand-login-shell h3 {
+  color: var(--tenant-login-heading, var(--tenant-heading, #2C211B)) !important;
+}
+
+.brand-login-shell p,
+.brand-login-shell label {
+  color: var(--tenant-login-subtext, var(--tenant-subtext, #796B5D)) !important;
+}
+
+/* Master-only Studio Management and All Branches appearance. */
+.app-shell h1,
+.app-shell h2,
+.app-shell h3,
+.brand-login-shell h1,
+.brand-login-shell h2,
+.brand-login-shell h3 {
+  font-family: var(--tenant-heading-font, Inter, sans-serif) !important;
+  font-style: var(--tenant-heading-style, normal) !important;
+  font-weight: var(--tenant-heading-weight, 700) !important;
+}
+
+.app-shell h1,
+.brand-login-shell h1 {
+  font-size: var(--tenant-heading-size, 26px) !important;
+}
+
+.app-shell h2,
+.brand-login-shell h2 {
+  font-size: calc(var(--tenant-heading-size, 26px) * .78) !important;
+}
+
+.app-shell h3,
+.brand-login-shell h3 {
+  font-size: calc(var(--tenant-heading-size, 26px) * .68) !important;
+}
+
+.app-shell .animate-fade-in p,
+.brand-login-shell p,
+.app-shell .animate-fade-in .text-muted {
+  font-family: var(--tenant-supporting-font, Inter, sans-serif) !important;
+  font-size: var(--tenant-supporting-size, 14px) !important;
+  font-style: var(--tenant-supporting-style, normal) !important;
+  font-weight: var(--tenant-supporting-weight, 400) !important;
+}
+
+.master-portal-themed {
+  color: var(--master-text, #4B4038);
+}
+
+.master-portal-themed > header {
+  background-color: var(--master-card-bg, #FFFFFF) !important;
+  border-color: var(--master-border, #D99A64) !important;
+}
+
+.master-portal-themed h1,
+.master-portal-themed h2,
+.master-portal-themed h3 {
+  color: var(--master-heading, #2C211B) !important;
+  font-family: var(--master-heading-font, Inter, sans-serif) !important;
+  font-style: var(--master-heading-style, normal) !important;
+  font-weight: var(--master-heading-weight, 700) !important;
+}
+
+.master-portal-themed h1 {
+  font-size: var(--master-heading-size, 26px) !important;
+}
+
+.master-portal-themed h2 {
+  font-size: calc(var(--master-heading-size, 26px) * .78) !important;
+}
+
+.master-portal-themed h3 {
+  font-size: calc(var(--master-heading-size, 26px) * .68) !important;
+}
+
+.master-portal-themed p,
+.master-portal-themed .concierge-subtitle,
+.master-portal-themed .concierge-card-desc {
+  font-family: var(--master-supporting-font, Inter, sans-serif) !important;
+  font-size: var(--master-supporting-size, 14px) !important;
+  font-style: var(--master-supporting-style, normal) !important;
+  font-weight: var(--master-supporting-weight, 400) !important;
+}
+
+.studio-management-screen .concierge-title {
+  color: var(--master-heading, #FFFFFF) !important;
+}
+
+.studio-management-screen .concierge-card-title {
+  color: var(--master-text, #4B4038) !important;
+}
+
+.studio-management-screen .concierge-subtitle,
+.studio-management-screen .concierge-card-desc {
+  color: var(--master-subtext, #D8C3AA) !important;
+}
+
+.studio-management-screen .concierge-action-btn {
+  font-family: var(--master-supporting-font, Inter, sans-serif) !important;
+  font-size: var(--master-supporting-size, 14px) !important;
+  font-style: var(--master-supporting-style, normal) !important;
+  font-weight: var(--master-supporting-weight, 400) !important;
+}
+
+.studio-management-screen .concierge-luxury-card {
+  background: var(--master-card-bg, #FFFFFF) !important;
+  border: var(--master-border-width, 1px) solid var(--master-border, #D99A64) !important;
+  border-radius: var(--master-card-radius, 22px) !important;
+}
+
+.studio-management-screen .concierge-action-btn,
+.studio-management-screen .concierge-action-btn-gold,
+.studio-management-screen .concierge-action-btn-dark {
+  background: var(--master-primary, #B88B4A) !important;
+  border-color: var(--master-primary, #B88B4A) !important;
+  color: #FFFFFF !important;
+}
+
+.location-selection-screen.branch-selection-page-light {
+  color: var(--master-text, #4B4038);
+}
+
+.location-selection-screen .master-location-card {
+  background-color: var(--master-card-bg, #FFFFFF) !important;
+  border-color: var(--master-border, #D99A64) !important;
+  border-width: var(--master-border-width, 1px) !important;
+  border-radius: var(--master-card-radius, 22px) !important;
+}

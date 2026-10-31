@@ -9,7 +9,49 @@ import {
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import { canAccessModule } from '../utils/permissions';
 
-export default function MembershipManagement({ onOpenClient, activeLocation, currentUser }) {
+function ComplimentaryServiceSelector({ services, value = [], membershipPrice, onChange }) {
+  const [serviceToAdd, setServiceToAdd] = useState('');
+  const selectedIds = new Set(value.map(item => String(item.service_id)));
+  const selectedServices = value.map(item => {
+    const current = services.find(service => String(service.service_id) === String(item.service_id));
+    return { ...item, service_name: current?.service_name || item.service_name, price: Number(current?.price ?? item.price) || 0 };
+  });
+  const includedValue = selectedServices.reduce((sum, service) => sum + service.price, 0);
+  const price = Number(membershipPrice) || 0;
+  const selectService = serviceId => {
+    if (!serviceId || selectedIds.has(String(serviceId))) return setServiceToAdd('');
+    const service = services.find(item => String(item.service_id) === String(serviceId));
+    if (!service) return;
+    onChange([...value, { service_id: Number(service.service_id), service_name: service.service_name, price: Number(service.price) || 0, is_free: true }]);
+    setServiceToAdd('');
+  };
+
+  return (
+    <section style={{ border: '1px solid #E7D8C4', borderRadius: 9, padding: 12, background: '#FFFCF7', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 12, color: '#6B4A22' }}>Complimentary services</strong>
+        <span style={{ fontSize: 11, color: '#57534E' }}>Current value: <strong>{formatCurrency(includedValue)}</strong></span>
+      </div>
+      <select aria-label="Add a free service benefit" value={serviceToAdd} onChange={event => selectService(event.target.value)} style={{ width: '100%', minWidth: 0, padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', fontSize: 12 }}>
+        <option value="">Select a service to include free…</option>
+        {services.filter(service => !selectedIds.has(String(service.service_id))).map(service => (
+          <option key={service.service_id} value={service.service_id}>{service.service_name} — {formatCurrency(service.price)}</option>
+        ))}
+      </select>
+      {selectedServices.map(service => (
+        <div key={service.service_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 9px', background: '#FFFFFF', border: '1px solid #EEE7DD', borderRadius: 7, fontSize: 11 }}>
+          <span>{service.service_name} <strong>{formatCurrency(service.price)}</strong></span>
+          <button type="button" aria-label={`Remove ${service.service_name} free benefit`} onClick={() => onChange(value.filter(item => String(item.service_id) !== String(service.service_id)))} style={{ border: 0, background: 'transparent', color: '#A33B32', cursor: 'pointer', fontSize: 16 }}>×</button>
+        </div>
+      ))}
+      {price > 0 && <div style={{ paddingTop: 4, borderTop: '1px solid #E7D8C4', fontSize: 11, color: includedValue > price ? '#C62828' : '#8C6228' }}>
+        Membership price: <strong>{formatCurrency(price)}</strong> · included value: <strong>{formatCurrency(includedValue)}</strong> · {includedValue > price ? `benefits exceed price by ${formatCurrency(includedValue - price)}` : `${formatCurrency(price - includedValue)} more value needed to exceed price`}
+      </div>}
+    </section>
+  );
+}
+
+export default function MembershipManagement({ onOpenClient, activeLocation, currentUser, branding }) {
   const user = currentUser || JSON.parse(localStorage.getItem('crm_user') || '{}');
   const effectiveRole = user?.original_role || user?.role;
   const canManagePlans = effectiveRole === 'master_admin'
@@ -17,6 +59,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     || (effectiveRole === 'reception' && canAccessModule(user, 'membership'));
 
   const [plans, setPlans] = useState([]);
+  const [serviceOptions, setServiceOptions] = useState([]);
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({
     total_members: 0,
@@ -73,14 +116,15 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     tier: '',
     tierNumber: '',
     price: '',
-    validity: 'Valid for 1 year',
-    validityBadge: 'VALID FOR 1 YEAR',
-    durationLabel: '(per year)',
+    validity: 'Valid for 30 days',
+    validityBadge: 'VALID FOR 30 DAYS',
+    durationLabel: '(per 30 days)',
     discountPercent: 0,
     image: '/memberships/card_infini_3d.jpg',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
     benefitInput: '',
-    benefits: []
+    benefits: [],
+    freeServices: []
   });
 
   // Add Membership Plan Modal (Master Admin & Main Admin only)
@@ -93,9 +137,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     tier: '',
     tierNumber: '',
     price: '',
-    validity: 'Valid for 1 year',
-    validityBadge: 'VALID FOR 1 YEAR',
-    durationLabel: '(per year)',
+    validity: 'Valid for 30 days',
+    validityBadge: 'VALID FOR 30 DAYS',
+    durationLabel: '(per 30 days)',
     discountPercent: 0,
     image: '/memberships/card_infini_3d.jpg',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
@@ -104,10 +148,11 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       'Complimentary skin consultation + AI analysis',
       'Priority booking on peak hours',
       'Special member discount on all treatments'
-    ]
+    ],
+    freeServices: []
   });
-  const [newPlanDurationValue, setNewPlanDurationValue] = useState('1');
-  const [newPlanDurationUnit, setNewPlanDurationUnit] = useState('year');
+  const [newPlanDurationValue, setNewPlanDurationValue] = useState('30');
+  const [newPlanDurationUnit, setNewPlanDurationUnit] = useState('day');
 
   // Card Image File Upload State & Ref
   const [cardImageUploading, setCardImageUploading] = useState(false);
@@ -166,6 +211,16 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     setLoading(true);
     fetchMemberships();
     return () => { membershipRequestId.current += 1; };
+  }, [activeLocation?.location_id, currentUser?.location_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setServiceOptions([]);
+    apiRequest('/categories').then(result => {
+      if (cancelled) return;
+      setServiceOptions((result.categories || []).flatMap(category => category.services || []).filter(service => Number(service.active ?? 1) === 1));
+    }).catch(error => console.error('Could not load services for membership benefits:', error));
+    return () => { cancelled = true; };
   }, [activeLocation?.location_id, currentUser?.location_id]);
 
   const handleSelectPlanForEnroll = (plan) => {
@@ -331,8 +386,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     try {
       setSavingPlan(true);
       const tierVal = newPlanForm.tier.trim() || newPlanForm.name.trim();
-      const durationLimit = newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : Infinity;
-      const durationValue = Math.min(durationLimit, Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1));
+      const durationValue = Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1);
       const durationUnitLabel = durationValue === 1 ? newPlanDurationUnit : `${newPlanDurationUnit}s`;
       const durationValidity = `Valid for ${durationValue} ${durationUnitLabel}`;
       const payload = {
@@ -350,7 +404,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         benefits: newPlanForm.benefits.map(benefit => benefit.trim()).filter(Boolean).length > 0
           ? newPlanForm.benefits.map(benefit => benefit.trim()).filter(Boolean)
           : ['Exclusive tailored beauty treatment privileges'],
-        discount_percent: Number(newPlanForm.discountPercent) || 0
+        discount_percent: Number(newPlanForm.discountPercent) || 0,
+        free_services: newPlanForm.freeServices
       };
 
       const res = await apiRequest('/memberships/plans', {
@@ -361,17 +416,17 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       if (res && res.success) {
         setShowAddPlanModal(false);
         setIsInlineAddingPlan(false);
-        setNewPlanDurationValue('1');
-        setNewPlanDurationUnit('year');
+        setNewPlanDurationValue('30');
+        setNewPlanDurationUnit('day');
         setNewPlanForm({
           name: '',
           fullName: '',
           tier: '',
           tierNumber: '',
           price: '',
-          validity: 'Valid for 1 year',
-          validityBadge: 'VALID FOR 1 YEAR',
-          durationLabel: '(per year)',
+          validity: 'Valid for 30 days',
+          validityBadge: 'VALID FOR 30 DAYS',
+          durationLabel: '(per 30 days)',
           discountPercent: 0,
           image: '/memberships/card_infini_3d.jpg',
           tagline: 'Exclusive personalized aesthetic luxury membership.',
@@ -380,7 +435,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             'Complimentary skin consultation + AI analysis',
             'Priority booking on peak hours',
             'Special member discount on all treatments'
-          ]
+          ],
+          freeServices: []
         });
         await fetchMemberships();
         notifyMembershipChanged();
@@ -396,30 +452,30 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   };
 
   const handleStartInlineAddPlan = () => {
-    setNewPlanDurationValue('1');
-    setNewPlanDurationUnit('year');
+    setNewPlanDurationValue('30');
+    setNewPlanDurationUnit('day');
     setNewPlanForm({
       name: '',
       fullName: '',
       tier: '',
       tierNumber: `0${plans.length + 1} — SERVICE`,
       price: '',
-      validity: 'Valid for 1 year',
-      validityBadge: 'VALID FOR 1 YEAR',
-      durationLabel: '(per year)',
+      validity: 'Valid for 30 days',
+      validityBadge: 'VALID FOR 30 DAYS',
+      durationLabel: '(per 30 days)',
       discountPercent: 0,
       image: '',
       tagline: '',
       benefitInput: '',
-      benefits: ['', '', '']
+      benefits: ['', '', ''],
+      freeServices: []
     });
     setIsInlineAddingPlan(true);
   };
 
   const updateNewPlanValidity = (value, unit) => {
-    const durationLimit = unit === 'day' ? 30 : unit === 'month' ? 12 : Infinity;
     const isWholePositiveNumber = /^\d+$/.test(String(value)) && Number(value) >= 1;
-    const normalizedValue = isWholePositiveNumber ? String(Math.min(durationLimit, Number(value))) : value;
+    const normalizedValue = isWholePositiveNumber ? String(Number(value)) : value;
     setNewPlanDurationValue(normalizedValue);
     setNewPlanDurationUnit(unit);
     if (!isWholePositiveNumber) return;
@@ -429,8 +485,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     setNewPlanForm(prev => ({ ...prev, validity, validityBadge: validity.toUpperCase(), durationLabel }));
   };
   const normalizeNewPlanValidity = () => {
-    const durationLimit = newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : Infinity;
-    const safeValue = Math.min(durationLimit, Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1));
+    const safeValue = Math.max(1, Number.parseInt(newPlanDurationValue, 10) || 1);
     const pluralUnit = safeValue === 1 ? newPlanDurationUnit : `${newPlanDurationUnit}s`;
     const validity = `Valid for ${safeValue} ${pluralUnit}`;
     setNewPlanDurationValue(String(safeValue));
@@ -481,7 +536,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       image: p.image || '/memberships/card_infini_3d.jpg',
       tagline: p.tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitInput: '',
-      benefits: Array.isArray(p.benefits) ? [...p.benefits] : []
+      benefits: Array.isArray(p.benefits) ? [...p.benefits] : [],
+      freeServices: Array.isArray(p.free_services) ? p.free_services.map(service => ({ ...service })) : []
     });
     setShowEditPlanModal(true);
   };
@@ -557,7 +613,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         image: editPlanForm.image,
         tagline: editPlanForm.tagline,
         benefits: editPlanForm.benefits.length > 0 ? editPlanForm.benefits : ['Exclusive tailored beauty treatment privileges'],
-        discount_percent: Number(editPlanForm.discountPercent) || 0
+        discount_percent: Number(editPlanForm.discountPercent) || 0,
+        free_services: editPlanForm.freeServices
       };
 
       const res = await apiRequest(`/memberships/plans/${editingPlan.id}`, {
@@ -613,12 +670,12 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-fade-in membership-branding-scope" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Top Header Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700', paddingLeft: '20px' }}>
-            Membership Tiers & Privileges
+            {branding?.membership_heading || 'Membership Tiers & Privileges'}
           </h1>
         </div>
 
@@ -704,7 +761,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                 margin: 0,
                 textTransform: 'uppercase'
               }}>
-                {programTitle}
+                {branding?.membership_program_heading || programTitle}
               </h2>
               {canManagePlans && (
                 <button
@@ -750,6 +807,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             return (
               <div
                 key={p.id}
+                className="membership-plan-card"
                 style={{
                   background: '#FFFFFF',
                   borderRadius: '22px',
@@ -911,7 +969,17 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                         <span>{b}</span>
                       </li>
                     ))}
+                    {(p.free_services || []).map(service => (
+                      <li key={`free-${service.service_id}`} style={{ fontSize: '10.5px', color: '#44403C', display: 'flex', alignItems: 'flex-start', gap: '6px', lineHeight: 1.32 }}>
+                        <span style={{ color: '#287448', fontWeight: 'bold', fontSize: '11px', lineHeight: 1 }}>✓</span>
+                        <span>Free {service.service_name} ({formatCurrency(service.price)})</span>
+                      </li>
+                    ))}
                   </ul>
+
+                  {(p.free_services || []).length > 0 && <div style={{ textAlign: 'center', margin: '-9px 0 9px', color: '#287448', fontSize: 10, fontWeight: 700 }}>
+                    Included service value {formatCurrency((p.free_services || []).reduce((sum, service) => sum + (Number(service.price) || 0), 0))}
+                  </div>}
 
                   {/* Direct Action Buttons (Matching Image 2) */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 'auto' }}>
@@ -1124,28 +1192,18 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       onChange={(e) => setNewPlanForm(prev => ({ ...prev, price: e.target.value }))}
                       style={{ minWidth: 0, boxSizing: 'border-box', padding: '8px', border: '1px solid #E7D8C4', borderRadius: '7px', textAlign: 'center', fontWeight: '700', fontSize: '12px' }}
                     />
-                    <div style={{ minWidth: 0, minHeight: '36px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '4px', padding: '0 6px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF' }}>
+                    <div style={{ minWidth: 0, minHeight: '36px', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: '2px', padding: '0 4px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF' }}>
                       <Calendar size={12} color="#9E7437" />
                       <input
                         aria-label="Membership duration"
                         type="number"
                         min="1"
-                        max={newPlanDurationUnit === 'day' ? 30 : newPlanDurationUnit === 'month' ? 12 : undefined}
                         value={newPlanDurationValue}
                         onChange={(e) => updateNewPlanValidity(e.target.value, newPlanDurationUnit)}
                         onBlur={normalizeNewPlanValidity}
-                        style={{ width: '56px', minWidth: '56px', flex: '0 0 56px', boxSizing: 'border-box', border: 0, outline: 'none', padding: '8px 0', fontSize: '12px' }}
+                        style={{ width: '40px', minWidth: '40px', flex: '0 0 40px', boxSizing: 'border-box', border: 0, outline: 'none', padding: '8px 0', fontSize: '12px' }}
                       />
-                      <select
-                        aria-label="Membership duration unit"
-                        value={newPlanDurationUnit}
-                        onChange={(e) => updateNewPlanValidity(newPlanDurationValue, e.target.value)}
-                        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', fontSize: '12px' }}
-                      >
-                        <option value="day">days</option>
-                        <option value="month">months</option>
-                        <option value="year">years</option>
-                      </select>
+                      <span aria-label="Membership duration unit" style={{ flex: 1, minWidth: 0, color: '#57534E', fontSize: '11px' }}>days</span>
                     </div>
                   </div>
 
@@ -1194,6 +1252,8 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       </div>
                     ))}
                   </div>
+
+                  <ComplimentaryServiceSelector services={serviceOptions} value={newPlanForm.freeServices} membershipPrice={newPlanForm.price} onChange={freeServices => setNewPlanForm(prev => ({ ...prev, freeServices }))} />
 
                   <div style={{ display: 'flex', gap: '7px', marginTop: 'auto' }}>
                     <button type="button" onClick={() => setIsInlineAddingPlan(false)} style={{ flex: 1, padding: '8px 5px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF', color: '#57534E', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>Cancel</button>
@@ -2065,6 +2125,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     + Add
                   </button>
                 </div>
+                <ComplimentaryServiceSelector services={serviceOptions} value={newPlanForm.freeServices} membershipPrice={newPlanForm.price} onChange={freeServices => setNewPlanForm(prev => ({ ...prev, freeServices }))} />
               </div>
 
               {/* Modal Footer Buttons */}
@@ -2575,6 +2636,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     + Add
                   </button>
                 </div>
+                <ComplimentaryServiceSelector services={serviceOptions} value={editPlanForm.freeServices} membershipPrice={editPlanForm.price} onChange={freeServices => setEditPlanForm(prev => ({ ...prev, freeServices }))} />
               </div>
 
               {/* Modal Footer Buttons */}

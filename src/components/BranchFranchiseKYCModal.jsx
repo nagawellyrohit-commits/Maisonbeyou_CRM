@@ -1265,7 +1265,7 @@ export default function BranchFranchiseKYCModal({
                 : `REGISTER ${firmType.toUpperCase()} ${relationshipType === 'branch' ? 'COMPANY-OWNED BRANCH' : 'FRANCHISE PARTNER'} KYC`)
             : currentStep === 2
               ? `CREATE ADMIN LOGINS — ${savedLocation?.name || branchName}`
-              : `STUDIO ONBOARDING & ADMIN SETUP COMPLETE`}
+              : isEdit ? 'BRANCH DETAILS SAVED' : 'STUDIO ONBOARDING & ADMIN SETUP COMPLETE'}
         </h2>
         <div style={{ width: '42px', height: '2px', background: '#C59A58', borderRadius: '2px', marginBottom: '32px' }} />
 
@@ -3534,7 +3534,7 @@ export default function BranchFranchiseKYCModal({
                   e.currentTarget.style.borderColor = '#D6D3D1';
                 }}
               >
-                Cancel & Go Back
+                {isEdit ? 'Cancel' : 'Cancel & Go Back'}
               </button>
 
               <button
@@ -3559,11 +3559,11 @@ export default function BranchFranchiseKYCModal({
                 }}
               >
                 {isSubmitting ? (
-                  <span>Saving KYC Record...</span>
+                  <span>{isEdit ? 'Saving Changes...' : 'Saving KYC Record...'}</span>
                 ) : (
                   <>
-                    <span>Submit & Proceed to Create Logins</span>
-                    <ArrowRight size={18} />
+                  <span>{isEdit ? 'Save Changes' : 'Submit & Proceed to Create Logins'}</span>
+                  {!isEdit && <ArrowRight size={18} />}
                   </>
                 )}
               </button>
@@ -4044,14 +4044,17 @@ export default function BranchFranchiseKYCModal({
             </div>
 
             <h3 style={{ fontFamily: 'var(--font-sans)', fontSize: '26px', fontWeight: '700', color: '#1C1917', marginBottom: '8px' }}>
-              {isEdit ? 'Branch Details Updated' : 'Branch & Admin Access Created'}
+              {isEdit ? 'Changes Saved' : 'Branch & Admin Access Created'}
             </h3>
             <p style={{ fontSize: '15px', color: '#57534E', maxWidth: '640px', lineHeight: '1.6', margin: '0 0 28px 0' }}>
-              <strong>{savedLocation?.name || branchName}</strong> {isEdit ? 'has been updated.' : 'has been registered with complete KYC.'}
+              {isEdit
+                ? <>Your changes to <strong>{savedLocation?.name || branchName}</strong> have been saved.</>
+                : <><strong>{savedLocation?.name || branchName}</strong> has been registered with complete KYC.</>}
               {!isEdit && ' Every registered proprietor, partner, or director can now sign in to this branch with OTP using their registered mobile number.'}
             </p>
 
             {/* Credentials Card */}
+            {!isEdit && (
             <div style={{
               width: '100%',
               maxWidth: '720px',
@@ -4145,6 +4148,7 @@ export default function BranchFranchiseKYCModal({
                 ))}
               </div>
             </div>
+            )}
 
             <button
               type="button"
@@ -4162,8 +4166,8 @@ export default function BranchFranchiseKYCModal({
                 gap: '8px'
               }}
             >
-              <span>Complete Setup & Return to Studios</span>
-              <ArrowRight size={18} />
+              <span>{isEdit ? 'Done' : 'Complete Setup & Return to Studios'}</span>
+              {!isEdit && <ArrowRight size={18} />}
             </button>
           </div>
         )}

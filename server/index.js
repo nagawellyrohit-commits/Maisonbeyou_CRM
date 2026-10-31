@@ -8,7 +8,7 @@ import multer from 'multer';
 import { PNG } from 'pngjs';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'url';
-import db, { initDatabase, recordAuditLog, generateLocationCode } from './db.js';
+import db, { initDatabase, recordAuditLog, generateLocationCode, ensureTeamMasterOptions } from './db.js';
 import {
   calculateNextDueDate,
   formatSessionMessage,
@@ -172,6 +172,8 @@ function permissionModulesForRequest(req) {
   const route = req.path || '';
   const method = String(req.method || 'GET').toUpperCase();
   if (/^\/api\/admin\/branch-users(?:\/|$)/.test(route)) return ['user_management'];
+  if (/^\/api\/admin\/team-options(?:\/|$)/.test(route)) return ['team'];
+  if (/^\/api\/admin\/team-(?:departments|hierarchy)(?:\/|$)/.test(route)) return ['team'];
   if (/^\/api\/locations(?:\/|$)/.test(route) && !route.startsWith('/api/locations-list')) return ['user_management'];
   if (/^\/api\/auth\/switch-role$/.test(route)) return ['user_management'];
   if (route === '/api/kyc/upload') return ['user_management'];
@@ -311,6 +313,320 @@ export function authorizeRoles(...allowedRoles) {
 const passwordResetStore = new Map();
 // In-memory store for OTP login requests: userId -> { otp, expiresAt, identifier }
 const loginOtpStore = new Map();
+
+const DEFAULT_LOCATION_BRANDING = {
+  brand_name: '',
+  dashboard_back_label: 'Back',
+  dashboard_summary_heading: "TODAY'S SUMMARY",
+  dashboard_refresh_label: 'Refresh Data',
+  team_heading: 'Studio Practitioners & Team',
+  clients_heading: 'Client Directory',
+  reports_heading: 'Executive Reporting & Analytics',
+  user_access_heading: 'Manage Users',
+  user_access_subtitle: 'Create Manager and Visitor accounts for {branch}.',
+  user_access_managers_label: 'Managers',
+  user_access_visitors_label: 'Visitors',
+  user_access_add_button: 'Add User',
+  user_access_manager_empty: 'No Manager accounts yet.',
+  user_access_visitor_empty: 'No Visitor accounts yet.',
+  heading_font_family: 'Inter, sans-serif',
+  heading_font_size: 26,
+  heading_font_style: 'normal',
+  heading_font_weight: 700,
+  supporting_font_family: 'Inter, sans-serif',
+  supporting_font_size: 14,
+  supporting_font_style: 'normal',
+  supporting_font_weight: 400,
+  dashboard_button_fill: '#FFFFFF',
+  dashboard_button_text: '#9F7335',
+  dashboard_button_border: '#D99A64',
+  dashboard_button_border_width: 1,
+  dashboard_button_radius: 48,
+  service_heading: 'Service & Pricing Management',
+  service_add_category_label: 'Add New Category',
+  service_add_first_category_label: 'Add Your Category',
+  service_expand_all_label: 'Expand All',
+  service_collapse_all_label: 'Collapse All',
+  service_card_color: '#FFFFFF',
+  service_card_border_color: '#D99A64',
+  service_card_border_width: 1,
+  service_card_radius: 22,
+  membership_heading: 'Membership Tiers & Privileges',
+  membership_program_heading: '',
+  membership_card_color: '#FFFFFF',
+  membership_card_border_color: '#D99A64',
+  membership_card_border_width: 1,
+  membership_card_radius: 22,
+  login_logo_url: '',
+  login_background_image_url: '',
+  login_background_color: '#F7F2E9',
+  login_primary_color: '#B88B4A',
+  login_heading_color: '#2C211B',
+  login_text_color: '#4B4038',
+  login_subtext_color: '#796B5D',
+  login_input_border_color: '#DAC493',
+  login_button_text_color: '#FFFFFF',
+  login_card_color: '#FFFCF7',
+  login_card_border_color: '#D99A64',
+  login_card_border_width: 1,
+  login_card_radius: 22,
+  login_button_radius: 12,
+  login_card_opacity: 96,
+  login_card_width: 520,
+  login_card_padding: 42,
+  login_logo_height: 52,
+  login_mobile_label: 'Registered Mobile Number',
+  login_mobile_placeholder: 'Enter phone number',
+  login_button_label: 'Continue to Studio Portal',
+  login_footer_text: 'Maison BeYou Luxury Aesthetic Clinic & Salon',
+  logo_url: '',
+  background_color: '#F7F2E9',
+  background_image_url: '',
+  card_color: '#FFFFFF',
+  primary_color: '#B88B4A',
+  heading_color: '#2C211B',
+  text_color: '#4B4038',
+  subtext_color: '#796B5D',
+  card_border_color: '#D99A64',
+  card_border_width: 1,
+  card_radius: 22
+};
+
+const DEFAULT_MASTER_PORTAL_BRANDING = {
+  brand_name: 'Maison BeYou',
+  master_logo_url: '',
+  master_background_image_url: '',
+  master_background_color: '#F7F3ED',
+  master_card_color: '#FFFFFF',
+  master_primary_color: '#B88B4A',
+  master_heading_color: '#2C211B',
+  master_text_color: '#4B4038',
+  master_subtext_color: '#796B5D',
+  master_border_color: '#D99A64',
+  master_border_width: 1,
+  master_card_radius: 22,
+  master_overlay_opacity: 62,
+  master_studio_heading: 'STUDIO MANAGEMENT',
+  master_studio_subtitle: 'your personalised journey awaits',
+  master_branches_title: 'BRANCHES',
+  master_branches_subtitle: 'manage company-owned studio locations',
+  master_branches_button: 'GET STARTED',
+  master_franchises_title: 'FRANCHISES',
+  master_franchises_subtitle: 'monitor franchise partner performance',
+  master_franchises_button: 'CONTINUE',
+  master_locations_heading: '',
+  master_back_label: 'Back to Studio Management',
+  master_reports_label: 'Reports',
+  master_logout_label: 'Sign Out',
+  heading_font_family: 'Inter, sans-serif',
+  heading_font_size: 26,
+  heading_font_style: 'normal',
+  heading_font_weight: 700,
+  supporting_font_family: 'Inter, sans-serif',
+  supporting_font_size: 14,
+  supporting_font_style: 'normal',
+  supporting_font_weight: 400,
+  login_logo_url: '',
+  login_background_image_url: '',
+  login_background_color: '#F7F2E9',
+  login_primary_color: '#B88B4A',
+  login_heading_color: '#2C211B',
+  login_text_color: '#4B4038',
+  login_subtext_color: '#796B5D',
+  login_input_border_color: '#DAC493',
+  login_button_text_color: '#FFFFFF',
+  login_card_color: '#FFFCF7',
+  login_card_border_color: '#D99A64',
+  login_card_border_width: 1,
+  login_card_radius: 22,
+  login_button_radius: 12,
+  login_card_opacity: 96,
+  login_card_width: 520,
+  login_card_padding: 42,
+  login_logo_height: 52,
+  login_mobile_label: 'Registered Mobile Number',
+  login_mobile_placeholder: 'Enter phone number',
+  login_button_label: 'Continue to Studio Portal',
+  login_footer_text: 'Maison BeYou Luxury Aesthetic Clinic & Salon'
+};
+
+function safeFont(value) {
+  const fonts = ['Inter, sans-serif', 'Arial, sans-serif', 'Georgia, serif', 'Trebuchet MS, sans-serif', 'Courier New, monospace'];
+  return fonts.includes(value) ? value : fonts[0];
+}
+
+function parseMasterPortalBranding(raw) {
+  let value = raw;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { value = {}; }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) value = {};
+  return { ...DEFAULT_MASTER_PORTAL_BRANDING, ...value };
+}
+
+function sanitizeMasterPortalBranding(input) {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const color = key => /^#[0-9a-f]{6}$/i.test(String(source[key] || '')) ? String(source[key]).toUpperCase() : DEFAULT_MASTER_PORTAL_BRANDING[key];
+  const image = key => {
+    const value = String(source[key] || '').trim();
+    return value.startsWith('/uploads/') && value.length <= 1000 ? value : '';
+  };
+  const text = (key, max) => String(source[key] ?? DEFAULT_MASTER_PORTAL_BRANDING[key]).trim().slice(0, max);
+  return {
+    brand_name: text('brand_name', 80) || 'Maison BeYou',
+    master_logo_url: image('master_logo_url'),
+    master_background_image_url: image('master_background_image_url'),
+    master_background_color: color('master_background_color'),
+    master_card_color: color('master_card_color'),
+    master_primary_color: color('master_primary_color'),
+    master_heading_color: color('master_heading_color'),
+    master_text_color: color('master_text_color'),
+    master_subtext_color: color('master_subtext_color'),
+    master_border_color: color('master_border_color'),
+    master_border_width: Math.min(8, Math.max(0, Number(source.master_border_width) || 0)),
+    master_card_radius: Math.min(48, Math.max(0, Number(source.master_card_radius) || 0)),
+    master_overlay_opacity: Math.min(90, Math.max(0, Number(source.master_overlay_opacity) || 0)),
+    master_studio_heading: text('master_studio_heading', 80),
+    master_studio_subtitle: text('master_studio_subtitle', 120),
+    master_branches_title: text('master_branches_title', 50),
+    master_branches_subtitle: text('master_branches_subtitle', 120),
+    master_branches_button: text('master_branches_button', 40),
+    master_franchises_title: text('master_franchises_title', 50),
+    master_franchises_subtitle: text('master_franchises_subtitle', 120),
+    master_franchises_button: text('master_franchises_button', 40),
+    master_locations_heading: text('master_locations_heading', 80),
+    master_back_label: text('master_back_label', 60),
+    master_reports_label: text('master_reports_label', 40),
+    master_logout_label: text('master_logout_label', 40),
+    heading_font_family: safeFont(source.heading_font_family),
+    heading_font_size: Math.min(48, Math.max(14, Number(source.heading_font_size) || 26)),
+    heading_font_style: source.heading_font_style === 'italic' ? 'italic' : 'normal',
+    heading_font_weight: Math.min(900, Math.max(300, Number(source.heading_font_weight) || 700)),
+    supporting_font_family: safeFont(source.supporting_font_family),
+    supporting_font_size: Math.min(32, Math.max(10, Number(source.supporting_font_size) || 14)),
+    supporting_font_style: source.supporting_font_style === 'italic' ? 'italic' : 'normal',
+    supporting_font_weight: Math.min(900, Math.max(300, Number(source.supporting_font_weight) || 400)),
+    login_logo_url: image('login_logo_url'),
+    login_background_image_url: image('login_background_image_url'),
+    login_background_color: color('login_background_color'),
+    login_primary_color: color('login_primary_color'),
+    login_heading_color: color('login_heading_color'),
+    login_text_color: color('login_text_color'),
+    login_subtext_color: color('login_subtext_color'),
+    login_input_border_color: color('login_input_border_color'),
+    login_button_text_color: color('login_button_text_color'),
+    login_card_color: color('login_card_color'),
+    login_card_border_color: color('login_card_border_color'),
+    login_card_border_width: Math.min(8, Math.max(0, Number(source.login_card_border_width) || 0)),
+    login_card_radius: Math.min(48, Math.max(0, Number(source.login_card_radius) || 0)),
+    login_button_radius: Math.min(48, Math.max(0, Number(source.login_button_radius) || 0)),
+    login_card_opacity: Math.min(100, Math.max(40, Number(source.login_card_opacity) || 96)),
+    login_card_width: Math.min(760, Math.max(320, Number(source.login_card_width) || 520)),
+    login_card_padding: Math.min(80, Math.max(16, Number(source.login_card_padding) || 42)),
+    login_logo_height: Math.min(160, Math.max(24, Number(source.login_logo_height) || 52)),
+    login_mobile_label: text('login_mobile_label', 60),
+    login_mobile_placeholder: text('login_mobile_placeholder', 60),
+    login_button_label: text('login_button_label', 60),
+    login_footer_text: text('login_footer_text', 100)
+  };
+}
+
+function parseLocationBranding(raw, locationName = '') {
+  let value = raw;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { value = {}; }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) value = {};
+  return { ...DEFAULT_LOCATION_BRANDING, ...value, brand_name: value.brand_name || locationName || '' };
+}
+
+function sanitizeLocationBranding(input, locationName = '') {
+  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const color = (key) => /^#[0-9a-f]{6}$/i.test(String(source[key] || ''))
+    ? String(source[key]).toUpperCase()
+    : DEFAULT_LOCATION_BRANDING[key];
+  const image = (key) => {
+    const value = String(source[key] || '').trim();
+    return value.startsWith('/uploads/') && value.length <= 1000 ? value : '';
+  };
+  return {
+    brand_name: String(source.brand_name || '').trim().slice(0, 80) || locationName,
+    dashboard_back_label: String(source.dashboard_back_label ?? DEFAULT_LOCATION_BRANDING.dashboard_back_label).trim().slice(0, 40),
+    dashboard_summary_heading: String(source.dashboard_summary_heading ?? DEFAULT_LOCATION_BRANDING.dashboard_summary_heading).trim().slice(0, 80),
+    dashboard_refresh_label: String(source.dashboard_refresh_label ?? DEFAULT_LOCATION_BRANDING.dashboard_refresh_label).trim().slice(0, 40),
+    team_heading: String(source.team_heading ?? DEFAULT_LOCATION_BRANDING.team_heading).trim().slice(0, 100),
+    clients_heading: String(source.clients_heading ?? DEFAULT_LOCATION_BRANDING.clients_heading).trim().slice(0, 100),
+    reports_heading: String(source.reports_heading ?? DEFAULT_LOCATION_BRANDING.reports_heading).trim().slice(0, 100),
+    user_access_heading: String(source.user_access_heading ?? DEFAULT_LOCATION_BRANDING.user_access_heading).trim().slice(0, 100),
+    user_access_subtitle: String(source.user_access_subtitle ?? DEFAULT_LOCATION_BRANDING.user_access_subtitle).trim().slice(0, 150),
+    user_access_managers_label: String(source.user_access_managers_label ?? DEFAULT_LOCATION_BRANDING.user_access_managers_label).trim().slice(0, 40),
+    user_access_visitors_label: String(source.user_access_visitors_label ?? DEFAULT_LOCATION_BRANDING.user_access_visitors_label).trim().slice(0, 40),
+    user_access_add_button: String(source.user_access_add_button ?? DEFAULT_LOCATION_BRANDING.user_access_add_button).trim().slice(0, 40),
+    user_access_manager_empty: String(source.user_access_manager_empty ?? DEFAULT_LOCATION_BRANDING.user_access_manager_empty).trim().slice(0, 80),
+    user_access_visitor_empty: String(source.user_access_visitor_empty ?? DEFAULT_LOCATION_BRANDING.user_access_visitor_empty).trim().slice(0, 80),
+    heading_font_family: safeFont(source.heading_font_family),
+    heading_font_size: Math.min(48, Math.max(14, Number(source.heading_font_size) || 26)),
+    heading_font_style: source.heading_font_style === 'italic' ? 'italic' : 'normal',
+    heading_font_weight: Math.min(900, Math.max(300, Number(source.heading_font_weight) || 700)),
+    supporting_font_family: safeFont(source.supporting_font_family),
+    supporting_font_size: Math.min(32, Math.max(10, Number(source.supporting_font_size) || 14)),
+    supporting_font_style: source.supporting_font_style === 'italic' ? 'italic' : 'normal',
+    supporting_font_weight: Math.min(900, Math.max(300, Number(source.supporting_font_weight) || 400)),
+    dashboard_button_fill: color('dashboard_button_fill'),
+    dashboard_button_text: color('dashboard_button_text'),
+    dashboard_button_border: color('dashboard_button_border'),
+    dashboard_button_border_width: Math.min(8, Math.max(0, Number(source.dashboard_button_border_width) || 0)),
+    dashboard_button_radius: Math.min(48, Math.max(0, Number(source.dashboard_button_radius) || 0)),
+    service_heading: String(source.service_heading ?? DEFAULT_LOCATION_BRANDING.service_heading).trim().slice(0, 80),
+    service_add_category_label: String(source.service_add_category_label ?? DEFAULT_LOCATION_BRANDING.service_add_category_label).trim().slice(0, 40),
+    service_add_first_category_label: String(source.service_add_first_category_label ?? DEFAULT_LOCATION_BRANDING.service_add_first_category_label).trim().slice(0, 40),
+    service_expand_all_label: String(source.service_expand_all_label ?? DEFAULT_LOCATION_BRANDING.service_expand_all_label).trim().slice(0, 40),
+    service_collapse_all_label: String(source.service_collapse_all_label ?? DEFAULT_LOCATION_BRANDING.service_collapse_all_label).trim().slice(0, 40),
+    service_card_color: color('service_card_color'),
+    service_card_border_color: color('service_card_border_color'),
+    service_card_border_width: Math.min(8, Math.max(0, Number(source.service_card_border_width) || 0)),
+    service_card_radius: Math.min(48, Math.max(0, Number(source.service_card_radius) || 0)),
+    membership_heading: String(source.membership_heading ?? DEFAULT_LOCATION_BRANDING.membership_heading).trim().slice(0, 80),
+    membership_program_heading: String(source.membership_program_heading ?? DEFAULT_LOCATION_BRANDING.membership_program_heading).trim().slice(0, 80),
+    membership_card_color: color('membership_card_color'),
+    membership_card_border_color: color('membership_card_border_color'),
+    membership_card_border_width: Math.min(8, Math.max(0, Number(source.membership_card_border_width) || 0)),
+    membership_card_radius: Math.min(48, Math.max(0, Number(source.membership_card_radius) || 0)),
+    login_logo_url: image('login_logo_url'),
+    login_background_image_url: image('login_background_image_url'),
+    login_background_color: color('login_background_color'),
+    login_primary_color: color('login_primary_color'),
+    login_heading_color: color('login_heading_color'),
+    login_text_color: color('login_text_color'),
+    login_subtext_color: color('login_subtext_color'),
+    login_input_border_color: color('login_input_border_color'),
+    login_button_text_color: color('login_button_text_color'),
+    login_card_color: color('login_card_color'),
+    login_card_border_color: color('login_card_border_color'),
+    login_card_border_width: Math.min(8, Math.max(0, Number(source.login_card_border_width) || 0)),
+    login_card_radius: Math.min(48, Math.max(0, Number(source.login_card_radius) || 0)),
+    login_button_radius: Math.min(48, Math.max(0, Number(source.login_button_radius) || 0)),
+    login_card_opacity: Math.min(100, Math.max(40, Number(source.login_card_opacity) || 96)),
+    login_card_width: Math.min(760, Math.max(320, Number(source.login_card_width) || 520)),
+    login_card_padding: Math.min(80, Math.max(16, Number(source.login_card_padding) || 42)),
+    login_logo_height: Math.min(160, Math.max(24, Number(source.login_logo_height) || 52)),
+    login_mobile_label: String(source.login_mobile_label ?? DEFAULT_LOCATION_BRANDING.login_mobile_label).trim().slice(0, 60),
+    login_mobile_placeholder: String(source.login_mobile_placeholder ?? DEFAULT_LOCATION_BRANDING.login_mobile_placeholder).trim().slice(0, 60),
+    login_button_label: String(source.login_button_label ?? DEFAULT_LOCATION_BRANDING.login_button_label).trim().slice(0, 60),
+    login_footer_text: String(source.login_footer_text ?? DEFAULT_LOCATION_BRANDING.login_footer_text).trim().slice(0, 100),
+    logo_url: image('logo_url'),
+    background_color: color('background_color'),
+    background_image_url: image('background_image_url'),
+    card_color: color('card_color'),
+    primary_color: color('primary_color'),
+    heading_color: color('heading_color'),
+    text_color: color('text_color'),
+    subtext_color: color('subtext_color'),
+    card_border_color: color('card_border_color'),
+    card_border_width: Math.min(8, Math.max(0, Number(source.card_border_width) || 0)),
+    card_radius: Math.min(48, Math.max(0, Number(source.card_radius) || 0))
+  };
+}
 
 // Helper to identify non-preferred contact details across LOCATIONS, KYC, STAKEHOLDERS, and CLIENTS
 function isNonPreferredContact(rawInput) {
@@ -688,7 +1004,7 @@ app.post('/api/auth/detect-account', (req, res) => {
       // 2. Query all active users with phone numbers
       const usersWithPhone = db.prepare(`
         SELECT u.user_id, u.name, u.email, u.phone, u.designation, u.role, u.location_id,
-               l.name as location_name, l.code as location_code, l.city as location_city
+               l.name as location_name, l.code as location_code, l.city as location_city, l.branding_config
         FROM USERS u
         LEFT JOIN LOCATIONS l ON u.location_id = l.location_id
         WHERE u.active = 1 AND u.phone IS NOT NULL
@@ -720,6 +1036,7 @@ app.post('/api/auth/detect-account', (req, res) => {
           roleSubtitle,
           branchName: u.location_name || (u.role === 'master_admin' ? 'Headquarters & Global Network' : 'Studio Branch'),
           branchCode: u.location_code,
+          branding: parseLocationBranding(u.branding_config, u.location_name),
           isMasterAdmin: u.role === 'master_admin'
         });
       }
@@ -746,6 +1063,7 @@ app.post('/api/auth/detect-account', (req, res) => {
             name: u.name,
             location_id: u.location_id,
             branch_name: u.location_name,
+            branding: parseLocationBranding(u.branding_config, u.location_name),
             roleLabel: u.role === 'admin' ? 'Branch Admin' : u.role === 'reception' ? 'Manager' : 'Visitor',
             roleSubtitle: u.role === 'admin' ? 'Management & Reports' : u.role === 'reception' ? 'Billing & Intake' : 'Client Tablet'
           }))
@@ -758,7 +1076,7 @@ app.post('/api/auth/detect-account', (req, res) => {
       if (user) {
         let loc = null;
         if (user.location_id) {
-          loc = db.prepare('SELECT location_id, name, code FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
+          loc = db.prepare('SELECT location_id, name, code, branding_config FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
         }
         const roleLabel = user.role === 'admin' ? 'Branch Admin' : user.role === 'reception' ? 'Manager' : user.role === 'master_admin' ? 'Maison Master Admin' : 'Visitor';
         return res.json({
@@ -775,6 +1093,7 @@ app.post('/api/auth/detect-account', (req, res) => {
           roleLabel,
           branchName: loc ? loc.name : 'Headquarters & Global Network',
           branchCode: loc ? loc.code : null,
+          branding: loc ? parseLocationBranding(loc.branding_config, loc.name) : null,
           isMasterAdmin: user.role === 'master_admin'
         });
       }
@@ -1212,6 +1531,111 @@ function parseStakeholders(rows) {
 }
 
 // ==================== LOCATION & STUDIO MANAGEMENT ROUTES ====================
+const authorizeBrandingLocation = (req, res, next) => {
+  const locationId = Number(req.params.id);
+  const location = db.prepare('SELECT location_id FROM LOCATIONS WHERE location_id = ?').get(locationId);
+  if (!location) return res.status(404).json({ error: 'Branch not found.' });
+  if (req.user.role !== 'master_admin' && Number(req.user.location_id) !== locationId) {
+    return res.status(403).json({ error: 'You can only customize your own branch.' });
+  }
+  req.brandingLocationId = locationId;
+  next();
+};
+
+app.post('/api/branding/master-portal/upload', authenticateToken, authorizeRoles('master_admin'), upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
+    if (!req.file.mimetype?.startsWith('image/')) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Only image files can be used for branding.' });
+    }
+    if (req.file.size > 8 * 1024 * 1024) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Branding images must be 8 MB or smaller.' });
+    }
+    res.json({ url: `/uploads/${req.file.filename}` });
+  } catch (error) {
+    console.error('Master portal branding upload error:', error);
+    res.status(500).json({ error: 'Could not upload the branding image.' });
+  }
+});
+
+app.get('/api/branding/master-portal', (req, res) => {
+  try {
+    const row = db.prepare('SELECT setting_value FROM APP_SETTINGS WHERE setting_key = ?').get('master_portal_branding');
+    res.json({ branding: parseMasterPortalBranding(row?.setting_value) });
+  } catch (error) {
+    console.error('Load master portal branding error:', error);
+    res.status(500).json({ error: 'Could not load master portal branding.' });
+  }
+});
+
+app.put('/api/branding/master-portal', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+  try {
+    const branding = sanitizeMasterPortalBranding(req.body);
+    db.prepare(`
+      INSERT INTO APP_SETTINGS (setting_key, setting_value, updated_at)
+      VALUES ('master_portal_branding', ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP
+    `).run(JSON.stringify(branding));
+    res.json({ success: true, branding });
+  } catch (error) {
+    console.error('Save master portal branding error:', error);
+    res.status(500).json({ error: 'Could not save master portal branding.' });
+  }
+});
+
+app.post('/api/branding/:id/upload', authenticateToken, authorizeRoles('master_admin', 'admin'), authorizeBrandingLocation, upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Choose an image to upload.' });
+    if (!req.file.mimetype?.startsWith('image/')) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Only image files can be used for branding.' });
+    }
+    if (req.file.size > 8 * 1024 * 1024) {
+      fs.unlink(req.file.path, () => {});
+      return res.status(400).json({ error: 'Branding images must be 8 MB or smaller.' });
+    }
+    res.json({ url: `/uploads/${req.file.filename}` });
+  } catch (error) {
+    console.error('Branch branding upload error:', error);
+    res.status(500).json({ error: 'Could not upload the branding image.' });
+  }
+});
+
+app.get('/api/branding/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    const locationId = Number(req.params.id);
+    const location = db.prepare('SELECT location_id, name, branding_config FROM LOCATIONS WHERE location_id = ?').get(locationId);
+    if (!location) return res.status(404).json({ error: 'Branch not found.' });
+    if (req.user.role !== 'master_admin' && Number(req.user.location_id) !== locationId) {
+      return res.status(403).json({ error: 'You can only customize your own branch.' });
+    }
+    res.json({ branding: parseLocationBranding(location.branding_config, location.name) });
+  } catch (error) {
+    console.error('Load branch branding error:', error);
+    res.status(500).json({ error: 'Could not load branch branding.' });
+  }
+});
+
+app.put('/api/branding/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    const locationId = Number(req.params.id);
+    const location = db.prepare('SELECT location_id, name FROM LOCATIONS WHERE location_id = ?').get(locationId);
+    if (!location) return res.status(404).json({ error: 'Branch not found.' });
+    if (req.user.role !== 'master_admin' && Number(req.user.location_id) !== locationId) {
+      return res.status(403).json({ error: 'You can only customize your own branch.' });
+    }
+    const branding = sanitizeLocationBranding(req.body, location.name);
+    db.prepare('UPDATE LOCATIONS SET branding_config = ?, updated_at = CURRENT_TIMESTAMP WHERE location_id = ?')
+      .run(JSON.stringify(branding), locationId);
+    res.json({ success: true, branding });
+  } catch (error) {
+    console.error('Save branch branding error:', error);
+    res.status(500).json({ error: 'Could not save branch branding.' });
+  }
+});
+
 // Get all locations or filter by type (?type=branch or ?type=franchise)
 app.get('/api/locations', authenticateToken, (req, res) => {
   try {
@@ -1344,6 +1768,7 @@ app.get('/api/locations', authenticateToken, (req, res) => {
 
       return {
         ...loc,
+        branding: parseLocationBranding(loc.branding_config, loc.name),
         manager_name: branchManager,
         client_count: clientCount,
         staff_count: staffCount,
@@ -1411,7 +1836,7 @@ app.get('/api/locations/:id', authenticateToken, (req, res) => {
       console.error('Error fetching KYC for location id:', locId, e.message);
     }
 
-    res.json({ location: { ...location, kyc, stakeholders }, kyc, stakeholders });
+    res.json({ location: { ...location, branding: parseLocationBranding(location.branding_config, location.name), kyc, stakeholders }, kyc, stakeholders });
   } catch (error) {
     console.error('Get location error:', error);
     res.status(500).json({ error: 'Failed to fetch location' });
@@ -2115,7 +2540,7 @@ app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
     }
 
     let query = `
-      SELECT u.user_id, u.name, u.email, u.phone, u.designation, u.role, u.active, u.location_id, u.created_at, u.updated_at,
+      SELECT u.user_id, u.name, u.email, u.phone, u.designation, u.team_role, u.role, u.active, u.location_id, u.created_at, u.updated_at,
              l.name as location_name, l.code as location_code, l.type as location_type
       FROM USERS u
       LEFT JOIN LOCATIONS l ON u.location_id = l.location_id
@@ -2143,7 +2568,7 @@ app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
 // Branch Admin can create Manager/Visitor accounts only in their own branch.
 app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    const { name, email, phone, role, location_id, designation } = req.body;
+    const { name, email, phone, role, location_id, designation, team_role } = req.body;
     const targetLocId = req.user.role === 'master_admin' ? Number(location_id) : Number(req.locationId);
     const requestedPermissions = role === 'visitor' ? ['visitor_intake'] : req.body.permissions;
     if (!name || !email || !phone || !role || !targetLocId || !Array.isArray(requestedPermissions)) {
@@ -2152,6 +2577,13 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
 
     if (!['reception', 'visitor'].includes(role)) {
       return res.status(400).json({ error: 'Branch Admins can create Manager or Visitor accounts only.' });
+    }
+    const cleanTeamRole = String(team_role || '').trim();
+    const cleanDesignation = String(designation || '').trim();
+    if (role === 'reception') {
+      if (!cleanTeamRole || !cleanDesignation) return res.status(400).json({ error: 'Choose a team role and designation from Master for this Manager.' });
+      if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanTeamRole)) return res.status(400).json({ error: 'Choose a team role from Master.' });
+      if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from Master.' });
     }
 
     const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
@@ -2177,9 +2609,9 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
     const hash = bcrypt.hashSync(randomBytes(32).toString('hex'), 10);
 
     const info = db.prepare(`
-      INSERT INTO USERS (name, email, phone, designation, password_hash, role, active, location_id)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
-    `).run(name.trim(), cleanEmail, cleanPhone, (designation || (role === 'reception' ? 'Manager' : 'Visitor')).trim(), hash, role, targetLocId);
+      INSERT INTO USERS (name, email, phone, designation, team_role, password_hash, role, active, location_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(name.trim(), cleanEmail, cleanPhone, (cleanDesignation || 'Visitor'), cleanTeamRole || null, hash, role, targetLocId);
 
     const newUserId = info.lastInsertRowid;
     db.prepare('INSERT INTO USER_ACCESS_PROFILES (user_id, location_id, permissions) VALUES (?, ?, ?)')
@@ -2195,7 +2627,7 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
-    const createdUser = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, role, active, location_id, created_at FROM USERS WHERE user_id = ?').get(newUserId));
+    const createdUser = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, team_role, role, active, location_id, created_at FROM USERS WHERE user_id = ?').get(newUserId));
     res.status(201).json({ success: true, user: createdUser });
   } catch (error) {
     console.error('Create branch user error:', error);
@@ -2207,7 +2639,7 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
 app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     const userId = Number(req.params.id);
-    const { name, phone, email, designation, role, location_id } = req.body;
+    const { name, phone, email, designation, team_role, role, location_id } = req.body;
     let { permissions } = req.body;
 
     const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
@@ -2225,6 +2657,13 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
     }
     const effectiveRole = role || existingUser.role;
     if (effectiveRole === 'visitor') permissions = ['visitor_intake'];
+    const cleanTeamRole = team_role === undefined ? existingUser.team_role : String(team_role || '').trim();
+    const cleanDesignation = designation === undefined ? existingUser.designation : String(designation || '').trim();
+    if (effectiveRole === 'reception') {
+      if (!cleanTeamRole || !cleanDesignation) return res.status(400).json({ error: 'Choose a team role and designation from Master for this Manager.' });
+      if (cleanTeamRole.toLowerCase() !== String(existingUser.team_role || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanTeamRole)) return res.status(400).json({ error: 'Choose a team role from Master.' });
+      if (cleanDesignation.toLowerCase() !== String(existingUser.designation || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from Master.' });
+    }
 
     if (Number(existingUser.location_id) !== Number(targetLocId)) {
       return res.status(403).json({ error: 'Branch user accounts cannot be moved between branches.' });
@@ -2249,10 +2688,11 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
           phone = COALESCE(?, phone),
           email = COALESCE(?, email),
           designation = COALESCE(?, designation),
+          team_role = CASE WHEN ? IS NOT NULL THEN ? ELSE team_role END,
           role = COALESCE(?, role),
           updated_at = CURRENT_TIMESTAMP
       WHERE user_id = ?
-    `).run(name ? name.trim() : null, cleanPhone, cleanEmail, designation === undefined ? null : designation.trim(), role || null, userId);
+    `).run(name ? name.trim() : null, cleanPhone, cleanEmail, designation === undefined ? null : cleanDesignation, team_role === undefined ? null : 1, team_role === undefined ? null : (cleanTeamRole || null), role || null, userId);
 
     if (permissions !== undefined) {
       db.prepare(`UPDATE USER_ACCESS_PROFILES SET permissions = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND location_id = ?`)
@@ -2265,11 +2705,11 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
       targetType: 'USER',
       targetId: userId,
       locationId: targetLocId,
-      details: { old: { name: existingUser.name, role: existingUser.role, location_id: existingUser.location_id }, updated: { name, phone, email, designation, role, permissions } },
+      details: { old: { name: existingUser.name, role: existingUser.role, team_role: existingUser.team_role, location_id: existingUser.location_id }, updated: { name, phone, email, designation: cleanDesignation, team_role: cleanTeamRole, role, permissions } },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
-    const updated = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, role, active, location_id, updated_at FROM USERS WHERE user_id = ?').get(userId));
+    const updated = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, team_role, role, active, location_id, updated_at FROM USERS WHERE user_id = ?').get(userId));
     res.json({ success: true, user: updated });
   } catch (error) {
     console.error('Update branch user error:', error);
@@ -3374,6 +3814,7 @@ function ensureMembershipPlansTable(locationId) {
       bg TEXT DEFAULT '#FAF6EE',
       tagline TEXT,
       benefits TEXT,
+      free_services TEXT DEFAULT '[]',
       discount_percent REAL NOT NULL DEFAULT 0,
       is_custom INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -3385,6 +3826,7 @@ function ensureMembershipPlansTable(locationId) {
       value TEXT
     );
   `);
+  try { db.exec("ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN free_services TEXT DEFAULT '[]'"); } catch (e) {}
 
   try { db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id)'); } catch (e) {}
   db.prepare('UPDATE MEMBERSHIP_PLANS SET location_id = 1 WHERE location_id IS NULL').run();
@@ -3423,6 +3865,29 @@ function ensureMembershipPlansTable(locationId) {
   // plans are added explicitly from that branch's Membership screen.
 }
 
+function sanitizeMembershipFreeServices(input, locationId) {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set();
+  return input.map(item => Number(item?.service_id)).filter(serviceId => {
+    if (!Number.isInteger(serviceId) || serviceId <= 0 || seen.has(serviceId)) return false;
+    seen.add(serviceId);
+    return true;
+  }).map(serviceId => {
+    const service = db.prepare(`
+      SELECT s.service_id, s.service_name, s.price
+      FROM SERVICES s JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
+      WHERE s.service_id = ? AND c.location_id = ? AND s.active = 1
+    `).get(serviceId, locationId);
+    if (!service) throw new Error('A complimentary service is unavailable at this branch. Refresh the services list and try again.');
+    return { service_id: service.service_id, service_name: service.service_name, price: Number(service.price) || 0, is_free: true };
+  });
+}
+
+function parseMembershipFreeServices(raw) {
+  if (Array.isArray(raw)) return raw;
+  try { return JSON.parse(raw || '[]'); } catch { return []; }
+}
+
 // Studio Membership Intelligence & Roster endpoint
 app.get('/api/memberships', authenticateToken, (req, res) => {
   try {
@@ -3451,7 +3916,9 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
     const canonicalPlans = planRows.map(p => ({
       ...p,
       priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
-      benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
+      benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || []),
+      free_services: parseMembershipFreeServices(p.free_services),
+      free_service_value: parseMembershipFreeServices(p.free_services).reduce((sum, service) => sum + (Number(service.price) || 0), 0)
     }));
 
     const standardTierCosts = {};
@@ -3546,7 +4013,9 @@ app.get('/api/memberships/public', (req, res) => {
       return {
         ...clientPlan,
         priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
-        benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || [])
+        benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || []),
+        free_services: parseMembershipFreeServices(p.free_services),
+        free_service_value: parseMembershipFreeServices(p.free_services).reduce((sum, service) => sum + (Number(service.price) || 0), 0)
       };
     });
     const titleRow = db.prepare('SELECT value FROM MEMBERSHIP_SETTINGS WHERE key = ?').get(`${locId}:program_title`);
@@ -3589,7 +4058,7 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
     const locId = req.locationId;
     if (!locId) return res.status(400).json({ error: 'Branch context is required to add a membership plan.' });
     ensureMembershipPlansTable(locId);
-    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, free_services, discount_percent } = req.body;
     if (!name || !price) {
       return res.status(400).json({ error: 'Membership tier name and price are required' });
     }
@@ -3602,13 +4071,15 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
       ? benefits 
       : (typeof benefits === 'string' ? benefits.split('\n').map(s => s.trim()).filter(Boolean) : []);
     const benefitsJson = JSON.stringify(benefitsList.length > 0 ? benefitsList : ['Exclusive tailored beauty treatment privileges']);
+    const freeServicesList = sanitizeMembershipFreeServices(free_services, locId);
+    const freeServicesJson = JSON.stringify(freeServicesList);
     const cardImg = image || '/memberships/card_infini_3d.jpg';
     const tierVal = tier ? tier.trim() : name.trim();
     const count = db.prepare('SELECT COUNT(*) as cnt FROM MEMBERSHIP_PLANS WHERE location_id = ?').get(locId).cnt;
 
     const insert = db.prepare(`
-      INSERT INTO MEMBERSHIP_PLANS (location_id, id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, discount_percent, is_custom)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      INSERT INTO MEMBERSHIP_PLANS (location_id, id, tier, tierNumber, name, fullName, price, credits, validity, validityBadge, durationLabel, image, color, bg, tagline, benefits, free_services, discount_percent, is_custom)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       locId,
       cleanId,
@@ -3626,6 +4097,7 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
       '#FAF6EE',
       tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitsJson,
+      freeServicesJson,
       discountPercent
     );
 
@@ -3635,7 +4107,8 @@ app.post('/api/memberships/plans', authenticateToken, authorizeRoles('master_adm
       plan: {
         ...createdPlan,
         priceFormatted: `₹${Number(createdPlan.price).toLocaleString('en-IN')}`,
-        benefits: JSON.parse(createdPlan.benefits || '[]')
+        benefits: JSON.parse(createdPlan.benefits || '[]'),
+        free_services: parseMembershipFreeServices(createdPlan.free_services)
       }
     });
   } catch (err) {
@@ -3651,7 +4124,7 @@ app.put('/api/memberships/plans/:id', authenticateToken, authorizeRoles('master_
     if (!locId) return res.status(400).json({ error: 'Branch context is required to edit a membership plan.' });
     ensureMembershipPlansTable(locId);
     const { id } = req.params;
-    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, discount_percent } = req.body;
+    const { name, fullName, tier, tierNumber, price, credits, validity, validityBadge, durationLabel, image, tagline, benefits, free_services, discount_percent } = req.body;
     if (!name || !price) {
       return res.status(400).json({ error: 'Membership tier name and price are required' });
     }
@@ -3663,6 +4136,8 @@ const benefitsList = Array.isArray(benefits)
       ? benefits
       : (typeof benefits === 'string' ? benefits.split('\n').map(s => s.trim()).filter(Boolean) : []);
 	    const benefitsJson = JSON.stringify(benefitsList.length > 0 ? benefitsList : ['Exclusive tailored beauty treatment privileges']);
+    const freeServicesList = sanitizeMembershipFreeServices(free_services, locId);
+    const freeServicesJson = JSON.stringify(freeServicesList);
     const cardImg = image || '/memberships/card_infini_3d.jpg';
     const tierVal = tier ? tier.trim() : name.trim();
 
@@ -3685,6 +4160,7 @@ const benefitsList = Array.isArray(benefits)
           image = ?,
           tagline = ?,
           benefits = ?,
+          free_services = ?,
           discount_percent = ?,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND location_id = ?
@@ -3701,6 +4177,7 @@ const benefitsList = Array.isArray(benefits)
       cardImg,
       tagline || 'Exclusive personalized aesthetic luxury membership.',
       benefitsJson,
+      freeServicesJson,
       discountPercent,
       planExists.id,
       locId
@@ -3712,7 +4189,8 @@ const benefitsList = Array.isArray(benefits)
       plan: {
         ...updatedPlan,
         priceFormatted: `₹${Number(updatedPlan.price).toLocaleString('en-IN')}`,
-        benefits: JSON.parse(updatedPlan.benefits || '[]')
+        benefits: JSON.parse(updatedPlan.benefits || '[]'),
+        free_services: parseMembershipFreeServices(updatedPlan.free_services)
       }
     });
   } catch (err) {
@@ -5096,7 +5574,7 @@ app.get('/api/staff', authenticateToken, (req, res) => {
     if (!locId) {
       return res.status(400).json({ error: 'Branch context (x-location-id) is required to view staff.' });
     }
-    const staff = db.prepare('SELECT staff_id, name, role, phone, location_id FROM STAFF WHERE active = 1 AND location_id = ? ORDER BY name ASC').all(locId);
+    const staff = db.prepare('SELECT staff_id, name, role, designation, department, phone, location_id FROM STAFF WHERE active = 1 AND location_id = ? ORDER BY name ASC').all(locId);
     res.json({ staff });
   } catch (error) {
     console.error('Staff error:', error);
@@ -5105,6 +5583,162 @@ app.get('/api/staff', authenticateToken, (req, res) => {
 });
 
 // Admin Staff with performance metrics & incentive calculations
+app.get('/api/admin/team-options', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    ensureTeamMasterOptions();
+    const options = db.prepare(`
+      SELECT option_id, option_type, option_name
+      FROM TEAM_MASTER_OPTIONS
+      WHERE active = 1
+      ORDER BY option_type, option_name COLLATE NOCASE
+    `).all();
+    res.json({ roles: options.filter(option => option.option_type === 'role'), designations: options.filter(option => option.option_type === 'designation') });
+  } catch (error) {
+    console.error('Team master options error:', error);
+    res.status(500).json({ error: 'Failed to load team role and designation options' });
+  }
+});
+
+app.post('/api/admin/team-options', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const optionType = String(req.body.option_type || '').trim().toLowerCase();
+    const optionName = String(req.body.option_name || '').trim().replace(/\s+/g, ' ');
+    if (!['role', 'designation'].includes(optionType)) return res.status(400).json({ error: 'Choose Role or Designation.' });
+    if (optionName.length < 2 || optionName.length > 60) return res.status(400).json({ error: 'Enter a name between 2 and 60 characters.' });
+    const existing = db.prepare(`SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE option_type = ? AND LOWER(option_name) = LOWER(?)`).get(optionType, optionName);
+    if (existing) {
+      db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 1 WHERE option_id = ?').run(existing.option_id);
+      return res.json({ option: { option_id: existing.option_id, option_type: optionType, option_name: optionName } });
+    }
+    const result = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (option_type, option_name) VALUES (?, ?)').run(optionType, optionName);
+    res.status(201).json({ option: { option_id: result.lastInsertRowid, option_type: optionType, option_name: optionName } });
+  } catch (error) {
+    console.error('Create team master option error:', error);
+    res.status(500).json({ error: 'Failed to save team option' });
+  }
+});
+
+app.delete('/api/admin/team-options/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const result = db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 0 WHERE option_id = ? AND active = 1').run(Number(req.params.id));
+    if (!result.changes) return res.status(404).json({ error: 'Team option not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove team master option error:', error);
+    res.status(500).json({ error: 'Failed to remove team option' });
+  }
+});
+
+app.get('/api/admin/team-departments', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const departments = db.prepare('SELECT department_id, department_name FROM TEAM_DEPARTMENTS WHERE active = 1 ORDER BY department_name COLLATE NOCASE').all();
+    res.json({ departments });
+  } catch (error) {
+    console.error('Team departments error:', error);
+    res.status(500).json({ error: 'Failed to load departments' });
+  }
+});
+
+app.post('/api/admin/team-departments', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const departmentName = String(req.body.department_name || '').trim().replace(/\s+/g, ' ');
+    if (departmentName.length < 2 || departmentName.length > 60) return res.status(400).json({ error: 'Enter a department name between 2 and 60 characters.' });
+    const existing = db.prepare('SELECT department_id FROM TEAM_DEPARTMENTS WHERE LOWER(department_name) = LOWER(?)').get(departmentName);
+    if (existing) {
+      db.prepare('UPDATE TEAM_DEPARTMENTS SET active = 1 WHERE department_id = ?').run(existing.department_id);
+      return res.json({ department: { department_id: existing.department_id, department_name: departmentName } });
+    }
+    const result = db.prepare('INSERT INTO TEAM_DEPARTMENTS (department_name) VALUES (?)').run(departmentName);
+    res.status(201).json({ department: { department_id: result.lastInsertRowid, department_name: departmentName } });
+  } catch (error) {
+    console.error('Create department error:', error);
+    res.status(500).json({ error: 'Failed to add department' });
+  }
+});
+
+app.delete('/api/admin/team-departments/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const departmentId = Number(req.params.id);
+    const hasPositions = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE department_id = ? AND active = 1 LIMIT 1').get(departmentId);
+    if (hasPositions) return res.status(409).json({ error: 'Remove the department positions before removing this department.' });
+    const result = db.prepare('UPDATE TEAM_DEPARTMENTS SET active = 0 WHERE department_id = ? AND active = 1').run(departmentId);
+    if (!result.changes) return res.status(404).json({ error: 'Department not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove department error:', error);
+    res.status(500).json({ error: 'Failed to remove department' });
+  }
+});
+
+const teamHierarchySelect = `
+  SELECT h.hierarchy_id, h.department_id, d.department_name,
+         h.role_option_id, role.option_name AS role_name,
+         h.designation_option_id, designation.option_name AS designation_name,
+         h.reports_to_hierarchy_id AS reports_to_id,
+         parent_role.option_name AS reports_to_role,
+         parent_designation.option_name AS reports_to_designation,
+         h.reports_to_staff_id,
+         supervisor.name AS reports_to_name,
+         supervisor.role AS reports_to_staff_role,
+         supervisor.designation AS reports_to_staff_designation
+  FROM TEAM_HIERARCHY h
+  JOIN TEAM_DEPARTMENTS d ON d.department_id = h.department_id
+  JOIN TEAM_MASTER_OPTIONS role ON role.option_id = h.role_option_id
+  JOIN TEAM_MASTER_OPTIONS designation ON designation.option_id = h.designation_option_id
+  LEFT JOIN TEAM_HIERARCHY parent ON parent.hierarchy_id = h.reports_to_hierarchy_id
+  LEFT JOIN TEAM_MASTER_OPTIONS parent_role ON parent_role.option_id = parent.role_option_id
+  LEFT JOIN TEAM_MASTER_OPTIONS parent_designation ON parent_designation.option_id = parent.designation_option_id
+  LEFT JOIN STAFF supervisor ON supervisor.staff_id = h.reports_to_staff_id
+`;
+
+app.get('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.active = 1 AND d.active = 1 ORDER BY d.department_name COLLATE NOCASE, designation.option_name COLLATE NOCASE, role.option_name COLLATE NOCASE`).all();
+    res.json({ hierarchy });
+  } catch (error) {
+    console.error('Team hierarchy error:', error);
+    res.status(500).json({ error: 'Failed to load team hierarchy' });
+  }
+});
+
+app.post('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const departmentId = Number(req.body.department_id);
+    const roleOptionId = Number(req.body.role_option_id);
+    const designationOptionId = Number(req.body.designation_option_id);
+    const reportsToStaffId = req.body.reports_to_staff_id ? Number(req.body.reports_to_staff_id) : null;
+    if (!departmentId || !roleOptionId || !designationOptionId) return res.status(400).json({ error: 'Department, role, and designation are required.' });
+    if (!db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_id = ? AND active = 1').get(departmentId)) return res.status(400).json({ error: 'Choose an active department.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND option_type = 'role' AND active = 1").get(roleOptionId)) return res.status(400).json({ error: 'Choose an active role.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND option_type = 'designation' AND active = 1").get(designationOptionId)) return res.status(400).json({ error: 'Choose an active designation.' });
+    if (reportsToStaffId && !db.prepare('SELECT 1 FROM STAFF WHERE staff_id = ? AND department = (SELECT department_name FROM TEAM_DEPARTMENTS WHERE department_id = ?) COLLATE NOCASE AND active = 1').get(reportsToStaffId, departmentId)) return res.status(400).json({ error: 'Choose an active team member assigned to this department.' });
+    const result = db.prepare(`
+      INSERT INTO TEAM_HIERARCHY (department_id, role_option_id, designation_option_id, reports_to_staff_id)
+      VALUES (?, ?, ?, ?)
+    `).run(departmentId, roleOptionId, designationOptionId, reportsToStaffId);
+    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.hierarchy_id = ?`).get(result.lastInsertRowid);
+    res.status(201).json({ hierarchy });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That position is already listed in this department.' });
+    console.error('Create hierarchy position error:', error);
+    res.status(500).json({ error: 'Failed to add hierarchy position' });
+  }
+});
+
+app.delete('/api/admin/team-hierarchy/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const hierarchyId = Number(req.params.id);
+    const hasReports = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE reports_to_hierarchy_id = ? AND active = 1 LIMIT 1').get(hierarchyId);
+    if (hasReports) return res.status(409).json({ error: 'Reassign the positions reporting here before removing this position.' });
+    const result = db.prepare('UPDATE TEAM_HIERARCHY SET active = 0 WHERE hierarchy_id = ? AND active = 1').run(hierarchyId);
+    if (!result.changes) return res.status(404).json({ error: 'Hierarchy position not found' });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Remove hierarchy position error:', error);
+    res.status(500).json({ error: 'Failed to remove hierarchy position' });
+  }
+});
+
 app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
     const locId = req.locationId;
@@ -5161,21 +5795,43 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
     const {
       name,
       role,
+      designation,
+      department,
       phone,
+      email,
+      surname,
+      address,
+      pincode,
+      city,
+      state,
+      bank_account_name,
+      bank_name,
+      ifsc_code,
+      qr_code_url,
+      upi_id,
       location_id,
       aadhaar_number,
       aadhaar_doc,
+      aadhaar_back_doc,
       pan_number,
       pan_doc,
+      pan_back_doc,
       photo_url,
       salary_type,
       salary_amount,
       incentive_percentage
     } = req.body;
 
-    if (!name || !role) {
-      return res.status(400).json({ error: 'Staff name and role are required' });
+    if (!name) {
+      return res.status(400).json({ error: 'Staff name is required' });
     }
+    const cleanRole = String(role || '').trim();
+    const cleanDesignation = String(designation || '').trim();
+    if (!cleanRole || !cleanDesignation) return res.status(400).json({ error: 'Role and designation are required.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanRole)) return res.status(400).json({ error: 'Choose a role from the Team Master list.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from the Team Master list.' });
+    const cleanDepartment = String(department || '').trim();
+    if (cleanDepartment && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_name = ? COLLATE NOCASE AND active = 1').get(cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from the Master hierarchy.' });
 
     const targetLocId = req.locationId;
     if (!targetLocId) {
@@ -5187,20 +5843,36 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
 
     const info = db.prepare(`
       INSERT INTO STAFF (
-        name, role, phone, active, location_id,
-        aadhaar_number, aadhaar_doc, pan_number, pan_doc, photo_url,
+        name, role, designation, department, phone, email, surname, address, pincode, city, state,
+        bank_account_name, bank_name, ifsc_code, qr_code_url, upi_id, active, location_id,
+        aadhaar_number, aadhaar_doc, aadhaar_back_doc, pan_number, pan_doc, pan_back_doc, photo_url,
         salary_type, salary_amount, incentive_percentage
       )
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       name.trim(),
-      role.trim(),
+      cleanRole,
+      cleanDesignation,
+      cleanDepartment || null,
       phone ? phone.trim() : null,
+      email ? email.trim() : null,
+      surname ? surname.trim() : null,
+      address ? address.trim() : null,
+      pincode ? pincode.trim() : null,
+      city ? city.trim() : null,
+      state ? state.trim() : null,
+      bank_account_name ? bank_account_name.trim() : null,
+      bank_name ? bank_name.trim() : null,
+      ifsc_code ? ifsc_code.trim().toUpperCase() : null,
+      qr_code_url || null,
+      upi_id ? upi_id.trim() : null,
       targetLocId,
       aadhaar_number ? aadhaar_number.trim() : null,
       aadhaar_doc || null,
+      aadhaar_back_doc || null,
       pan_number ? pan_number.trim().toUpperCase() : null,
       pan_doc || null,
+      pan_back_doc || null,
       photo_url || null,
       cleanSalaryType,
       cleanSalaryAmount,
@@ -5221,12 +5893,27 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
     const {
       name,
       role,
+      designation,
+      department,
       phone,
+      email,
+      surname,
+      address,
+      pincode,
+      city,
+      state,
+      bank_account_name,
+      bank_name,
+      ifsc_code,
+      qr_code_url,
+      upi_id,
       active,
       aadhaar_number,
       aadhaar_doc,
+      aadhaar_back_doc,
       pan_number,
       pan_doc,
+      pan_back_doc,
       photo_url,
       salary_type,
       salary_amount,
@@ -5238,12 +5925,24 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
     if (!activeLocId) {
       return res.status(400).json({ error: 'Branch context (x-location-id) is required to update staff.' });
     }
-    const existing = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(staffId);
+    const existing = db.prepare('SELECT location_id, role, designation, department FROM STAFF WHERE staff_id = ?').get(staffId);
     if (!existing) {
       return res.status(404).json({ error: 'Staff member not found' });
     }
     if (Number(existing.location_id) !== Number(activeLocId)) {
       return res.status(403).json({ error: 'Access denied: Staff member belongs to another studio location' });
+    }
+    if (role !== undefined) {
+      const cleanRole = String(role ?? '').trim();
+      if (!cleanRole || (cleanRole.toLowerCase() !== String(existing.role || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanRole))) return res.status(400).json({ error: 'Choose a role from the Team Master list.' });
+    }
+    if (designation !== undefined) {
+      const cleanDesignation = String(designation ?? '').trim();
+      if (!cleanDesignation || (cleanDesignation.toLowerCase() !== String(existing.designation || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation))) return res.status(400).json({ error: 'Choose a designation from the Team Master list.' });
+    }
+    if (department !== undefined) {
+      const cleanDepartment = String(department ?? '').trim();
+      if (cleanDepartment && cleanDepartment.toLowerCase() !== String(existing.department || '').toLowerCase() && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_name = ? COLLATE NOCASE AND active = 1').get(cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from the Master hierarchy.' });
     }
 
     const cleanSalaryType = salary_type !== undefined
@@ -5254,12 +5953,27 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
       UPDATE STAFF
       SET name = COALESCE(?, name),
           role = COALESCE(?, role),
+          designation = COALESCE(?, designation),
+          department = CASE WHEN ? IS NOT NULL THEN ? ELSE department END,
           phone = COALESCE(?, phone),
+          email = CASE WHEN ? IS NOT NULL THEN ? ELSE email END,
+          surname = CASE WHEN ? IS NOT NULL THEN ? ELSE surname END,
+          address = CASE WHEN ? IS NOT NULL THEN ? ELSE address END,
+          pincode = CASE WHEN ? IS NOT NULL THEN ? ELSE pincode END,
+          city = CASE WHEN ? IS NOT NULL THEN ? ELSE city END,
+          state = CASE WHEN ? IS NOT NULL THEN ? ELSE state END,
+          bank_account_name = CASE WHEN ? IS NOT NULL THEN ? ELSE bank_account_name END,
+          bank_name = CASE WHEN ? IS NOT NULL THEN ? ELSE bank_name END,
+          ifsc_code = CASE WHEN ? IS NOT NULL THEN ? ELSE ifsc_code END,
+          qr_code_url = CASE WHEN ? IS NOT NULL THEN ? ELSE qr_code_url END,
+          upi_id = CASE WHEN ? IS NOT NULL THEN ? ELSE upi_id END,
           active = COALESCE(?, active),
           aadhaar_number = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_number END,
           aadhaar_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_doc END,
+          aadhaar_back_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE aadhaar_back_doc END,
           pan_number = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_number END,
           pan_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_doc END,
+          pan_back_doc = CASE WHEN ? IS NOT NULL THEN ? ELSE pan_back_doc END,
           photo_url = CASE WHEN ? IS NOT NULL THEN ? ELSE photo_url END,
           salary_type = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_type END,
           salary_amount = CASE WHEN ? IS NOT NULL THEN ? ELSE salary_amount END,
@@ -5268,17 +5982,34 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
       WHERE staff_id = ?
     `).run(
       name !== undefined ? (name ? name.trim() : null) : null,
-      role !== undefined ? (role ? role.trim() : null) : null,
+      role !== undefined ? String(role ?? '').trim() : null,
+      designation !== undefined ? String(designation ?? '').trim() : null,
+      department !== undefined ? 1 : null, department !== undefined ? (String(department ?? '').trim() || null) : null,
       phone !== undefined ? (phone ? phone.trim() : null) : null,
+      email !== undefined ? 1 : null, email ?? null,
+      surname !== undefined ? 1 : null, surname ?? null,
+      address !== undefined ? 1 : null, address ?? null,
+      pincode !== undefined ? 1 : null, pincode ?? null,
+      city !== undefined ? 1 : null, city ?? null,
+      state !== undefined ? 1 : null, state ?? null,
+      bank_account_name !== undefined ? 1 : null, bank_account_name ?? null,
+      bank_name !== undefined ? 1 : null, bank_name ?? null,
+      ifsc_code !== undefined ? 1 : null, ifsc_code ? ifsc_code.trim().toUpperCase() : '',
+      qr_code_url !== undefined ? 1 : null, qr_code_url || '',
+      upi_id !== undefined ? 1 : null, upi_id ?? null,
       active,
       aadhaar_number !== undefined ? 1 : null,
       aadhaar_number ? aadhaar_number.trim() : '',
       aadhaar_doc !== undefined ? 1 : null,
       aadhaar_doc || '',
+      aadhaar_back_doc !== undefined ? 1 : null,
+      aadhaar_back_doc || '',
       pan_number !== undefined ? 1 : null,
       pan_number ? pan_number.trim().toUpperCase() : '',
       pan_doc !== undefined ? 1 : null,
       pan_doc || '',
+      pan_back_doc !== undefined ? 1 : null,
+      pan_back_doc || '',
       photo_url !== undefined ? 1 : null,
       photo_url || '',
       cleanSalaryType !== undefined ? 1 : null,
@@ -5421,6 +6152,45 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       throw new Error('Branch context (x-location-id) is required to record a visit');
     }
 
+    const membershipTier = req.body.membership_tier || null;
+    const membershipPrice = parseFloat(req.body.membership_price) || 0;
+    let membershipPlanForBenefits = null;
+    let authorizedFreeServiceIds = new Set();
+    let serverAppliedFreeService = false;
+    let serverAdjustedServicePricing = false;
+    if (membershipTier) {
+      const memberRow = finalClientId
+        ? db.prepare('SELECT membership_tier, membership_status, membership_expires_at FROM CLIENTS WHERE client_id = ?').get(finalClientId)
+        : null;
+      const today = new Date().toISOString().slice(0, 10);
+      const existingMembershipValid = Boolean(memberRow &&
+        memberRow.membership_tier &&
+        String(memberRow.membership_tier || '').toLowerCase() !== 'non-member' &&
+        String(memberRow.membership_tier || '').toLowerCase() !== 'none' &&
+        memberRow.membership_status === 'active' &&
+        (!memberRow.membership_expires_at || String(memberRow.membership_expires_at).slice(0, 10) >= today));
+      const membershipBeingPurchased = membershipPrice > 0;
+      if (existingMembershipValid || membershipBeingPurchased) {
+        ensureMembershipPlansTable(clientLocationId);
+        const membershipLookupTier = membershipBeingPurchased ? membershipTier : memberRow.membership_tier;
+        membershipPlanForBenefits = db.prepare(`
+          SELECT * FROM MEMBERSHIP_PLANS
+          WHERE location_id = ? AND (
+            LOWER(tier) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(fullName) = LOWER(?) OR LOWER(id) = LOWER(?)
+          )
+          ORDER BY plan_id DESC LIMIT 1
+        `).get(clientLocationId, membershipLookupTier, membershipLookupTier, membershipLookupTier, membershipLookupTier) || null;
+        if (membershipBeingPurchased && !membershipPlanForBenefits) {
+          throw new Error('Selected membership plan is not available at this branch. Refresh the membership list and try again.');
+        }
+        if (membershipPlanForBenefits) {
+          authorizedFreeServiceIds = new Set(parseMembershipFreeServices(membershipPlanForBenefits.free_services)
+            .filter(item => item?.is_free !== false)
+            .map(item => Number(item.service_id)));
+        }
+      }
+    }
+
     // Validate assigned staff belongs to current studio location
     if (services && services.length > 0) {
       for (const s of services) {
@@ -5429,13 +6199,31 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
           throw new Error('Each selected service must belong to this branch. Refresh the service list and try again.');
         }
         const branchService = db.prepare(`
-          SELECT s.service_id
+          SELECT s.service_id, s.service_name, s.price
           FROM SERVICES s
           JOIN SERVICE_CATEGORIES c ON c.category_id = s.category_id
           WHERE s.service_id = ? AND c.location_id = ?
         `).get(serviceId, req.locationId);
         if (!branchService) {
           throw new Error('Access denied: A selected service belongs to another studio location.');
+        }
+        const includedFreeService = authorizedFreeServiceIds.has(serviceId);
+        if (includedFreeService) {
+          if (Number(s.price) !== 0) serverAdjustedServicePricing = true;
+          if (!s.membership_benefit_service) serverAppliedFreeService = true;
+          s.list_price = Number(branchService.price) || 0;
+          s.price = 0;
+          s.service_name = branchService.service_name;
+          s.is_privilege = 1;
+          s.membership_benefit_service = 1;
+          s.privilege_id = `membership_service_${serviceId}`;
+        } else if (s.membership_benefit_service) {
+          if (Number(s.price) !== Number(branchService.price || 0)) serverAdjustedServicePricing = true;
+          s.list_price = Number(branchService.price) || 0;
+          s.price = Number(branchService.price) || 0;
+          s.is_privilege = 0;
+          s.membership_benefit_service = 0;
+          if (String(s.privilege_id || '').startsWith('membership_service_')) s.privilege_id = null;
         }
         if (s.staff_id) {
           const staffRow = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(s.staff_id);
@@ -5452,10 +6240,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       servicesSubtotal += parseFloat(s.price) || 0;
     }
 
-    const membershipTier = req.body.membership_tier || null;
-    const membershipPrice = parseFloat(req.body.membership_price) || 0;
     if (membershipPrice > 0 && membershipTier) {
-      ensureMembershipPlansTable(clientLocationId);
       const branchPlan = db.prepare(`
         SELECT plan_id
         FROM MEMBERSHIP_PLANS
@@ -5466,27 +6251,40 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       if (!branchPlan) throw new Error('Selected membership plan is not available at this branch. Refresh the membership list and try again.');
     }
 
-    let subtotal = req.body.subtotal !== undefined && !isNaN(parseFloat(req.body.subtotal))
-      ? parseFloat(req.body.subtotal)
-      : (servicesSubtotal + membershipPrice);
+    let subtotal = serverAdjustedServicePricing
+      ? servicesSubtotal + membershipPrice
+      : (req.body.subtotal !== undefined && !isNaN(parseFloat(req.body.subtotal))
+        ? parseFloat(req.body.subtotal)
+        : (servicesSubtotal + membershipPrice));
 
     let discountAmount = 0;
     const discVal = parseFloat(discount_value) || 0;
     const discType = discount_type === 'percentage' ? 'percentage' : 'fixed';
 
-    if (discType === 'percentage') {
-      discountAmount = Math.round((subtotal * Math.min(Math.max(discVal, 0), 100)) / 100);
+    let netSubtotal;
+    if (serverAppliedFreeService) {
+      const memberDiscountPercent = Math.min(100, Math.max(0, Number(membershipPlanForBenefits?.discount_percent) || 0));
+      const memberDiscountAmount = Math.round(servicesSubtotal * memberDiscountPercent / 100);
+      const servicesAfterMemberDiscount = Math.max(0, servicesSubtotal - memberDiscountAmount);
+      const promoDiscountAmount = discType === 'percentage'
+        ? Math.round(servicesAfterMemberDiscount * Math.min(Math.max(discVal, 0), 100) / 100)
+        : Math.min(Math.max(discVal, 0), servicesAfterMemberDiscount);
+      discountAmount = memberDiscountAmount + promoDiscountAmount;
+      netSubtotal = servicesAfterMemberDiscount - promoDiscountAmount + membershipPrice;
     } else {
-      discountAmount = Math.min(Math.max(discVal, 0), subtotal);
+      if (discType === 'percentage') {
+        discountAmount = Math.round((subtotal * Math.min(Math.max(discVal, 0), 100)) / 100);
+      } else {
+        discountAmount = Math.min(Math.max(discVal, 0), subtotal);
+      }
+      netSubtotal = Math.max(0, subtotal - discountAmount);
     }
-
-    const netSubtotal = Math.max(0, subtotal - discountAmount);
     // 18% GST on overall amount
-    const taxAmount = req.body.tax_amount !== undefined && !isNaN(parseFloat(req.body.tax_amount))
+    const taxAmount = !serverAppliedFreeService && req.body.tax_amount !== undefined && !isNaN(parseFloat(req.body.tax_amount))
       ? parseFloat(req.body.tax_amount)
       : Math.round(netSubtotal * 0.18);
 
-    const totalAmount = req.body.total_amount !== undefined && !isNaN(parseFloat(req.body.total_amount))
+    const totalAmount = !serverAppliedFreeService && req.body.total_amount !== undefined && !isNaN(parseFloat(req.body.total_amount))
       ? parseFloat(req.body.total_amount)
       : (netSubtotal + taxAmount);
 
@@ -5612,8 +6410,8 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
     // 4. Insert Visit Services with immutable snapshots
     const insertVisitService = db.prepare(`
       INSERT INTO VISIT_SERVICES (
-        visit_id, service_id, service_name_snapshot, price_snapshot, staff_id, is_privilege, privilege_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        visit_id, service_id, service_name_snapshot, price_snapshot, retail_price_snapshot, staff_id, is_privilege, privilege_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const s of services) {
@@ -5640,6 +6438,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         finalServiceId,
         sName || 'Service',
         parseFloat(s.price) || 0,
+        parseFloat(s.list_price ?? s.price) || 0,
         s.staff_id || null,
         (s.is_privilege || s.privilege_id) ? 1 : 0,
         s.privilege_id || null

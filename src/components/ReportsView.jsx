@@ -20,7 +20,7 @@ const DEFAULT_KPI_CARD_ORDER = [
   'staff'
 ];
 
-export default function ReportsView({ onOpenClient }) {
+export default function ReportsView({ onOpenClient, branding }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -495,7 +495,7 @@ export default function ReportsView({ onOpenClient }) {
       }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700', paddingLeft: '20px' }}>
-            Executive Reporting & Analytics
+            {branding?.reports_heading || 'Executive Reporting & Analytics'}
           </h1>
         </div>
 

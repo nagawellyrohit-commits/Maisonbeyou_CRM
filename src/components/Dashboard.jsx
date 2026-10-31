@@ -4,8 +4,8 @@ import {
   Building2, Handshake,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
-  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut,
-  Edit2, FileText, Crown
+  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut, Palette,
+  Edit2, FileText, Crown, Settings
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import ClientsList from './ClientsList';
@@ -15,6 +15,7 @@ import MembershipManagement from './MembershipManagement';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import BranchUserManagement from './BranchUserManagement';
+import BrandingCustomizer from './BrandingCustomizer';
 import { canAccessModule } from '../utils/permissions';
 
 const roleDashboardButtonStyle = {
@@ -29,7 +30,7 @@ const roleDashboardButtonStyle = {
   cursor: 'pointer'
 };
 
-export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard }) {
+export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard, branding, onPreviewBranding, onSaveBranding }) {
   const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
   const [currentLocation, setCurrentLocation] = useState(activeLocation);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
@@ -38,6 +39,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [adminMenuPosition, setAdminMenuPosition] = useState({ top: 68, right: 64 });
   const [roleDashboardUsers, setRoleDashboardUsers] = useState({ manager: [], visitor: [] });
   const [dashboardViewRole, setDashboardViewRole] = useState(null);
+  const [masterTab, setMasterTab] = useState('hierarchy');
   const adminMenuRef = useRef(null);
   const adminMenuPortalRef = useRef(null);
 
@@ -122,6 +124,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   useEffect(() => {
     setActiveSection(initialSection);
   }, [activeLocation?.location_id, initialSection]);
+
+  useEffect(() => {
+    if (activeSection === 'team-master') setMasterTab('hierarchy');
+  }, [activeSection]);
 
   useEffect(() => {
     const handleResetDashboard = () => setActiveSection(initialSection);
@@ -498,34 +504,28 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               alignItems: 'center',
               gap: '12px',
               padding: '8px 18px',
-              borderRadius: '9999px',
+              borderRadius: 'var(--tenant-dashboard-button-radius, 9999px)',
               fontSize: '13px',
               fontWeight: '700',
               letterSpacing: '0.02em',
-              color: '#9F7335',
-              background: '#FFFFFF',
-              border: '1.5px solid #D99A64',
+              color: 'var(--tenant-dashboard-button-text, #9F7335)',
+              background: 'var(--tenant-dashboard-button-fill, #FFFFFF)',
+              border: 'var(--tenant-dashboard-button-border-width, 1px) solid var(--tenant-dashboard-button-border, #D99A64)',
               boxShadow: '0 2px 10px rgba(184, 139, 74, 0.10)',
               cursor: 'pointer',
               transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#B88B4A';
-              e.currentTarget.style.color = '#FFFFFF';
-              e.currentTarget.style.borderColor = '#B88B4A';
               e.currentTarget.style.transform = 'translateY(-1px)';
               e.currentTarget.style.boxShadow = '0 4px 14px rgba(184, 139, 74, 0.28)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#FFFFFF';
-              e.currentTarget.style.color = '#9F7335';
-              e.currentTarget.style.borderColor = '#D99A64';
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 2px 10px rgba(184, 139, 74, 0.10)';
             }}
           >
             <ArrowLeft size={15} strokeWidth={2.2} />
-            <span>Back</span>
+            <span>{branding?.dashboard_back_label || 'Back'}</span>
           </button>
         </div>
       )}
@@ -646,10 +646,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   {[
                     { id: 'visits', label: dashboardViewRole === 'manager' || dashboardUser?.role === 'reception' ? 'Manager Dashboard' : 'Dashboard', icon: LayoutDashboard, show: hasModuleAccess('dashboard') || hasModuleAccess('visits') },
                     { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) },
-                    { id: 'services', label: 'Services', icon: Scissors, show: hasModuleAccess('services') },
-                    { id: 'membership', label: 'Membership', icon: Crown, show: hasModuleAccess('membership') },
-                    { id: 'staff', label: 'Team', icon: Award, show: hasModuleAccess('team') },
-                    { id: 'users', label: 'User Access', icon: ShieldCheck, show: isAdmin },
+                    { id: 'team-master', label: 'Master', icon: Settings, show: isAdmin && hasModuleAccess('team') },
                     { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
                     { id: 'reports', label: 'Reports', icon: BarChart3, show: hasModuleAccess('reports') },
                   ].filter(item => item.show).map(item => {
@@ -820,6 +817,35 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   })}
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                  {isActualAdmin && activeLocation?.location_id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminMenu(false);
+                        window.dispatchEvent(new Event('open_branding_customizer'));
+                      }}
+                      style={{
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '9px 12px',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: '13.5px',
+                        fontWeight: '600',
+                        color: '#9F7335',
+                        background: 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        cursor: 'pointer',
+                        border: 'none'
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <Palette size={16} />
+                      <span>Customize</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -856,11 +882,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       </div>
 
       {/* Today's Summary Grid (Section 3 Requirement) */}
-      {(hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
+      {activeSection !== 'team-master' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 style={{ fontSize: '26px', color: 'var(--text-main)', margin: 0, paddingLeft: '22px' }}>TODAY'S SUMMARY</h2>
+            <h2 style={{ fontSize: '26px', color: 'var(--text-main)', margin: 0, paddingLeft: '22px' }}>{branding?.dashboard_summary_heading || "TODAY'S SUMMARY"}</h2>
           </div>
           <button
             type="button"
@@ -870,34 +896,34 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             title="Refresh dashboard metrics and latest visits"
             style={{
               fontSize: '12px',
-              color: '#B88B4A',
+              color: 'var(--tenant-dashboard-button-text, #B88B4A)',
               fontWeight: '600',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: isRefreshing ? '#F8EEE4' : '#FFFFFF',
-              border: '1px solid #D99A64',
+              background: 'var(--tenant-dashboard-button-fill, #FFFFFF)',
+              border: 'var(--tenant-dashboard-button-border-width, 1px) solid var(--tenant-dashboard-button-border, #D99A64)',
               cursor: isRefreshing ? 'wait' : 'pointer',
               padding: '6px 12px',
-              borderRadius: '9999px',
+              borderRadius: 'var(--tenant-dashboard-button-radius, 9999px)',
               transition: 'all 0.15s ease'
             }}
             onMouseEnter={(e) => {
-              if (!isRefreshing) e.currentTarget.style.background = 'var(--primary-subtle)';
+              if (!isRefreshing) e.currentTarget.style.transform = 'translateY(-1px)';
             }}
             onMouseLeave={(e) => {
-              if (!isRefreshing) e.currentTarget.style.background = '#FFFFFF';
+              if (!isRefreshing) e.currentTarget.style.transform = 'translateY(0)';
             }}
           >
             <RotateCw
               size={13}
-              color="#B88B4A"
+              color="var(--tenant-dashboard-button-text, #B88B4A)"
               style={{
                 animation: isRefreshing ? 'spin 0.75s linear infinite' : 'none',
                 display: 'inline-block'
               }}
             />
-            <span>{isRefreshing ? 'Refreshing...' : 'Refresh Data'}</span>
+            <span>{isRefreshing ? 'Refreshing...' : (branding?.dashboard_refresh_label || 'Refresh Data')}</span>
           </button>
         </div>
 
@@ -909,7 +935,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           marginBottom: '30px'
         }}>
           {/* Client summary cards are shown only when Client Records is assigned. */}
-          {hasModuleAccess('clients') && <>
+          {(activeSection === 'team-master' || hasModuleAccess('clients')) && <>
           {/* Total Clients */}
           <div className="card" style={{
             padding: '20px 22px 24px 22px',
@@ -954,6 +980,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             </div>
           </div>
 
+          <>
           {/* Regular Clients */}
               {/* Returning / Regular Clients */}
               <div className="card" style={{
@@ -976,11 +1003,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   {summary.regular_clients}
                 </div>
               </div>
+          </>
 
           </>}
 
           {/* Membership Credits / Earned Through Membership */}
-          {hasModuleAccess('membership') && (
+          {(activeSection === 'team-master' || hasModuleAccess('membership')) && (
               <div className="card" style={{
                 padding: '20px 22px 24px 22px',
                 display: 'flex',
@@ -1004,7 +1032,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           )}
 
               {/* Total Revenue */}
-          {hasModuleAccess('visits') && <>
+          {(activeSection === 'team-master' || hasModuleAccess('visits')) && <>
               <div className="card" style={{
                 padding: '20px 22px 24px 22px',
                 display: 'flex',
@@ -1570,6 +1598,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <ClientsList
             onOpenClient={(id) => onOpenClient(id, 'dashboard')}
+            branding={branding}
           />
         </div>
       )}
@@ -1577,21 +1606,53 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Services Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'services' && hasModuleAccess('services') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <ServiceManagement />
+          <ServiceManagement branding={branding} />
         </div>
       )}
 
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'staff' && hasModuleAccess('team') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <StaffManagement />
+          <StaffManagement branding={branding} currentUser={dashboardUser} />
+        </div>
+      )}
+
+      {activeSection === 'team-master' && isAdmin && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+          <div role="tablist" aria-label="Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, padding: '5px 2px 12px' }}>
+            {[
+              { id: 'services', label: 'Services', description: 'Service catalog', icon: Scissors },
+              { id: 'membership', label: 'Membership', description: 'Plans & privileges', icon: Crown },
+              { id: 'designation', label: 'Designation', description: 'Seniority levels', icon: UserCheck },
+              { id: 'team', label: 'Team', description: 'Team members', icon: Users },
+              { id: 'hierarchy', label: 'Hierarchy', description: 'Studio roles', icon: Award },
+              { id: 'user-access', label: 'User Assign', description: 'Accounts & permissions', icon: ShieldCheck }
+            ].map(tab => {
+              const Icon = tab.icon;
+              const selected = masterTab === tab.id;
+              return <button key={tab.id} type="button" role="tab" aria-selected={selected} onClick={() => setMasterTab(tab.id)} style={{ minWidth: 0, minHeight: 124, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 14, padding: '18px 20px 20px', borderRadius: 22, border: `1px solid ${selected ? '#B88B4A' : '#D99A64'}`, background: selected ? '#FAF6EE' : '#FFFFFF', color: '#4B4038', textAlign: 'left', cursor: 'pointer', boxShadow: selected ? '0 4px 14px rgba(184,139,74,0.12)' : '0 4px 14px rgba(87,58,32,0.04)', transition: 'all .15s ease' }}>
+                <span style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <span style={{ fontSize: 11.5, textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.06em', lineHeight: 1.35 }}>{tab.label}</span>
+                  <span style={{ width: 38, height: 38, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 10, background: '#F4EEE5', color: '#B88B4A' }}><Icon size={19} /></span>
+                </span>
+                <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.2, color: selected ? '#8C6228' : '#4B4038' }}>{tab.description}</span>
+              </button>;
+            })}
+          </div>
+
+          {masterTab === 'hierarchy' && <StaffManagement key="master-hierarchy" branding={branding} currentUser={dashboardUser} initialMasterView masterOptionType="role" />}
+          {masterTab === 'designation' && <StaffManagement key="master-designation" branding={branding} currentUser={dashboardUser} initialMasterView masterOptionType="designation" />}
+          {masterTab === 'services' && <ServiceManagement branding={branding} />}
+          {masterTab === 'membership' && <MembershipManagement onOpenClient={onOpenClient} activeLocation={activeLocation} currentUser={dashboardUser} branding={branding} />}
+          {masterTab === 'team' && <StaffManagement branding={branding} currentUser={dashboardUser} />}
+          {masterTab === 'user-access' && <BranchUserManagement activeLocation={activeLocation} branding={branding} />}
         </div>
       )}
 
       {/* Membership Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'users' && isAdmin && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <BranchUserManagement activeLocation={activeLocation} />
+          <BranchUserManagement activeLocation={activeLocation} branding={branding} />
         </div>
       )}
 
@@ -1601,6 +1662,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             onOpenClient={onOpenClient}
             activeLocation={activeLocation}
             currentUser={dashboardUser}
+            branding={branding}
           />
         </div>
       )}
@@ -1608,7 +1670,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'reports' && hasModuleAccess('reports') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <ReportsView onOpenClient={onOpenClient} />
+          <ReportsView onOpenClient={onOpenClient} branding={branding} />
         </div>
       )}
 
@@ -3208,6 +3270,16 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       )}
 
       {/* Branch & Franchise Statutory KYC Modal Overlay */}
+      {(currentUser?.role === 'admin' || currentUser?.role === 'master_admin') && activeLocation?.location_id && (
+        <BrandingCustomizer
+          location={activeLocation}
+          initialBranding={branding}
+          section={activeSection}
+          onPreview={onPreviewBranding}
+          onSaved={onSaveBranding}
+        />
+      )}
+
       {isKycModalOpen && (
         <div 
           onClick={(e) => {

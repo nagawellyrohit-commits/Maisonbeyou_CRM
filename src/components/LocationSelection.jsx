@@ -3,7 +3,7 @@ import {
   Building2, Store, Handshake, ArrowLeft, Plus, MapPin, Phone, Mail, User,
   CheckCircle2, Clock, ArrowRight, X, AlertCircle, AlertTriangle, Sparkles, Shield, ShieldCheck,
   ChevronRight, Users, Briefcase, ChevronDown, LogOut, TrendingUp, TrendingDown, Minus,
-  Calendar, BarChart3, Menu
+  Calendar, BarChart3, Menu, Palette
 } from 'lucide-react';
 import brandLogoImg from '../assets/brand-logo.png';
 import studioBg from '../assets/studio-bg.png';
@@ -12,6 +12,8 @@ import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import LocationDateFilterModal, { formatISO, formatDisplayDate } from './LocationDateFilterModal';
 import ReportsView from './ReportsView';
 import MasterAdminReportsDashboard from './MasterAdminReportsDashboard';
+import { masterPortalCssVariables } from '../utils/branding';
+import BrandingCustomizer from './BrandingCustomizer';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
 
@@ -155,7 +157,7 @@ const FIRM_CARDS = [
   }
 ];
 
-export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout }) {
+export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout, branding, onPreviewBranding, onSaveBranding }) {
   const isBranch = type === 'branch';
   const typeLabel = isBranch ? 'Branch' : 'Franchise';
   const typePlural = isBranch ? 'Branches' : 'Franchises';
@@ -312,10 +314,12 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
   const lowTiersCount = reportLocations.filter(loc => (loc.return_tier || '').toLowerCase() === 'low').length;
 
   return (
-    <div className={viewMode === 'locations' ? 'branch-selection-page-light' : ''} style={{
+    <div className={`master-portal-themed location-selection-screen ${viewMode === 'locations' ? 'branch-selection-page-light' : ''}`} style={{
+      ...masterPortalCssVariables(branding),
       minHeight: '100vh',
-      background: viewMode === 'locations'
-        ? '#F7F3ED'
+      backgroundColor: branding?.master_background_color || '#F7F3ED',
+      backgroundImage: viewMode === 'locations'
+        ? (branding?.master_background_image_url ? `url(${branding.master_background_image_url})` : 'none')
         : `linear-gradient(180deg, rgba(44, 33, 27, 0.78) 0%, rgba(44, 33, 27, 0.70) 280px, rgba(44, 33, 27, 0.65) 100%), url(${studioBg}) center / cover fixed`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
@@ -340,8 +344,8 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
           {/* Brand Logo */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <img
-              src={brandLogoImg}
-              alt="Maison BeYou"
+              src={branding?.master_logo_url || brandLogoImg}
+              alt={branding?.brand_name || 'Maison BeYou'}
               className="navbar-brand-logo"
             />
           </div>
@@ -393,6 +397,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   <div style={{ fontSize: '11px', color: '#9F7335', fontWeight: '600' }}>Master Administrator</div>
                 </div>
                 <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+                <button type="button" onClick={() => { setShowUserMenu(false); window.dispatchEvent(new Event('open_master_portal_customizer')); }} style={{ width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#9F7335', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '600', background: 'none', border: 'none', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                  <Palette size={15} />
+                  <span>Customize</span>
+                </button>
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
                 {onLogout && (
                   <button
                     type="button"
@@ -416,7 +425,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     <LogOut size={15} />
-                    <span>Sign Out</span>
+                    <span>{branding?.master_logout_label || 'Sign Out'}</span>
                   </button>
                 )}
               </div>
@@ -561,7 +570,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                       className="btn-luxury-header-action"
                     >
                       <ArrowLeft size={16} />
-                      <span>Back to Studio Management</span>
+                      <span>{branding?.master_back_label || 'Back to Studio Management'}</span>
                     </button>
                   ) : <div />}
 
@@ -571,7 +580,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     className="btn-luxury-header-action"
                   >
                     <BarChart3 size={16} />
-                    <span>Reports</span>
+                    <span>{branding?.master_reports_label || 'Reports'}</span>
                   </button>
                 </div>
 
@@ -587,7 +596,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     margin: 0,
                     textShadow: 'none'
                   }}>
-                    {isBranch ? 'All Branches' : 'All Franchises'}
+                    {branding?.master_locations_heading || (isBranch ? 'All Branches' : 'All Franchises')}
                   </h1>
                   <div style={{ width: '42px', height: '2px', background: '#C6A36A', borderRadius: '2px', marginTop: '12px' }} />
                 </div>
@@ -712,13 +721,20 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   const officePhone = formatStudioPhone(loc);
                   const branchManager = formatStudioManager(loc);
                   const dialPhone = officePhone;
+                  const branchBranding = loc.branding || {};
                   return (
                     <div
                       key={loc.location_id}
+                      className="master-location-card"
                       style={{
-                        background: '#FFFDF9',
-                        borderRadius: '22px',
-                        border: '1px solid #D99A64',
+                        background: branding?.master_card_color || branchBranding.card_color || '#FFFDF9',
+                        backgroundImage: branchBranding.background_image_url
+                          ? `linear-gradient(color-mix(in srgb, ${branchBranding.card_color || '#FFFDF9'} 84%, transparent), color-mix(in srgb, ${branchBranding.card_color || '#FFFDF9'} 84%, transparent)), url("${branchBranding.background_image_url}")`
+                          : undefined,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        borderRadius: `${Number(branding?.master_card_radius ?? branchBranding.card_radius) || 22}px`,
+                        border: `${Math.max(0, Number(branding?.master_border_width ?? branchBranding.card_border_width) || 0)}px solid ${branding?.master_border_color || branchBranding.card_border_color || '#D99A64'}`,
                         padding: '30px 28px 58px',
                         boxShadow: '0 6px 18px rgba(87, 58, 32, 0.06)',
                         cursor: 'default',
@@ -813,16 +829,17 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                         </div>
 
                         {/* Studio Name */}
+                        {branchBranding.logo_url && <img src={branchBranding.logo_url} alt={`${branchBranding.brand_name || loc.name} logo`} style={{ maxWidth: 120, height: 32, objectFit: 'contain', objectPosition: 'left center', margin: '2px 0 8px' }} />}
                         <h3 style={{
                           fontSize: '18px',
                           fontWeight: '700',
-                          color: '#2C211B',
+                          color: branchBranding.heading_color || '#2C211B',
                           margin: '14px 0 24px 0',
                           lineHeight: 1.35,
                           letterSpacing: '-0.01em',
                           fontFamily: 'var(--font-sans)'
                         }}>
-                          {formatStudioTitle(loc)}
+                          {branchBranding.brand_name || formatStudioTitle(loc)}
                         </h3>
 
                         {/* Address / Location */}
@@ -899,6 +916,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       currentFilter={dateFilter}
       onApply={handleApplyDateFilter}
     />
+    <BrandingCustomizer scope="master" section="all_branches" location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
   </div>
 );
 }

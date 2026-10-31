@@ -9,10 +9,10 @@ import {
 } from 'lucide-react';
 import { apiRequest, formatCurrency } from '../utils/api';
 import { CATEGORY_ICONS, renderCategoryIcon, CATEGORY_IMAGE_PRESETS } from '../utils/categoryIcons';
-import { getServiceMedia } from '../utils/serviceMedia';
+import { getServiceMedia, isVideoMediaUrl } from '../utils/serviceMedia';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 
-export default function ServiceManagement() {
+export default function ServiceManagement({ branding }) {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -88,6 +88,10 @@ export default function ServiceManagement() {
   const [servSubtitle, setServSubtitle] = useState('');
   const [servDowntime, setServDowntime] = useState('Zero Downtime');
   const [servTag, setServTag] = useState('Quick & Effective');
+  const [servDurationSuffix, setServDurationSuffix] = useState('Mins Session');
+  const [servBenefitsHeading, setServBenefitsHeading] = useState('Benefits :');
+  const [servPriceNote, setServPriceNote] = useState('(plus taxes)');
+  const [servSelectButtonText, setServSelectButtonText] = useState('Select Service');
   const [servVspBadges, setServVspBadges] = useState([]);
   const [servHasSessions, setServHasSessions] = useState(false);
   const [servTotalSessions, setServTotalSessions] = useState(3);
@@ -776,16 +780,16 @@ export default function ServiceManagement() {
       setServSubtitle(serv.subtitle || defaults.subtitle || '');
       setServDowntime(serv.downtime || defaults.downtime || 'Zero Downtime');
       setServTag(defaults.tag || serv.tag || 'Quick & Effective');
-      setServVspBadges(Array.isArray(defaults.vspBadges) ? defaults.vspBadges : []);
+      setServDurationSuffix(defaults.spotlightCopy?.duration_suffix ?? 'Mins Session');
+      setServBenefitsHeading(defaults.spotlightCopy?.benefits_heading ?? 'Benefits :');
+      setServPriceNote(defaults.spotlightCopy?.price_note ?? '(plus taxes)');
+      setServSelectButtonText(defaults.spotlightCopy?.select_button_text ?? 'Select Service');
+      setServVspBadges(Array.from({ length: 3 }, (_, index) => defaults.vspBadges?.[index] || ''));
       setServHasSessions(serv.has_sessions === 1);
       setServTotalSessions(serv.total_sessions || 3);
       setServSessionInterval(serv.session_interval !== undefined ? serv.session_interval : 15);
       setServSessionIntervalUnit(serv.session_interval_unit || 'days');
-      setServHighlights(initialHighlights.length ? initialHighlights : [
-        'Advanced cooling sapphire tip for painless comfort',
-        'Targeted elimination of coarse hair & ingrown roots',
-        'Express 15–20 minute session; zero recovery time'
-      ]);
+      setServHighlights(Array.from({ length: 3 }, (_, index) => initialHighlights[index] || ''));
       setServVideoUrl(serv.video_url || defaults.video || 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4');
       setServImageUrl(serv.image_url || defaults.heroImage || defaults.image || '/services/laser_hero.jpg');
       setServGallery(initialGallery.length ? initialGallery : [
@@ -805,12 +809,16 @@ export default function ServiceManagement() {
       setServSubtitle('');
       setServDowntime('');
       setServTag('');
-      setServVspBadges(['']);
+      setServDurationSuffix('Mins Session');
+      setServBenefitsHeading('Benefits :');
+      setServPriceNote('(plus taxes)');
+      setServSelectButtonText('Select Service');
+      setServVspBadges(['', '', '']);
       setServHasSessions(false);
       setServTotalSessions(3);
       setServSessionInterval(15);
       setServSessionIntervalUnit('days');
-      setServHighlights(['']);
+      setServHighlights(['', '', '']);
       setServVideoUrl('');
       setServImageUrl('');
       setServGallery([]);
@@ -826,7 +834,7 @@ export default function ServiceManagement() {
   };
 
   const handleAddHighlight = () => {
-    if (servHighlights.length < 5) {
+    if (servHighlights.length < 10) {
       setServHighlights([...servHighlights, '']);
     }
   };
@@ -838,7 +846,7 @@ export default function ServiceManagement() {
   };
 
   const handleAddVspBadge = () => {
-    setServVspBadges(prev => [...prev, '']);
+    setServVspBadges(prev => prev.length < 3 ? [...prev, ''] : prev);
   };
 
   const handleUpdateVspBadge = (index, value) => {
@@ -878,12 +886,16 @@ export default function ServiceManagement() {
         description: (servDesc || '').trim(),
         display_order: parseInt(servOrder) || 0,
         subtitle: (servSubtitle || '').trim(),
-        tag: servVspBadges.some(b => (b || '').trim())
-          ? JSON.stringify({
-              tag: (servTag || '').trim(),
-              vsp_badges: servVspBadges.map(b => (b || '').trim()).filter(Boolean)
-            })
-          : (servTag || '').trim(),
+        tag: JSON.stringify({
+          tag: (servTag || '').trim(),
+          vsp_badges: servVspBadges.map(b => (b || '').trim()).filter(Boolean),
+          spotlight_copy: {
+            duration_suffix: (servDurationSuffix || '').trim(),
+            benefits_heading: (servBenefitsHeading || '').trim(),
+            price_note: (servPriceNote || '').trim(),
+            select_button_text: (servSelectButtonText || '').trim()
+          }
+        }),
         vsp_badges: servVspBadges.map(b => (b || '').trim()).filter(Boolean),
         downtime: (servDowntime || '').trim(),
         highlights: servHighlights.filter(h => (h || '').trim()),
@@ -933,22 +945,24 @@ export default function ServiceManagement() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>
-            Service & Pricing Management
+            {branding?.service_heading || 'Service & Pricing Management'}
           </h1>
         </div>
 
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            handleOpenCatModal();
-          }}
-          className="btn-primary"
-          style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginRight: '20px' }}
-        >
-          <Plus size={16} />
-          Add New Category
-        </button>
+        {!loading && categories.length > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              handleOpenCatModal();
+            }}
+            className="btn-primary"
+            style={{ padding: '10px 20px', fontSize: '14px', display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginRight: '20px' }}
+          >
+            <Plus size={16} />
+            {branding?.service_add_category_label || 'Add New Category'}
+          </button>
+        )}
       </div>
 
       {/* Error Alert with Retry Button */}
@@ -1011,11 +1025,6 @@ export default function ServiceManagement() {
           alignItems: 'center',
           justifyContent: 'center'
         }}>
-          <Layers size={40} color="#B88B4A" style={{ marginBottom: '12px', opacity: 0.6 }} />
-          <h3 style={{ fontSize: '18px', color: '#1C1917', marginBottom: '6px' }}>No Service Categories Found</h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '400px', margin: '0 0 18px' }}>
-            No service categories were found in the database. Click "+ Add New Category" to initialize your studio menu.
-          </p>
           <button
             type="button"
             onClick={() => handleOpenCatModal()}
@@ -1023,7 +1032,7 @@ export default function ServiceManagement() {
             style={{ padding: '10px 20px', fontSize: '13px', display: 'inline-flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
           >
             <Plus size={16} />
-            Add First Category
+            {branding?.service_add_first_category_label || 'Add Your Category'}
           </button>
         </div>
       ) : (
@@ -1053,7 +1062,7 @@ export default function ServiceManagement() {
                   cursor: 'pointer'
                 }}
               >
-                Expand All
+                {branding?.service_expand_all_label || 'Expand All'}
               </button>
               <button
                 type="button"
@@ -1069,7 +1078,7 @@ export default function ServiceManagement() {
                   cursor: 'pointer'
                 }}
               >
-                Collapse All
+                {branding?.service_collapse_all_label || 'Collapse All'}
               </button>
             </div>
           </div>
@@ -2403,7 +2412,7 @@ export default function ServiceManagement() {
 
                         <div>
                           <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>
-                            Sub-Service Title / Name *
+                            Title / Service Name *
                           </label>
                           <input
                             type="text"
@@ -2417,7 +2426,8 @@ export default function ServiceManagement() {
                               borderRadius: 'var(--radius-sm)',
                               border: '1px solid var(--border-color)',
                               outline: 'none',
-                              fontSize: '13.5px'
+                              fontSize: '13.5px',
+                              textTransform: 'uppercase'
                             }}
                           />
                         </div>
@@ -2683,13 +2693,43 @@ export default function ServiceManagement() {
                           />
                         </div>
 
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Downtime badge</label>
+                            <input type="text" value={servDowntime} onChange={(e) => setServDowntime(e.target.value)} placeholder="e.g. Zero Downtime" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Key benefit badge</label>
+                            <input type="text" value={servTag} onChange={(e) => setServTag(e.target.value)} placeholder="e.g. Quick & Effective" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                        </div>
+
+                        <div style={{ borderTop: '1px solid #EFEAE1', paddingTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Duration text after minutes</label>
+                            <input type="text" value={servDurationSuffix} onChange={(e) => setServDurationSuffix(e.target.value)} placeholder="e.g. Mins Session" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Benefits heading</label>
+                            <input type="text" value={servBenefitsHeading} onChange={(e) => setServBenefitsHeading(e.target.value)} placeholder="e.g. Benefits" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Price note</label>
+                            <input type="text" value={servPriceNote} onChange={(e) => setServPriceNote(e.target.value)} placeholder="e.g. (plus taxes)" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', marginBottom: '8px' }}>Select button text</label>
+                            <input type="text" value={servSelectButtonText} onChange={(e) => setServSelectButtonText(e.target.value)} placeholder="e.g. Select Service" style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', outline: 'none', fontSize: '13px' }} />
+                          </div>
+                        </div>
+
                         {/* VSP Badges Section */}
                         <div style={{ marginTop: '4px', paddingBottom: '4px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: servVspBadges.length > 0 ? '12px' : '0' }}>
                             <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', color: '#292524', margin: 0 }}>
-                              VSP Badges
+                              USP / VSP Badges (3)
                             </label>
-                            <button
+                            {servVspBadges.length < 3 && <button
                               type="button"
                               onClick={handleAddVspBadge}
                               style={{
@@ -2704,7 +2744,7 @@ export default function ServiceManagement() {
                               }}
                             >
                               + Add VSP Badge
-                            </button>
+                            </button>}
                           </div>
 
                           {servVspBadges.length > 0 && (
@@ -2715,7 +2755,7 @@ export default function ServiceManagement() {
                                     type="text"
                                     value={badgeText}
                                     onChange={(e) => handleUpdateVspBadge(bIdx, e.target.value)}
-                                    placeholder={`e.g. VSP Badge #${bIdx + 1}`}
+                                    placeholder={`USP / VSP badge [${bIdx + 1}]`}
                                     style={{
                                       flex: 1,
                                       padding: '9px 12px',
@@ -2846,27 +2886,18 @@ export default function ServiceManagement() {
                         flexDirection: 'column',
                         gap: '18px'
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <div style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#B88B4A' }}>
                             <span style={{ color: '#B88B4A', fontWeight: 700, marginRight: '8px', fontSize: '11px' }}>04</span>
                             <span style={{ color: '#292524', fontWeight: 700 }}>Clinical Highlights &amp; Benefits</span>
                           </div>
-                          {servHighlights.length < 5 && (
+                          {servHighlights.length < 10 && (
                             <button
                               type="button"
                               onClick={handleAddHighlight}
-                              style={{
-                                fontSize: '11px',
-                                color: '#B88B4A',
-                                background: 'var(--primary-subtle)',
-                                border: '1px solid var(--primary-border)',
-                                padding: '3px 8px',
-                                borderRadius: '6px',
-                                fontWeight: '700',
-                                cursor: 'pointer'
-                              }}
+                              style={{ fontSize: '11px', color: '#B88B4A', background: 'var(--primary-subtle)', border: '1px solid var(--primary-border)', padding: '4px 10px', borderRadius: '6px', fontWeight: '700', cursor: 'pointer' }}
                             >
-                              + Add Bullet
+                              + Add Benefit
                             </button>
                           )}
                         </div>
@@ -2874,14 +2905,14 @@ export default function ServiceManagement() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingTop: '4px', paddingBottom: '8px' }}>
                           {servHighlights.map((hl, hIdx) => (
                             <div key={hIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '11px', fontWeight: '700', color: '#B88B4A', minWidth: '16px' }}>
-                                ✓
+                              <span style={{ fontSize: '11px', fontWeight: '700', color: '#B88B4A', minWidth: '28px' }}>
+                                [{hIdx + 1}]
                               </span>
                               <input
                                 type="text"
                                 value={hl}
                                 onChange={(e) => handleUpdateHighlight(hIdx, e.target.value)}
-                                placeholder={`Highlight #${hIdx + 1} e.g. Advanced cooling sapphire tip`}
+                                placeholder={`Benefit [${hIdx + 1}] — enter a service USP or benefit`}
                                 style={{
                                   flex: 1,
                                   padding: '8px 12px',
@@ -2892,18 +2923,7 @@ export default function ServiceManagement() {
                                 }}
                               />
                               {servHighlights.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveHighlight(hIdx)}
-                                  style={{
-                                    border: 'none',
-                                    background: 'transparent',
-                                    color: '#DC2626',
-                                    cursor: 'pointer',
-                                    padding: '4px'
-                                  }}
-                                  title="Remove bullet point"
-                                >
+                                <button type="button" onClick={() => handleRemoveHighlight(hIdx)} title={`Delete benefit ${hIdx + 1}`} aria-label={`Delete benefit ${hIdx + 1}`} style={{ border: '1px solid #F2D6D3', background: '#FFF8F7', color: '#C0392B', cursor: 'pointer', padding: '6px', borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
                                   <Trash2 size={14} />
                                 </button>
                               )}
@@ -2928,7 +2948,8 @@ export default function ServiceManagement() {
                         gap: '22px',
                         paddingTop: '28px',
                         paddingBottom: '12px',
-                        borderBottom: 'none'
+                        borderBottom: 'none',
+                        display: 'none'
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <div style={{ fontSize: '12px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#B88B4A' }}>
@@ -2954,7 +2975,20 @@ export default function ServiceManagement() {
                             )}
                           </div>
 
-                          <label style={{
+                          <input
+                            id="procedure-video-media-upload"
+                            type="file"
+                            ref={servVideoInputRef}
+                            accept="image/jpeg,image/png,image/webp,image/*,video/mp4,video/webm,video/quicktime,video/*"
+                            disabled={uploadingState.video}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              e.target.value = '';
+                              if (file) uploadFile(file, file.type.startsWith('image/') ? 'hero' : 'video');
+                            }}
+                            style={{ display: 'none' }}
+                          />
+                          <label htmlFor="procedure-video-media-upload" style={{
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
@@ -2969,20 +3003,6 @@ export default function ServiceManagement() {
                             position: 'relative',
                             overflow: 'hidden'
                           }}>
-                            <input
-                              type="file"
-                              ref={servVideoInputRef}
-                              onClick={(e) => e.stopPropagation()}
-                              accept="video/mp4,video/webm,video/quicktime,video/*"
-                              disabled={uploadingState.video}
-                              onChange={(e) => {
-                                const file = e.target.files?.[0];
-                                e.target.value = '';
-                                if (file) uploadFile(file, 'video');
-                              }}
-                              style={{ display: 'none' }}
-                            />
-
                             {uploadingState.video ? (
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: '#B88B4A', padding: '12px' }}>
                                 <div style={{
@@ -3190,14 +3210,14 @@ export default function ServiceManagement() {
                           </label>
                         </div>
 
-                        {/* C. Clinical Photo Gallery (4 Direct Upload Slots) */}
+                        {/* C. Additional Media Gallery (4 Direct Upload Slots) */}
                         <div>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px', marginTop: '4px' }}>
                             <label style={{ display: 'block', fontSize: '12.5px', fontWeight: '600', margin: 0 }}>
-                              Clinical Photo Gallery (4 Upload Slots):
+                              Additional Media (3 slots beside the procedure video):
                             </label>
                             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              Click to upload • Drag &amp; drop to reorder #1–#4
+                              Upload an image or video • Drag &amp; drop to reorder
                             </span>
                           </div>
 
@@ -3261,7 +3281,7 @@ export default function ServiceManagement() {
                                 >
                                   <input
                                     type="file"
-                                    accept="image/jpeg,image/png,image/webp,image/*"
+                                    accept="image/jpeg,image/png,image/webp,image/*,video/mp4,video/webm,video/quicktime,video/*"
                                     ref={(el) => { servGalleryInputRefs.current[gIdx] = el; }}
                                     onClick={(e) => e.stopPropagation()}
                                     disabled={isSlotUploading}
@@ -3287,14 +3307,11 @@ export default function ServiceManagement() {
                                     </div>
                                   ) : imgUrl ? (
                                     <>
-                                      <img
-                                        key={imgUrl}
-                                        src={imgUrl}
-                                        draggable={false}
-                                        alt=""
-                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                      />
+                                      {isVideoMediaUrl(imgUrl) ? (
+                                        <video key={imgUrl} src={imgUrl} muted playsInline preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                      ) : (
+                                        <img key={imgUrl} src={imgUrl} draggable={false} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                                      )}
                                       {/* Number badge */}
                                       <div style={{
                                         position: 'absolute',
@@ -3330,14 +3347,14 @@ export default function ServiceManagement() {
                                         zIndex: 2
                                       }}>
                                         <Upload size={10} />
-                                        <span>Upload Photo</span>
+                                        <span>Replace media</span>
                                       </div>
                                     </>
                                   ) : (
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', color: '#9E7437' }}>
                                       <Camera size={20} />
-                                      <span style={{ fontSize: '10px', fontWeight: '700' }}>Photo #{gIdx + 1}</span>
-                                      <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>+ Upload</span>
+                                      <span style={{ fontSize: '10px', fontWeight: '700' }}>Media #{gIdx + 1}</span>
+                                      <span style={{ fontSize: '8.5px', color: 'var(--text-muted)' }}>+ Image or video</span>
                                     </div>
                                   )}
                                 </label>
@@ -3373,10 +3390,14 @@ export default function ServiceManagement() {
                         categoryName={modalCategoryName}
                         serviceName={(servName || '').trim() || 'Treatment name'}
                         durationMins={servDuration || 'Duration'}
+                        durationSuffix={servDurationSuffix}
+                        benefitsHeading={servBenefitsHeading}
+                        priceNote={servPriceNote}
+                        selectButtonText={servSelectButtonText}
                         price={servPrice !== '' ? servPrice : ''}
                         subtitle={(servSubtitle || '').trim()}
-                        tag=""
-                        downtime=""
+                        tag={(servTag || '').trim()}
+                        downtime={(servDowntime || '').trim()}
                         vspBadges={servVspBadges}
                         sessionPlanText={
                           servHasSessions
@@ -3389,6 +3410,19 @@ export default function ServiceManagement() {
                         highlights={servHighlights}
                         activeMediaTab={servPreviewTab}
                         onSelectMediaTab={setServPreviewTab}
+                        showMediaUploadSlots
+                        onUploadMedia={(index, file) => uploadFile(file, 'gallery', index)}
+                        mediaUploading={uploadingState.gallery}
+                        onSpotlightTextChange={(field, value, index) => {
+                          if (field === 'serviceName') setServName(value);
+                          else if (field === 'subtitle') setServSubtitle(value);
+                          else if (field === 'durationSuffix') setServDurationSuffix(value);
+                          else if (field === 'benefitsHeading') setServBenefitsHeading(value);
+                          else if (field === 'priceNote') setServPriceNote(value);
+                          else if (field === 'selectButtonText') setServSelectButtonText(value);
+                          else if (field === 'vspBadge') handleUpdateVspBadge(index, value);
+                          else if (field === 'benefit') handleUpdateHighlight(index, value);
+                        }}
                         videoRef={servVideoRef}
                         isVideoPlaying={isServVideoPlaying}
                         setIsVideoPlaying={setIsServVideoPlaying}

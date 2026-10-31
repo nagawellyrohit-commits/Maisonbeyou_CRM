@@ -1,10 +1,15 @@
 import React, { useRef } from 'react';
 import { Play, Pause, Clock, Volume2, VolumeX, Maximize2, Sparkles, Zap, ShieldCheck, Repeat } from 'lucide-react';
+import { isVideoMediaUrl } from '../utils/serviceMedia';
 
 export default function VisitorServiceSpotlightCard({
   categoryName,
   serviceName = 'Underarms Laser',
   durationMins = 20,
+  durationSuffix = 'Mins Session',
+  benefitsHeading = 'Benefits :',
+  priceNote = '(plus taxes)',
+  selectButtonText = 'Select Service',
   price = 1200,
   subtitle = '',
   tag = 'Quick & Effective',
@@ -28,7 +33,13 @@ export default function VisitorServiceSpotlightCard({
   onSelectService,
   onOpenTerms,
   maxGalleryThumbnails = 3,
-  compact = false
+  compact = false,
+  showMediaUploadSlots = false,
+  onRequestMediaUpload,
+  onRequestVideoUpload,
+  onUploadMedia,
+  mediaUploading = [],
+  onSpotlightTextChange
 }) {
   const internalVideoRef = useRef(null);
   const videoElRef = externalVideoRef || internalVideoRef;
@@ -36,8 +47,14 @@ export default function VisitorServiceSpotlightCard({
   const displayedGallery = Array.isArray(gallery)
     ? gallery.slice(0, maxGalleryThumbnails)
     : [];
+  const gallerySlots = showMediaUploadSlots
+    ? Array.from({ length: maxGalleryThumbnails }, (_, index) => displayedGallery[index] || '')
+    : displayedGallery;
+  const thumbnailCount = showMediaUploadSlots ? maxGalleryThumbnails : displayedGallery.length;
 
   const allGalleryPhotos = Array.isArray(gallery) ? gallery : [];
+  const activeGalleryMedia = typeof activeMediaTab === 'number' ? allGalleryPhotos[activeMediaTab] : '';
+  const activeGalleryIsVideo = isVideoMediaUrl(activeGalleryMedia);
 
   const handlePlayPause = () => {
     if (onTogglePlay) {
@@ -320,6 +337,17 @@ export default function VisitorServiceSpotlightCard({
                   </button>
                 </div>
               </>
+            ) : activeGalleryIsVideo ? (
+              <video
+                key={`gallery-video-${activeMediaTab}-${activeGalleryMedia}`}
+                src={activeGalleryMedia}
+                autoPlay
+                muted={isVideoMuted}
+                loop
+                playsInline
+                controls
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+              />
             ) : (
               <>
                 <img
@@ -408,16 +436,20 @@ export default function VisitorServiceSpotlightCard({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: `repeat(${Math.max(4, displayedGallery.length + 1)}, minmax(0, 1fr))`,
+              gridTemplateColumns: `repeat(${showMediaUploadSlots ? thumbnailCount : thumbnailCount + 1}, minmax(0, 1fr))`,
               gap: '10px',
               width: '100%',
               boxSizing: 'border-box'
             }}
           >
-            {/* Thumbnail 1: Video */}
-            <button
+            {/* The editor uses four equal mixed-media slots; visitor view keeps a dedicated video thumbnail. */}
+            {!showMediaUploadSlots && <button
               type="button"
               onClick={() => {
+                if (showMediaUploadSlots) {
+                  onRequestVideoUpload?.();
+                  return;
+                }
                 if (onSelectMediaTab) onSelectMediaTab('video');
                 if (setIsVideoPlaying) setIsVideoPlaying(true);
                 if (videoElRef.current) {
@@ -433,23 +465,36 @@ export default function VisitorServiceSpotlightCard({
                 cursor: 'pointer',
                 padding: 0,
                 margin: 0,
-                border: activeMediaTab === 'video' ? '2px solid #BA8758' : '1px solid #DAC493',
-                boxShadow: activeMediaTab === 'video' ? '0 0 0 2px rgba(186, 135, 88, 0.25)' : 'none',
-                background: '#1C1917',
+                border: showMediaUploadSlots ? '1px dashed #BA8758' : (activeMediaTab === 'video' ? '2px solid #BA8758' : '1px solid #DAC493'),
+                boxShadow: showMediaUploadSlots ? 'none' : (activeMediaTab === 'video' ? '0 0 0 2px rgba(186, 135, 88, 0.25)' : 'none'),
+                background: showMediaUploadSlots ? '#FAF6EE' : '#1C1917',
+                color: '#8E633A',
+                flexDirection: showMediaUploadSlots ? 'column' : undefined,
+                alignItems: showMediaUploadSlots ? 'center' : undefined,
+                justifyContent: showMediaUploadSlots ? 'center' : undefined,
+                gap: showMediaUploadSlots ? '3px' : undefined,
                 transition: 'all 0.2s ease'
               }}
-              title="Play Procedure Demo Video"
+              title={showMediaUploadSlots ? 'Upload or replace procedure video' : 'Play Procedure Demo Video'}
             >
-              <img
-                key={`vid_thumb_${heroImage || allGalleryPhotos[0] || ''}`}
-                src={heroImage || allGalleryPhotos[0]}
-                alt=""
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                }}
-                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-              />
-              <div
+              {showMediaUploadSlots ? (
+                <>
+                  <span style={{ fontSize: 20, lineHeight: 1 }}>+</span>
+                  <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.04em' }}>UPLOAD</span>
+                  <span style={{ fontSize: 7 }}>IMAGE / VIDEO</span>
+                </>
+              ) : (
+                <>
+                  <img
+                    key={`vid_thumb_${heroImage || allGalleryPhotos[0] || ''}`}
+                    src={heroImage || allGalleryPhotos[0]}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                  <div
                 style={{
                   position: 'absolute',
                   inset: 0,
@@ -478,16 +523,19 @@ export default function VisitorServiceSpotlightCard({
                   VIDEO
                 </span>
               </div>
-            </button>
+                </>
+              )}
+            </button>}
 
             {/* Thumbnails 2-4: Clinical Photos 1, 2, 3 */}
-            {displayedGallery.map((imgUrl, idx) => {
+            {gallerySlots.map((imgUrl, idx) => {
               const isSelected = activeMediaTab === idx;
+              const GallerySlotTag = showMediaUploadSlots ? 'label' : 'button';
               return (
-                <button
+                <GallerySlotTag
                   key={idx}
-                  type="button"
-                  onClick={() => {
+                  type={showMediaUploadSlots ? undefined : 'button'}
+                  onClick={showMediaUploadSlots ? undefined : () => {
                     if (onSelectMediaTab) onSelectMediaTab(idx);
                     if (videoElRef.current) {
                       videoElRef.current.pause();
@@ -503,7 +551,7 @@ export default function VisitorServiceSpotlightCard({
                     cursor: 'pointer',
                     padding: 0,
                     margin: 0,
-                    border: isSelected ? '2px solid #BA8758' : '1px solid #DAC493',
+                    border: showMediaUploadSlots && !imgUrl ? '1px dashed #BA8758' : (isSelected ? '2px solid #BA8758' : '1px solid #DAC493'),
                     boxShadow: isSelected ? '0 0 0 2px rgba(186, 135, 88, 0.25)' : 'none',
                     background: '#FAF6EE',
                     transition: 'all 0.2s ease',
@@ -511,9 +559,31 @@ export default function VisitorServiceSpotlightCard({
                     alignItems: 'center',
                     justifyContent: 'center'
                   }}
-                  title={`View Clinical Photo ${idx + 1}`}
+                  title={showMediaUploadSlots ? `${imgUrl ? 'Replace' : 'Upload'} media ${idx + 1}` : `View Clinical Photo ${idx + 1}`}
                 >
-                  {imgUrl && (
+                  {showMediaUploadSlots && (
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/*,video/mp4,video/webm,video/quicktime,video/*"
+                      disabled={Boolean(mediaUploading[idx])}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = '';
+                        if (file) onUploadMedia?.(idx, file);
+                      }}
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, zIndex: 3, cursor: 'pointer' }}
+                    />
+                  )}
+                  {imgUrl && (isVideoMediaUrl(imgUrl) ? (
+                    <video
+                      key={`gal-thumb-${idx}-${imgUrl}`}
+                      src={imgUrl}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                    />
+                  ) : (
                     <img
                       key={`gal_thumb_${idx}_${imgUrl}`}
                       src={imgUrl}
@@ -523,8 +593,34 @@ export default function VisitorServiceSpotlightCard({
                       }}
                       style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                     />
+                  ))}
+                  {!imgUrl && showMediaUploadSlots && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, color: '#8E633A' }}>
+                      <span style={{ fontSize: 20, lineHeight: 1 }}>+</span>
+                      <span style={{ fontSize: 8, fontWeight: 800, letterSpacing: '0.04em' }}>UPLOAD</span>
+                      <span style={{ fontSize: 7 }}>IMAGE / VIDEO</span>
+                    </div>
                   )}
-                  <div
+                  {showMediaUploadSlots && imgUrl && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: 4,
+                        left: 4,
+                        zIndex: 2,
+                        borderRadius: 5,
+                        padding: '2px 5px',
+                        background: 'rgba(28, 25, 23, 0.82)',
+                        color: '#FFFFFF',
+                        fontSize: 8,
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      REPLACE
+                    </span>
+                  )}
+                  {imgUrl && <div
                     style={{
                       position: 'absolute',
                       bottom: '3px',
@@ -540,9 +636,9 @@ export default function VisitorServiceSpotlightCard({
                       lineHeight: 1.2
                     }}
                   >
-                    {idx + 1}
-                  </div>
-                </button>
+                    {isVideoMediaUrl(imgUrl) ? 'VIDEO' : idx + 1}
+                  </div>}
+                </GallerySlotTag>
               );
             })}
           </div>
@@ -594,11 +690,19 @@ export default function VisitorServiceSpotlightCard({
                 letterSpacing: '0.02em'
               }}
             >
-              {serviceName}
+              {showMediaUploadSlots ? (
+                <input
+                  aria-label="Spotlight title"
+                  value={serviceName === 'Treatment name' ? '' : serviceName}
+                  placeholder="Treatment name"
+                  onChange={(event) => onSpotlightTextChange?.('serviceName', event.target.value)}
+                  style={{ width: '100%', padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textTransform: 'inherit' }}
+                />
+              ) : serviceName}
             </h2>
 
             {/* Subtitle / Tagline */}
-            {subtitle && (
+            {(subtitle || showMediaUploadSlots) && (
               <div
                 style={{
                   fontSize: '12px',
@@ -607,7 +711,15 @@ export default function VisitorServiceSpotlightCard({
                   fontWeight: '500'
                 }}
               >
-                {subtitle}
+                {showMediaUploadSlots ? (
+                  <input
+                    aria-label="Spotlight subtitle"
+                    value={subtitle}
+                    placeholder="Subtitle / tagline"
+                    onChange={(event) => onSpotlightTextChange?.('subtitle', event.target.value)}
+                    style={{ width: '100%', padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                  />
+                ) : subtitle}
               </div>
             )}
 
@@ -628,7 +740,15 @@ export default function VisitorServiceSpotlightCard({
                 }}
               >
                 <Clock size={12} color="#9E7437" />
-                {durationMins || 20} Mins Session
+                {durationMins || 20}{' '}
+                {showMediaUploadSlots ? (
+                  <input
+                    aria-label="Duration suffix"
+                    value={durationSuffix}
+                    onChange={(event) => onSpotlightTextChange?.('durationSuffix', event.target.value)}
+                    style={{ width: '105px', padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                  />
+                ) : durationSuffix}
               </span>
 
               {tag && (
@@ -671,7 +791,7 @@ export default function VisitorServiceSpotlightCard({
                 </span>
               )}
 
-              {cleanVspBadges.map((vspBadge, vIdx) => (
+              {(showMediaUploadSlots ? Array.from({ length: 3 }, (_, index) => vspBadges[index] || '') : cleanVspBadges).map((vspBadge, vIdx) => (
                 <span
                   key={`vsp_${vIdx}`}
                   style={{
@@ -684,11 +804,21 @@ export default function VisitorServiceSpotlightCard({
                     border: '1px solid #EADBCC',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '5px'
+                    gap: '5px',
+                    minWidth: showMediaUploadSlots ? 92 : undefined,
+                    boxSizing: 'border-box'
                   }}
                 >
                   <Sparkles size={12} color="#9E7437" />
-                  {vspBadge}
+                  {showMediaUploadSlots ? (
+                    <input
+                      aria-label={`USP or VSP badge ${vIdx + 1}`}
+                      value={vspBadge}
+                      placeholder={`USP / VSP [${vIdx + 1}]`}
+                      onChange={(event) => onSpotlightTextChange?.('vspBadge', event.target.value, vIdx)}
+                      style={{ width: '100%', minWidth: 0, padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                    />
+                  ) : vspBadge}
                 </span>
               ))}
 
@@ -723,12 +853,19 @@ export default function VisitorServiceSpotlightCard({
                 letterSpacing: '0.02em'
               }}
             >
-              Benefits :
+              {showMediaUploadSlots ? (
+                <input
+                  aria-label="Benefits heading"
+                  value={benefitsHeading}
+                  onChange={(event) => onSpotlightTextChange?.('benefitsHeading', event.target.value)}
+                  style={{ width: '100%', padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                />
+              ) : benefitsHeading}
             </div>
 
             {/* Clean Bullet List */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
-              {cleanHighlights.map((hl, i) => (
+              {(showMediaUploadSlots ? Array.from({ length: Math.max(3, highlights.length) }, (_, index) => highlights[index] || '') : cleanHighlights).map((hl, i) => (
                 <div
                   key={i}
                   style={{
@@ -751,9 +888,17 @@ export default function VisitorServiceSpotlightCard({
                       fontWeight: '700'
                     }}
                   >
-                    -
+                    {showMediaUploadSlots ? `[${i + 1}]` : '-'}
                   </span>
-                  <span>{hl}</span>
+                  {showMediaUploadSlots ? (
+                    <input
+                      aria-label={`Benefit ${i + 1}`}
+                      value={hl}
+                      placeholder={`Benefit [${i + 1}]`}
+                      onChange={(event) => onSpotlightTextChange?.('benefit', event.target.value, i)}
+                      style={{ flex: 1, minWidth: 0, padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                    />
+                  ) : <span>{hl}</span>}
                 </div>
               ))}
             </div>
@@ -774,7 +919,7 @@ export default function VisitorServiceSpotlightCard({
               >
                 ₹ {formattedPrice}
               </span>
-              <span
+              {priceNote && <span
                 style={{
                   fontSize: '10px',
                   color: '#B35E44',
@@ -784,12 +929,26 @@ export default function VisitorServiceSpotlightCard({
                   fontWeight: '600'
                 }}
               >
-                (plus taxes)
-              </span>
+                {showMediaUploadSlots ? (
+                  <input
+                    aria-label="Price note"
+                    value={priceNote}
+                    onChange={(event) => onSpotlightTextChange?.('priceNote', event.target.value)}
+                    style={{ width: '100%', padding: 0, border: 0, outline: 'none', background: 'transparent', color: 'inherit', font: 'inherit' }}
+                  />
+                ) : priceNote}
+              </span>}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <button
+              {showMediaUploadSlots ? (
+                <input
+                  aria-label="Select service button text"
+                  value={selectButtonText}
+                  onChange={(event) => onSpotlightTextChange?.('selectButtonText', event.target.value)}
+                  style={{ padding: '12px 38px', borderRadius: '9999px', background: '#BA8758', color: '#FFFFFF', border: 'none', fontWeight: '600', fontSize: '12px', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center', outline: 'none' }}
+                />
+              ) : <button
                 type="button"
                 onClick={onSelectService}
                 style={{
@@ -816,8 +975,8 @@ export default function VisitorServiceSpotlightCard({
                   e.currentTarget.style.background = isActiveInCart ? '#8C642D' : '#BA8758';
                 }}
               >
-                {isActiveInCart ? '✓ SERVICE ADDED' : 'SELECT SERVICE'}
-              </button>
+                {isActiveInCart ? '✓ SERVICE ADDED' : selectButtonText}
+              </button>}
 
               {isActiveInCart && onOpenTerms && (
                 <button

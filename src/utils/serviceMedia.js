@@ -625,6 +625,10 @@ const CATEGORY_GALLERIES = {
   ]
 };
 
+export function isVideoMediaUrl(url = '') {
+  return /\.(mp4|webm|mov|m4v|ogv)(?:$|[?#])/i.test(String(url).trim());
+}
+
 export function getServiceMedia(service, categoryName = '') {
   const cKey = (categoryName || '').toLowerCase().trim();
 
@@ -713,6 +717,16 @@ export function getServiceMedia(service, categoryName = '') {
     }
   }
 
+  let spotlightCopy = {};
+  if (service?.tag && typeof service.tag === 'string' && service.tag.trim().startsWith('{')) {
+    try {
+      const tagConfig = JSON.parse(service.tag);
+      if (tagConfig && typeof tagConfig === 'object' && !Array.isArray(tagConfig)) {
+        spotlightCopy = tagConfig.spotlight_copy || tagConfig.spotlightCopy || {};
+      }
+    } catch {}
+  }
+
   const baseGallery = resolveGallery(base);
   let resolvedTag = service?.tag !== undefined && service?.tag !== null ? service.tag : (base.tag || 'Quick & Effective');
   let resolvedVspBadges = [];
@@ -753,6 +767,7 @@ export function getServiceMedia(service, categoryName = '') {
     downtime: service?.downtime || base.downtime || 'Zero Downtime',
     tag: resolvedTag,
     vspBadges: resolvedVspBadges,
+    spotlightCopy,
     subtitle: service?.subtitle || service?.description || base.subtitle || 'Quick & effective',
     highlights: (customHighlights && customHighlights.length > 0) ? customHighlights : base.highlights,
     gallery: finalGallery

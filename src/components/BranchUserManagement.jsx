@@ -9,11 +9,13 @@ const emptyForm = {
   phone: '',
   email: '',
   role: 'reception',
+  teamRole: '',
   permissions: ['dashboard', 'visits', 'clients']
 };
 
-export default function BranchUserManagement({ activeLocation }) {
+export default function BranchUserManagement({ activeLocation, branding }) {
   const [users, setUsers] = useState([]);
+  const [teamOptions, setTeamOptions] = useState({ roles: [], designations: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -39,7 +41,17 @@ export default function BranchUserManagement({ activeLocation }) {
     }
   };
 
-  useEffect(() => { loadUsers(); }, [activeLocation?.location_id]);
+  const loadTeamOptions = async () => {
+    try {
+      const result = await apiRequest('/admin/team-options');
+      setTeamOptions({ roles: result.roles || [], designations: result.designations || [] });
+    } catch (err) {
+      console.error('Could not load Master role and designation options:', err);
+      setError(err.message || 'Could not load Role and Designation Master options.');
+    }
+  };
+
+  useEffect(() => { loadUsers(); loadTeamOptions(); }, [activeLocation?.location_id]);
 
   const startCreate = () => {
     setEditingUser(null);
@@ -55,6 +67,7 @@ export default function BranchUserManagement({ activeLocation }) {
       phone: user.phone || '',
       email: user.email || '',
       role: user.role,
+      teamRole: user.team_role || '',
       permissions: Array.isArray(user.permissions) ? user.permissions : []
     });
     setError('');
@@ -75,12 +88,17 @@ export default function BranchUserManagement({ activeLocation }) {
       setError('Mobile number and email address are required.');
       return;
     }
+    if (form.role === 'reception' && (!form.teamRole || !form.designation)) {
+      setError('Choose a team role and designation from Master.');
+      return;
+    }
     setSaving(true);
     setError('');
     try {
       const payload = {
         name: form.name.trim(),
-        designation: form.designation.trim() || (form.role === 'reception' ? 'Manager' : 'Visitor'),
+        designation: form.role === 'reception' ? form.designation.trim() : 'Visitor',
+        team_role: form.role === 'reception' ? form.teamRole : '',
         phone: form.phone.trim(),
         email: form.email.trim().toLowerCase(),
         role: form.role,
@@ -131,8 +149,8 @@ export default function BranchUserManagement({ activeLocation }) {
 
   const buttonStyle = {
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-    border: '1px solid #D8BD91', borderRadius: 9, padding: '9px 13px',
-    background: '#FFF', color: '#8C6228', cursor: 'pointer', fontWeight: 700, fontSize: 12
+    border: '1px solid var(--tenant-primary, #D8BD91)', borderRadius: 'var(--tenant-radius, 9px)', padding: '9px 13px',
+    background: 'var(--tenant-card-bg, #FFF)', color: 'var(--tenant-primary, #8C6228)', cursor: 'pointer', fontWeight: 700, fontSize: 12
   };
 
   const renderUserCard = (user) => (
@@ -140,7 +158,7 @@ export default function BranchUserManagement({ activeLocation }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <strong style={{ display: 'block', color: '#29231E', fontSize: 15 }}>{user.name}</strong>
-          <span style={{ color: '#9F7335', fontSize: 12 }}>{user.designation || (user.role === 'reception' ? 'Manager' : 'Visitor')} · {user.role === 'reception' ? 'Manager' : 'Visitor'}</span>
+          <span style={{ color: '#9F7335', fontSize: 12 }}>{user.team_role ? `${user.team_role}${user.designation ? ` · ${user.designation}` : ''}` : (user.designation || (user.role === 'reception' ? 'Manager' : 'Visitor'))} · {user.role === 'reception' ? 'Manager access' : 'Visitor access'}</span>
         </div>
         <span style={{ alignSelf: 'flex-start', borderRadius: 999, padding: '4px 9px', fontSize: 10, fontWeight: 800, color: user.active ? '#3F6B4A' : '#78716C', background: user.active ? '#EDF7EE' : '#F1EFEB' }}>{user.active ? 'ACTIVE' : 'INACTIVE'}</span>
       </div>
@@ -153,28 +171,29 @@ export default function BranchUserManagement({ activeLocation }) {
         ))}
         {!(user.permissions || []).length && <span style={{ color: '#A8A29E', fontSize: 11 }}>No modules assigned</span>}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid #EEE7DD', paddingTop: 12 }}>
-        <button type="button" style={buttonStyle} onClick={() => startEdit(user)}><Edit2 size={14} /> Edit access</button>
-        <button type="button" style={buttonStyle} onClick={() => toggleStatus(user)}>{user.active ? <UserX size={14} /> : <UserCheck size={14} />}{user.active ? 'Deactivate' : 'Activate'}</button>
+      <div className="branch-user-management-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid #EEE7DD', paddingTop: 12 }}>
+        <button type="button" className="tenant-accent-button" style={buttonStyle} onClick={() => startEdit(user)}><Edit2 size={14} /> Edit access</button>
+        <button type="button" className="tenant-accent-button" style={buttonStyle} onClick={() => toggleStatus(user)}>{user.active ? <UserX size={14} /> : <UserCheck size={14} />}{user.active ? 'Deactivate' : 'Activate'}</button>
         <button type="button" style={{ ...buttonStyle, color: '#B42318', borderColor: '#F0B7B3' }} onClick={() => deleteUser(user)}><Trash2 size={14} /> Delete</button>
       </div>
     </article>
   );
 
+  const branchName = activeLocation?.name || 'this branch';
+  const pageSubtitle = (branding?.user_access_subtitle || 'Create Manager and Visitor accounts for {branch}.').replaceAll('{branch}', branchName);
   const accountGroups = [
-    { role: 'reception', label: 'Managers', emptyLabel: 'No Manager accounts yet.' },
-    { role: 'visitor', label: 'Visitors', emptyLabel: 'No Visitor accounts yet.' }
+    { role: 'reception', label: branding?.user_access_managers_label || 'Managers', emptyLabel: branding?.user_access_manager_empty || 'No Manager accounts yet.' },
+    { role: 'visitor', label: branding?.user_access_visitors_label || 'Visitors', emptyLabel: branding?.user_access_visitor_empty || 'No Visitor accounts yet.' }
   ];
 
   return (
-    <section className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '20px 0' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <div>
-          <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>Branch Access</div>
-          <h2 style={{ margin: '5px 0', color: '#29231E' }}>Manage Users</h2>
-          <div style={{ fontSize: 13, color: '#78716C' }}>Create Manager and Visitor accounts for {activeLocation?.name || 'this branch'}.</div>
+    <section className="animate-fade-in branch-user-management" style={{ display: 'flex', flexDirection: 'column', gap: 20, padding: '28px 0 18px' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 30 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <h2 style={{ margin: 0, color: '#29231E' }}>{branding?.user_access_heading || 'Manage Users'}</h2>
+          <div className="branch-user-management-description" style={{ fontSize: 13, color: '#78716C' }}>{pageSubtitle}</div>
         </div>
-        <button type="button" style={buttonStyle} onClick={startCreate}><Plus size={15} /> Add User</button>
+        <button type="button" className="tenant-accent-button" style={buttonStyle} onClick={startCreate}><Plus size={15} /> {branding?.user_access_add_button || 'Add User'}</button>
       </header>
 
       {error && <div role="alert" style={{ padding: '11px 14px', background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA', borderRadius: 9, fontSize: 13 }}>{error}</div>}
@@ -184,7 +203,7 @@ export default function BranchUserManagement({ activeLocation }) {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 440px), 1fr))',
           alignItems: 'start',
-          gap: 22
+          gap: 18
         }}>
           {accountGroups.map(group => {
             const groupUsers = users.filter(user => user.role === group.role);
@@ -199,7 +218,7 @@ export default function BranchUserManagement({ activeLocation }) {
                     {groupUsers.map(renderUserCard)}
                   </div>
                 ) : (
-                  <div className="card" style={{ padding: 18, color: '#78716C', fontSize: 13 }}>{group.emptyLabel}</div>
+                  <div className="card" style={{ padding: '13px 16px', color: '#78716C', fontSize: 13 }}>{group.emptyLabel}</div>
                 )}
               </section>
             );
@@ -208,16 +227,19 @@ export default function BranchUserManagement({ activeLocation }) {
       )}
 
       <>
-        <div className="card" style={{ padding: 22 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div className="card" style={{ padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ margin: 0, color: '#29231E' }}>{editingUser ? 'Edit User Access' : 'Create User'}</h3>
             {editingUser && <button type="button" aria-label="Cancel edit" onClick={startCreate} style={{ ...buttonStyle, padding: 7 }}><X size={15} /></button>}
           </div>
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 10 }}>
               <label style={labelStyle}>Full name *<input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} /></label>
-              <label style={labelStyle}>Role<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value, designation: e.target.value === 'reception' ? 'Manager' : 'Visitor', permissions: e.target.value === 'reception' ? ['dashboard', 'visits', 'clients'] : ['visitor_intake'] })} style={inputStyle}><option value="reception">Manager</option><option value="visitor">Visitor</option></select></label>
-              <label style={labelStyle}>Designation<input value={form.designation} onChange={e => setForm({ ...form, designation: e.target.value })} style={inputStyle} placeholder="e.g. Studio Manager" /></label>
+              <label style={labelStyle}>Account access<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value, permissions: e.target.value === 'reception' ? ['dashboard', 'visits', 'clients'] : ['visitor_intake'] })} style={{ ...inputStyle, cursor: 'pointer' }}><option value="reception">Manager</option><option value="visitor">Visitor</option></select></label>
+              {form.role === 'reception' && <>
+                <label style={labelStyle}>Team role *<select required value={form.teamRole} onChange={e => setForm(current => ({ ...current, teamRole: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="">Select a role</option>{form.teamRole && !teamOptions.roles.some(item => item.option_name === form.teamRole) && <option value={form.teamRole}>{form.teamRole} (saved)</option>}{teamOptions.roles.map(item => <option key={item.option_id} value={item.option_name}>{item.option_name}</option>)}</select><span style={{ fontSize: 10, color: '#A8A29E', fontWeight: 400 }}>Scroll to browse roles from Master.</span></label>
+                <label style={labelStyle}>Designation *<select required value={form.designation} onChange={e => setForm(current => ({ ...current, designation: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="">Select a designation</option>{form.designation && !teamOptions.designations.some(item => item.option_name === form.designation) && <option value={form.designation}>{form.designation} (saved)</option>}{teamOptions.designations.map(item => <option key={item.option_id} value={item.option_name}>{item.option_name}</option>)}</select><span style={{ fontSize: 10, color: '#A8A29E', fontWeight: 400 }}>Scroll to browse designations from Master.</span></label>
+              </>}
               <label style={labelStyle}>Mobile number *<input required type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} /></label>
               <label style={labelStyle}>Email address *<input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={inputStyle} /></label>
             </div>
@@ -256,5 +278,5 @@ export default function BranchUserManagement({ activeLocation }) {
   );
 }
 
-const labelStyle = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, fontWeight: 700, color: '#57534E' };
-const inputStyle = { border: '1px solid #DED5C9', borderRadius: 8, padding: '10px 11px', fontSize: 13, color: '#29231E', background: '#fff', outlineColor: '#B88B4A' };
+const labelStyle = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, fontWeight: 700, color: '#57534E' };
+const inputStyle = { border: '1px solid #DED5C9', borderRadius: 8, padding: '8px 10px', fontSize: 13, color: '#29231E', background: '#fff', outlineColor: '#B88B4A' };

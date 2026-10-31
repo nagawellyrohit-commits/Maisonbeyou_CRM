@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Handshake, LogOut } from 'lucide-react';
+import { Building2, Handshake, LogOut, Menu, Palette } from 'lucide-react';
 import studioBg from '../assets/studio-bg.png';
 import { apiRequest } from '../utils/api';
+import { masterPortalCssVariables } from '../utils/branding';
+import BrandingCustomizer from './BrandingCustomizer';
 
-export default function StudioManagement({ currentUser, onSelectType, onLogout }) {
+export default function StudioManagement({ currentUser, onSelectType, onLogout, branding, onPreviewBranding, onSaveBranding }) {
   const [counts, setCounts] = useState({ branchCount: 2, franchiseCount: 2, totalLocations: 4 });
   const [loading, setLoading] = useState(true);
+  const [showMenu, setShowMenu] = useState(false);
 
   const fetchSummary = async () => {
     try {
@@ -40,10 +43,14 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout }
     }
   };
 
+  const overlayOpacity = Math.min(90, Math.max(0, Number(branding?.master_overlay_opacity ?? 62))) / 100;
+
   return (
-    <div style={{
+    <div className="master-portal-themed studio-management-screen" style={{
+      ...masterPortalCssVariables(branding),
       minHeight: '100vh',
-      backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.62)), url(${studioBg})`,
+      backgroundColor: branding?.master_background_color || '#2C211B',
+      backgroundImage: `linear-gradient(rgba(0, 0, 0, ${overlayOpacity}), rgba(0, 0, 0, ${overlayOpacity})), url(${branding?.master_background_image_url || studioBg})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
@@ -53,51 +60,21 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout }
       fontFamily: 'var(--font-sans)',
       position: 'relative'
     }}>
-      {/* Top-Right Floating Luxury Logout Button */}
-      <button
-        type="button"
-        onClick={handleLogoutClick}
-        title="Sign Out of Session"
-        style={{
-          position: 'absolute',
-          top: 'clamp(16px, 3vh, 28px)',
-          right: 'clamp(16px, 3vw, 32px)',
-          zIndex: 20,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          padding: '9px 18px',
-          borderRadius: '9999px',
-          background: 'rgba(26, 20, 15, 0.65)',
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(218, 196, 147, 0.35)',
-          color: '#E8D5B5',
-          fontSize: '13px',
-          fontWeight: '600',
-          letterSpacing: '0.03em',
-          cursor: 'pointer',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.35)',
-          transition: 'all 0.25s ease'
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'rgba(220, 38, 38, 0.25)';
-          e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.6)';
-          e.currentTarget.style.color = '#FFFFFF';
-          e.currentTarget.style.transform = 'translateY(-1px)';
-          e.currentTarget.style.boxShadow = '0 6px 24px rgba(220, 38, 38, 0.3)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'rgba(26, 20, 15, 0.65)';
-          e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.35)';
-          e.currentTarget.style.color = '#E8D5B5';
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.35)';
-        }}
-      >
-        <LogOut size={15} style={{ strokeWidth: 2 }} />
-        <span>Log Out</span>
-      </button>
+      {branding?.master_logo_url && <img src={branding.master_logo_url} alt={branding.brand_name || 'Brand logo'} style={{ position: 'absolute', top: 24, left: 28, height: 58, maxWidth: 220, objectFit: 'contain', zIndex: 5 }} />}
+      <div style={{ position: 'absolute', top: 'clamp(16px, 3vh, 28px)', right: 'clamp(16px, 3vw, 32px)', zIndex: 20 }}>
+        <button type="button" aria-label="Open master portal menu" onClick={() => setShowMenu(value => !value)} style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, color: '#E8D5B5', background: 'rgba(26,20,15,.72)', border: '1px solid rgba(218,196,147,.45)', cursor: 'pointer' }}>
+          <Menu size={19} />
+        </button>
+        {showMenu && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 220, padding: 8, background: '#FFFFFF', border: '1px solid #E5D8C6', borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,.2)' }}>
+          <button type="button" onClick={() => { setShowMenu(false); window.dispatchEvent(new Event('open_master_portal_customizer')); }} style={masterMenuItemStyle}>
+            <Palette size={15} /> Customize
+          </button>
+          <div style={{ height: 1, background: '#E7DED2', margin: '5px 0' }} />
+          <button type="button" onClick={handleLogoutClick} style={{ ...masterMenuItemStyle, color: '#B42318' }}>
+            <LogOut size={15} /> {branding?.master_logout_label || 'Sign Out'}
+          </button>
+        </div>}
+      </div>
 
       {/* Main Content Area */}
       <main style={{
@@ -114,13 +91,13 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout }
         {/* Header matching user reference */}
         <div className="concierge-header" style={{ marginBottom: 'clamp(28px, 4vh, 42px)' }}>
           <h1 className="concierge-title" style={{ letterSpacing: '0.14em' }}>
-            STUDIO MANAGEMENT
+            {branding?.master_studio_heading || 'STUDIO MANAGEMENT'}
           </h1>
 
           <div className="concierge-subtitle-wrap">
             <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, transparent, #C59A58)' }} />
             <span className="concierge-subtitle">
-              your personalised journey awaits
+              {branding?.master_studio_subtitle || 'your personalised journey awaits'}
             </span>
             <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, #C59A58, transparent)' }} />
           </div>
@@ -140,17 +117,17 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout }
 
             {/* Card Title */}
             <h2 className="concierge-card-title">
-              BRANCHES
+              {branding?.master_branches_title || 'BRANCHES'}
             </h2>
 
             {/* Card Subtitle */}
             <p className="concierge-card-desc">
-              manage company-owned studio locations
+              {branding?.master_branches_subtitle || 'manage company-owned studio locations'}
             </p>
 
             {/* Luxury Action Button - Gold */}
             <div className="concierge-action-btn concierge-action-btn-gold">
-              <span>GET STARTED</span>
+              <span>{branding?.master_branches_button || 'GET STARTED'}</span>
             </div>
           </div>
 
@@ -166,21 +143,24 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout }
 
             {/* Card Title */}
             <h2 className="concierge-card-title">
-              FRANCHISES
+              {branding?.master_franchises_title || 'FRANCHISES'}
             </h2>
 
             {/* Card Subtitle */}
             <p className="concierge-card-desc">
-              monitor franchise partner performance
+              {branding?.master_franchises_subtitle || 'monitor franchise partner performance'}
             </p>
 
             {/* Luxury Action Button - Dark */}
             <div className="concierge-action-btn concierge-action-btn-dark">
-              <span>CONTINUE</span>
+              <span>{branding?.master_franchises_button || 'CONTINUE'}</span>
             </div>
           </div>
         </div>
       </main>
+      <BrandingCustomizer scope="master" section="studio_management" showMasterLoginTab location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
     </div>
   );
 }
+
+const masterMenuItemStyle = { width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: 7, fontSize: 13, fontWeight: 700, color: '#9F7335', background: 'transparent', display: 'flex', alignItems: 'center', gap: 8, border: 'none', cursor: 'pointer' };

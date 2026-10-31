@@ -16,6 +16,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
+import { brandingCssVariables, DEFAULT_LOCATION_BRANDING } from '../utils/branding';
 import brandLogoImg from '../assets/brand-logo.png';
 import loginBg from '../assets/login-bg.jpg';
 
@@ -32,7 +33,7 @@ async function readApiResponse(res, action) {
   }
 }
 
-export default function Login({ onLoginSuccess }) {
+export default function Login({ onLoginSuccess, masterPortalBranding }) {
   // Mobile / Phone or ID input
   const [identifier, setIdentifier] = useState('');
   
@@ -59,6 +60,18 @@ export default function Login({ onLoginSuccess }) {
   const [successMsg, setSuccessMsg] = useState('');
 
   const otpInputRef = useRef(null);
+  const selectedDetectedUser = detectedAccount?.type === 'multiple'
+    ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)
+    : null;
+  const accountBranding = selectedDetectedUser?.branding || detectedAccount?.branding;
+  const loginBranding = accountBranding
+    ? { ...accountBranding, ...masterPortalBranding }
+    : { ...DEFAULT_LOCATION_BRANDING, ...masterPortalBranding };
+  const loginCardOpacity = Math.min(100, Math.max(40, Number(loginBranding.login_card_opacity) || 96)) / 100;
+  const loginCardColor = loginBranding.login_card_color || '#FFFCF7';
+  const loginCardBackground = /^#[0-9a-f]{6}$/i.test(loginCardColor)
+    ? `rgba(${parseInt(loginCardColor.slice(1, 3), 16)}, ${parseInt(loginCardColor.slice(3, 5), 16)}, ${parseInt(loginCardColor.slice(5, 7), 16)}, ${loginCardOpacity})`
+    : loginCardColor;
 
   // Auto-detect account whenever phone number or identifier changes
   useEffect(() => {
@@ -242,44 +255,53 @@ export default function Login({ onLoginSuccess }) {
 
 
   return (
-    <div style={{
+    <div className="brand-login-shell" style={{
+      ...brandingCssVariables(loginBranding),
       minHeight: '100vh',
       width: '100%',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundImage: `url(${loginBg})`,
+      backgroundImage: loginBranding.login_background_image_url || loginBranding.background_image_url
+        ? `url(${loginBranding.login_background_image_url || loginBranding.background_image_url})`
+        : `url(${loginBg})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
       backgroundAttachment: 'fixed',
       padding: '24px 16px',
-      position: 'relative'
+      position: 'relative',
+      backgroundColor: loginBranding.login_background_color || loginBranding.background_color
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '520px',
-        background: 'rgba(255, 252, 247, 0.96)',
+        maxWidth: `${Math.min(760, Math.max(320, Number(loginBranding.login_card_width) || 520))}px`,
+        background: loginCardBackground,
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
-        borderRadius: '24px',
+        borderRadius: `${loginBranding.login_card_radius ?? loginBranding.card_radius}px`,
         boxShadow: '0 25px 60px -15px rgba(90, 60, 20, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.8) inset, 0 10px 30px -5px rgba(0, 0, 0, 0.05)',
-        border: '1.5px solid #DAC493',
-        padding: '42px 40px',
-        position: 'relative'
+        border: `${Math.max(0, Number(loginBranding.login_card_border_width ?? loginBranding.card_border_width) || 0)}px solid ${loginBranding.login_card_border_color || loginBranding.card_border_color}`,
+        backgroundColor: loginCardBackground,
+        padding: `${Math.min(80, Math.max(16, Number(loginBranding.login_card_padding) || 42))}px 40px`,
+        position: 'relative',
+        color: loginBranding.text_color
       }}>
         {/* Brand Crest */}
         <div style={{ textAlign: 'center', marginBottom: '34px' }}>
           <img 
-            src={brandLogoImg} 
-            alt="Maison BeYou Logo" 
+            src={loginBranding.login_logo_url || loginBranding.logo_url || brandLogoImg}
+            alt={loginBranding.brand_name || 'Maison BeYou Logo'}
             style={{
-              height: '52px',
+              height: `${Math.min(160, Math.max(24, Number(loginBranding.login_logo_height) || 52))}px`,
               width: 'auto',
               maxWidth: '220px',
               objectFit: 'contain'
             }}
           />
+          {loginBranding.brand_name && detectedAccount?.found && (
+            <div style={{ marginTop: 8, color: loginBranding.login_heading_color || loginBranding.heading_color, fontSize: 16, fontWeight: 700 }}>{loginBranding.brand_name}</div>
+          )}
         </div>
 
         {/* Success Alert */}
@@ -328,18 +350,18 @@ export default function Login({ onLoginSuccess }) {
           {!otpSent ? (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', marginBottom: '11px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '700', color: '#57534E' }}>
-                  Registered Mobile Number
+                <label style={{ fontSize: '13px', fontWeight: '700', color: loginBranding.login_subtext_color || loginBranding.subtext_color }}>
+                  {loginBranding.login_mobile_label || 'Registered Mobile Number'}
                 </label>
               </div>
 
               <div style={{ position: 'relative' }}>
-                <Phone size={17} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '14px' }} />
+                <Phone size={17} color={loginBranding.login_primary_color || loginBranding.primary_color} style={{ position: 'absolute', left: '14px', top: '14px' }} />
                 <input
                   className="login-phone-input"
                   type="text"
                   value={identifier}
-                  placeholder="Enter phone number"
+                  placeholder={loginBranding.login_mobile_placeholder || 'Enter phone number'}
                   onChange={(e) => {
                     setIdentifier(e.target.value);
                     setError('');
@@ -350,12 +372,12 @@ export default function Login({ onLoginSuccess }) {
                     width: '100%',
                     padding: '15px 14px 15px 42px',
                     borderRadius: '12px',
-                    border: '1.5px solid #DAC493',
+                    border: `1.5px solid ${loginBranding.login_input_border_color || '#DAC493'}`,
                     background: '#FFFFFF',
                     outline: 'none',
                     fontSize: '14.5px',
                     fontWeight: '600',
-                    color: '#1C1917',
+                    color: loginBranding.login_text_color || loginBranding.text_color,
                     boxShadow: '0 2px 8px rgba(184, 139, 74, 0.08)'
                   }}
                 />
@@ -661,10 +683,10 @@ export default function Login({ onLoginSuccess }) {
               fontSize: '14px',
               fontWeight: '700',
               marginTop: '14px',
-              background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)',
-              color: '#FFFFFF',
+              background: loginBranding.login_primary_color || loginBranding.primary_color,
+              color: loginBranding.login_button_text_color || '#FFFFFF',
               border: 'none',
-              borderRadius: '12px',
+              borderRadius: `${loginBranding.login_button_radius ?? 12}px`,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -676,7 +698,7 @@ export default function Login({ onLoginSuccess }) {
           >
             {loading ? 'Verifying...' : sendingOtp ? 'Sending Code...' : (
               <>
-                {otpSent ? 'Verify & Open Desk' : 'Continue to Studio Portal'}
+                {otpSent ? 'Verify & Open Desk' : (loginBranding.login_button_label || 'Continue to Studio Portal')}
                 <ArrowRight size={16} />
               </>
             )}
@@ -689,10 +711,10 @@ export default function Login({ onLoginSuccess }) {
           marginTop: '25px',
           textAlign: 'center',
           fontSize: '11px',
-          color: '#A17D4D',
+          color: loginBranding.login_subtext_color || loginBranding.subtext_color,
           opacity: 0.8
         }}>
-          <span>Maison BeYou Luxury Aesthetic Clinic & Salon</span>
+          <span>{loginBranding.login_footer_text || 'Maison BeYou Luxury Aesthetic Clinic & Salon'}</span>
         </div>
       </div>
     </div>

@@ -1516,17 +1516,35 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
     setTimeout(() => setToastNotification(null), 2500);
   };
 
-  const handleAddService = (service, stayOnPage = false) => {
+  const handleAddService = (service, stayOnPage = false, isRepeat = false) => {
+    const currentMember = selectedRegularClient || clientHistory?.client || preSelectedClient;
+    const tierName = currentMember?.membership_tier || activeMembership?.plan?.tier || activeMembership?.plan?.name || '';
+    const expiry = currentMember?.membership_expires_at ? new Date(currentMember.membership_expires_at) : null;
+    if (expiry) expiry.setHours(23, 59, 59, 999);
+    const currentMembershipValid = Boolean(tierName &&
+      (!currentMember || (currentMember.membership_status !== 'expired' && currentMember.membership_status !== 'inactive')) &&
+      (!expiry || expiry.getTime() >= Date.now()));
+    const benefitPlan = activeMembership?.plan || (currentMembershipValid ? findConfiguredMembershipPlan(tierName) : null);
+    const freeServices = Array.isArray(benefitPlan?.free_services) ? benefitPlan.free_services : [];
+    const includedService = currentMembershipValid && freeServices.find(item => Number(item.service_id) === Number(service.service_id) && item.is_free !== false);
+    const listPrice = Number(service.price) || 0;
+    const isFreeWithMembership = Boolean(includedService);
     const newItem = {
       temp_id: 'item_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
       service_id: service.service_id,
       service_name: service.service_name,
-      price: service.price,
+      price: isFreeWithMembership ? 0 : listPrice,
+      list_price: listPrice,
       staff_id: null,
-      is_repeat: false
+      is_repeat: isRepeat,
+      is_privilege: isFreeWithMembership,
+      membership_benefit_service: isFreeWithMembership,
+      privilege_id: isFreeWithMembership ? `membership_service_${service.service_id}` : null
     };
     setSelectedServices(prev => [...prev, newItem]);
-    setToastNotification(`✓ Added "${service.service_name}" (${formatCurrency(service.price)}) to visit`);
+    setToastNotification(isFreeWithMembership
+      ? `✓ ${service.service_name} is included free with ${benefitPlan.name || tierName} (value ${formatCurrency(listPrice)})`
+      : `✓ Added "${service.service_name}" (${formatCurrency(listPrice)}) to visit`);
     setTimeout(() => setToastNotification(null), 3000);
 
     if (!stayOnPage) {
@@ -1568,17 +1586,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       setTimeout(() => setToastNotification(null), 2500);
     } else {
       setSelectedRepeatServiceKeys(prev => [...prev, key]);
-      const newItem = {
-        temp_id: 'item_rep_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        service_id: prevService.service_id,
-        service_name: prevService.service_name,
-        price: prevService.current_price || prevService.last_price,
-        staff_id: null,
-        is_repeat: true
-      };
-      setSelectedServices(prev => [...prev, newItem]);
-      setToastNotification(`✓ Added repeat "${prevService.service_name}"`);
-      setTimeout(() => setToastNotification(null), 2500);
+      handleAddService({ ...prevService, price: prevService.current_price || prevService.last_price }, true, true);
     }
   };
 
@@ -1843,9 +1851,11 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
           service_id: s.service_id,
           service_name: s.service_name,
           price: s.price,
+          list_price: s.list_price ?? s.price,
           staff_id: s.staff_id || null,
           is_privilege: s.is_privilege ? 1 : 0,
-          privilege_id: s.privilege_id || null
+          privilege_id: s.privilege_id || null,
+          membership_benefit_service: s.membership_benefit_service ? 1 : 0
         })) : [{
           service_id: 999999,
           service_name: `Membership: ${activeMembership?.plan?.name || 'Privilege Membership'}`,
@@ -4608,6 +4618,8 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
             const isSelected = currentPlan?.id === plan.id;
             const cardPrice = plan.priceFormatted || ('₹' + Number(plan.price || 0).toLocaleString('en-IN'));
             const cardBenefits = Array.isArray(plan.benefits) ? plan.benefits : [];
+            const complimentaryServices = Array.isArray(plan.free_services) ? plan.free_services : [];
+            const complimentaryValue = complimentaryServices.reduce((sum, service) => sum + (Number(service.price) || 0), 0);
 
             return (
               <div
@@ -4786,7 +4798,26 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                         <span>{b}</span>
                       </li>
                     ))}
+                    {complimentaryServices.map((service) => (
+                      <li key={`free-service-${service.service_id}`} style={{
+                        fontSize: '10.5px',
+                        color: '#287448',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: '6px',
+                        lineHeight: 1.3
+                      }}>
+                        <span>• {service.service_name} — complimentary</span>
+                        <strong style={{ whiteSpace: 'nowrap' }}>{formatCurrency(Number(service.price) || 0)}</strong>
+                      </li>
+                    ))}
                   </ul>
+                  {complimentaryServices.length > 0 && (
+                    <div style={{ fontSize: '10px', color: complimentaryValue >= (Number(plan.price) || 0) ? '#287448' : '#78716C', textAlign: 'center', marginBottom: 8 }}>
+                      Free service value {formatCurrency(complimentaryValue)}{complimentaryValue >= (Number(plan.price) || 0) ? ' · exceeds membership price' : ''}
+                    </div>
+                  )}
 
                   {/* I'M INTERESTED / SELECT Button */}
                   <button
@@ -5760,10 +5791,14 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                 categoryName={activeCatConfig.title || selectedCategory.category_name}
                 serviceName={activeService.service_name}
                 durationMins={activeService.duration_mins || 45}
+                durationSuffix={activeMedia.spotlightCopy?.duration_suffix ?? 'Mins Session'}
+                benefitsHeading={activeMedia.spotlightCopy?.benefits_heading ?? 'Benefits :'}
+                priceNote={activeMedia.spotlightCopy?.price_note ?? '(plus taxes)'}
+                selectButtonText={activeMedia.spotlightCopy?.select_button_text ?? 'Select Service'}
                 price={activeService.price}
                 subtitle={activeMedia.subtitle || ''}
-                tag=""
-                downtime=""
+                tag={activeMedia.tag || ''}
+                downtime={activeMedia.downtime || ''}
                 vspBadges={activeMedia.vspBadges || []}
                 videoUrl={activeMedia.video}
                 heroImage={activeMedia.heroImage || activeMedia.image}
@@ -6692,7 +6727,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                             textTransform: 'uppercase',
                             fontFamily: 'var(--font-sans)'
                           }}>
-                            MEMBERSHIP PRIVILEGE
+                            {item.membership_benefit_service ? 'FREE MEMBERSHIP SERVICE' : 'MEMBERSHIP PRIVILEGE'}
                           </span>
                         )}
 
@@ -6731,6 +6766,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+                        {item.membership_benefit_service && <span style={{ fontSize: 10, color: '#78716C', textDecoration: 'line-through' }}>{formatCartCurrency(item.list_price)}</span>}
                         <span style={{ fontSize: '15px', fontWeight: '700', color: item.is_privilege ? '#9E7437' : '#1C1917' }}>
                           {item.is_privilege ? '₹0' : formatCartCurrency(item.price)}
                         </span>
@@ -7049,7 +7085,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                         <span>{s.service_name}</span>
                         {s.is_privilege && (
                           <span style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '6px', background: '#FAF3E3', border: '1px solid #D6A87C', color: '#9E7437', fontWeight: '700' }}>
-                            Membership Privilege
+                            {s.membership_benefit_service ? 'Free membership service' : 'Membership Privilege'}
                           </span>
                         )}
                         {s.is_repeat && (
@@ -7064,6 +7100,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                         </div>
                       )}
                     </div>
+                    {s.membership_benefit_service && <span style={{ color: 'var(--text-muted)', textDecoration: 'line-through', marginRight: 7 }}>{formatCurrency(s.list_price)}</span>}
                     <span style={{ fontWeight: '700', color: s.is_privilege ? '#9E7437' : 'var(--text-main)' }}>
                       {s.is_privilege ? '₹0' : formatCurrency(s.price)}
                     </span>

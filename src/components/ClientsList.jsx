@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, UserCheck, Eye, ArrowRight, AlertCircle, CheckCircle2, UserX } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 
-export default function ClientsList({ onOpenClient, onBackToDashboard }) {
+export default function ClientsList({ onOpenClient, onBackToDashboard, branding }) {
   const [clients, setClients] = useState([]);
   const [counts, setCounts] = useState({ total: 0, active: 0, inactive: 0 });
   const [loading, setLoading] = useState(true);
@@ -38,7 +38,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>Client Directory</h1>
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>{branding?.clients_heading || 'Client Directory'}</h1>
         </div>
       </div>
 
