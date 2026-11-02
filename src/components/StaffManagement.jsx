@@ -10,16 +10,45 @@ const teamMasterRequestError = (error) => /API endpoint not found/i.test(String(
   ? 'The backend on port 5001 is an older version. Stop it and restart the server from this project folder, then refresh the page.'
   : error?.message || 'Could not load Team Master data.';
 
-const SUGGESTED_STUDIO_DEPARTMENTS = [
-  'Skin & Aesthetic Care',
-  'Laser Treatments',
-  'Hair & Scalp Care',
-  'Salon & Beauty',
-  'Front Desk & Client Care',
-  'Operations & Administration'
-];
+function TeamHierarchyFlowChart({ locationName, branchUsers, departments, hierarchy, staff }) {
+  const admins = branchUsers.filter(user => user.role === 'admin');
+  const managers = branchUsers.filter(user => user.role === 'reception');
+  const normalize = value => String(value || '').trim().toLowerCase();
+  const positionMembers = position => position.assigned_staff_id
+    ? staff.filter(person => person.active === 1 && Number(person.staff_id) === Number(position.assigned_staff_id))
+    : staff.filter(person => person.active === 1 && normalize(person.department) === normalize(position.department_name) && normalize(person.role) === normalize(position.role_name) && normalize(person.designation) === normalize(position.designation_name));
+  const nodeStyle = { minWidth: 180, maxWidth: 290, padding: '10px 12px', background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 10, boxShadow: '0 3px 10px rgba(87,58,32,0.05)' };
+  const managerPositions = hierarchy.filter(position => /manager/i.test(`${position.role_name} ${position.designation_name}`));
+  const managerNames = [...new Set([
+    ...managers.map(person => person.name),
+    ...managerPositions.flatMap(position => positionMembers(position).map(person => person.name))
+  ].filter(Boolean))];
+  const levels = ['Head of Department', 'Senior', 'Junior', 'Associate'];
+  const positionCard = (position, level) => {
+    const members = positionMembers(position);
+    const names = members.length ? members.map(person => person.name).join(', ') : position.assigned_member_name || 'No team member assigned yet';
+    return <div key={position.hierarchy_id} style={{ ...nodeStyle, minWidth: 0, width: '100%', padding: '8px 9px', boxSizing: 'border-box', boxShadow: 'none' }}><div style={{ color: '#8C6228', fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase' }}>{level}</div><div style={{ marginTop: 3, color: '#292524', fontSize: 11.5, fontWeight: 700 }}>{position.role_name}</div><div style={{ marginTop: 5, paddingTop: 5, borderTop: '1px solid #F0E7D9', color: members.length ? '#57534E' : '#A8A29E', fontSize: 10.5, overflowWrap: 'anywhere' }}>{names}</div></div>;
+  };
+  const emptyPositionCard = level => <div key={`empty-${level}`} style={{ ...nodeStyle, minWidth: 0, width: '100%', padding: '8px 9px', boxSizing: 'border-box', boxShadow: 'none', borderStyle: 'dashed', textAlign: 'center' }}><strong style={{ display: 'block', color: '#57534E', fontSize: 11 }}>{level}</strong><span style={{ display: 'block', marginTop: 3, color: '#A8A29E', fontSize: 10 }}>Not assigned yet</span></div>;
+  const departmentCard = department => <div key={department.department_id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 7, minWidth: 0, padding: 12, border: '1px solid #EADBBE', borderRadius: 13, background: '#FFFCF7' }}>
+    <strong style={{ color: '#72501F', fontSize: 12.5, textAlign: 'center' }}>{department.department_name}</strong>
+    {levels.map((level, index) => {
+      const positions = hierarchy.filter(position => Number(position.department_id) === Number(department.department_id) && normalize(position.designation_name) === normalize(level) && !/manager/i.test(`${position.role_name} ${position.designation_name}`));
+      return <React.Fragment key={level}>{index > 0 && <div aria-hidden="true" style={{ height: 10, width: 1, alignSelf: 'center', background: '#D6C19B' }} />}<div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>{positions.length ? positions.map(position => positionCard(position, level)) : emptyPositionCard(level)}</div></React.Fragment>;
+    })}
+  </div>;
+  return <section aria-label="Branch reporting flow chart" style={{ padding: 18, border: '1px solid #EADBBE', borderRadius: 14, background: '#FFFDF9', overflowX: 'auto' }}>
+    <div style={{ marginBottom: 14 }}><h2 style={{ margin: 0, color: '#292524', fontSize: 16 }}>Branch team reporting flow</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 12 }}>Branch Admin → Manager → Department → Head of Department → Senior → Junior → Associate</p>{locationName && <span style={{ color: '#9F7335', fontSize: 11, fontWeight: 700 }}>{locationName}</span>}</div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 8, width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '6px 0' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>{admins.length ? admins.map(admin => <div key={admin.user_id} style={{ ...nodeStyle, flex: '1 1 180px', textAlign: 'center', borderColor: '#C9A86C' }}><div style={{ color: '#8C6228', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Branch Admin</div><strong style={{ display: 'block', marginTop: 4, fontSize: 12.5 }}>{admin.name}</strong></div>) : <div style={nodeStyle}>No Branch Admin account is registered for this branch.</div>}</div>
+      <div aria-hidden="true" style={{ height: 14, width: 1, alignSelf: 'center', background: '#D6C19B' }} />
+      <div style={{ alignSelf: 'center', width: 'min(100%, 290px)', boxSizing: 'border-box', padding: 10, border: '1px solid #D6C19B', borderRadius: 12, background: '#FAF6EE', textAlign: 'center' }}><div style={{ color: '#8C6228', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Manager</div><div style={{ marginTop: 5, color: managerNames.length ? '#292524' : '#A8A29E', fontSize: 12, fontWeight: 650 }}>{managerNames.length ? managerNames.join(', ') : 'Not assigned yet'}</div></div>
+      {departments.length > 0 && <><div aria-hidden="true" style={{ height: 14, width: 1, alignSelf: 'center', background: '#D6C19B' }} /><div style={{ color: '#8A8175', textAlign: 'center', fontSize: 11, fontWeight: 700 }}>Department teams</div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 205px), 1fr))', alignItems: 'start', gap: 10 }}>{departments.map(departmentCard)}</div></>}
+    </div>
+  </section>;
+}
 
-export default function StaffManagement({ branding, currentUser, initialMasterView = false, masterOptionType = null }) {
+export default function StaffManagement({ branding, currentUser, activeLocation, initialMasterView = false, masterOptionType = null }) {
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ open: false, mode: 'create', data: null });
@@ -34,8 +63,11 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   const [teamOptions, setTeamOptions] = useState({ roles: [], designations: [] });
   const [teamDepartments, setTeamDepartments] = useState([]);
   const [teamHierarchy, setTeamHierarchy] = useState([]);
+  const [teamOrgUsers, setTeamOrgUsers] = useState([]);
+  const [teamLocationId, setTeamLocationId] = useState(String(activeLocation?.location_id || currentUser?.location_id || ''));
   const [newDepartmentName, setNewDepartmentName] = useState('');
-  const [hierarchyDraft, setHierarchyDraft] = useState({ department_id: '', role_option_id: '', designation_option_id: '', reports_to_staff_id: '' });
+  const [hierarchyDraft, setHierarchyDraft] = useState({ department_id: '', role_option_id: '', designation_option_id: '', assigned_staff_id: '', reports_to_hierarchy_id: '', reports_to_staff_id: '', reports_to_user_id: '', reports_to_user_ids: [] });
+  const [editingHierarchyId, setEditingHierarchyId] = useState(null);
   const [showTeamMaster, setShowTeamMaster] = useState(false);
   const [newTeamOption, setNewTeamOption] = useState({ role: '', designation: '' });
   const [savingTeamOption, setSavingTeamOption] = useState('');
@@ -80,9 +112,11 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   const [incentivePercentage, setIncentivePercentage] = useState('');
 
   const fetchStaff = async () => {
+    if (!teamLocationId) { setStaff([]); return; }
     try {
       setLoading(true);
-      const res = await apiRequest('/admin/staff');
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      const res = await apiRequest(`/admin/staff${locationQuery}`);
       setStaff(currentStaff => (res.staff || []).map(nextStaff => {
         const current = currentStaff.find(item => item.staff_id === nextStaff.staff_id);
         // Keep the just-saved photo visible if an older API response omits this field.
@@ -98,8 +132,10 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   };
 
   const fetchTeamOptions = async () => {
+    if (!teamLocationId) { setTeamOptions({ roles: [], designations: [] }); return; }
     try {
-      const response = await apiRequest('/admin/team-options');
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      const response = await apiRequest(`/admin/team-options${locationQuery}`);
       const roles = response.roles || [];
       const designations = response.designations || [];
       setTeamOptions({ roles, designations });
@@ -113,25 +149,53 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   };
 
   const fetchTeamDepartments = async () => {
+    if (!teamLocationId) { setTeamDepartments([]); return; }
     try {
-      const response = await apiRequest('/admin/team-departments');
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      const response = await apiRequest(`/admin/team-departments${locationQuery}`);
       setTeamDepartments(response.departments || []);
     } catch (err) { console.error('Failed to load departments:', err); setTeamMasterError(teamMasterRequestError(err)); }
   };
 
   const fetchTeamHierarchy = async () => {
+    if (!teamLocationId) { setTeamHierarchy([]); return; }
     try {
-      const response = await apiRequest('/admin/team-hierarchy');
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      const response = await apiRequest(`/admin/team-hierarchy${locationQuery}`);
       setTeamHierarchy(response.hierarchy || []);
     } catch (err) { console.error('Failed to load team hierarchy:', err); setTeamMasterError(teamMasterRequestError(err)); }
   };
 
+  const fetchTeamOrgUsers = async () => {
+    if (!teamLocationId) { setTeamOrgUsers([]); return; }
+    try {
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      const response = await apiRequest(`/admin/team-org-chart${locationQuery}`);
+      setTeamOrgUsers(response.branch_users || []);
+    } catch (err) { console.error('Failed to load branch managers:', err); setTeamMasterError(teamMasterRequestError(err)); }
+  };
+
   useEffect(() => {
-    fetchStaff();
+    if (currentUser?.role !== 'master_admin') {
+      fetchTeamOptions();
+      fetchTeamDepartments();
+    }
+  }, []);
+
+  useEffect(() => {
+    const nextLocationId = currentUser?.role === 'master_admin'
+      ? (activeLocation?.location_id || '')
+      : (currentUser?.location_id || activeLocation?.location_id || '');
+    if (nextLocationId && String(nextLocationId) !== teamLocationId) setTeamLocationId(String(nextLocationId));
+  }, [activeLocation?.location_id, currentUser?.location_id, currentUser?.role]);
+
+  useEffect(() => {
     fetchTeamOptions();
     fetchTeamDepartments();
+    fetchStaff();
     fetchTeamHierarchy();
-  }, []);
+    fetchTeamOrgUsers();
+  }, [teamLocationId]);
 
   useEffect(() => {
     setShowTeamMaster(Boolean(initialMasterView));
@@ -216,7 +280,7 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
     try {
       await apiRequest('/admin/team-options', {
         method: 'POST',
-        body: JSON.stringify({ option_type: type, option_name: optionName })
+        body: JSON.stringify({ option_type: type, option_name: optionName, location_id: teamLocationId })
       });
       setNewTeamOption(current => ({ ...current, [type]: '' }));
       await fetchTeamOptions();
@@ -230,7 +294,8 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   const handleRemoveTeamOption = async (option) => {
     setTeamMasterError('');
     try {
-      await apiRequest(`/admin/team-options/${option.option_id}`, { method: 'DELETE' });
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      await apiRequest(`/admin/team-options/${option.option_id}${locationQuery}`, { method: 'DELETE' });
       await fetchTeamOptions();
     } catch (err) {
       setTeamMasterError(err.message || 'Could not remove this option.');
@@ -242,7 +307,7 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
     if (!department_name) return;
     setTeamMasterError('');
     try {
-      await apiRequest('/admin/team-departments', { method: 'POST', body: JSON.stringify({ department_name }) });
+      await apiRequest('/admin/team-departments', { method: 'POST', body: JSON.stringify({ department_name, location_id: teamLocationId }) });
       setNewDepartmentName(current => current.trim().toLowerCase() === department_name.toLowerCase() ? '' : current);
       await fetchTeamDepartments();
     } catch (err) { setTeamMasterError(err.message || 'Could not add department.'); }
@@ -256,7 +321,8 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   const removeDepartment = async (item) => {
     setTeamMasterError('');
     try {
-      await apiRequest(`/admin/team-departments/${item.department_id}`, { method: 'DELETE' });
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      await apiRequest(`/admin/team-departments/${item.department_id}${locationQuery}`, { method: 'DELETE' });
       await fetchTeamDepartments();
     } catch (err) { setTeamMasterError(err.message || 'Could not remove department.'); }
   };
@@ -265,8 +331,10 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
     event.preventDefault();
     setTeamMasterError('');
     try {
-      await apiRequest('/admin/team-hierarchy', { method: 'POST', body: JSON.stringify(hierarchyDraft) });
-      setHierarchyDraft(current => ({ ...current, role_option_id: '', designation_option_id: '', reports_to_staff_id: '' }));
+      const endpoint = editingHierarchyId ? `/admin/team-hierarchy/${editingHierarchyId}` : '/admin/team-hierarchy';
+      await apiRequest(endpoint, { method: editingHierarchyId ? 'PUT' : 'POST', body: JSON.stringify({ ...hierarchyDraft, location_id: teamLocationId }) });
+      setEditingHierarchyId(null);
+      setHierarchyDraft(current => ({ ...current, role_option_id: '', designation_option_id: '', assigned_staff_id: '', reports_to_hierarchy_id: '', reports_to_staff_id: '', reports_to_user_id: '', reports_to_user_ids: [] }));
       await fetchTeamHierarchy();
     } catch (err) { setTeamMasterError(err.message || 'Could not save reporting line.'); }
   };
@@ -274,7 +342,9 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   const removeHierarchyPosition = async (item) => {
     setTeamMasterError('');
     try {
-      await apiRequest(`/admin/team-hierarchy/${item.hierarchy_id}`, { method: 'DELETE' });
+      const locationQuery = currentUser?.role === 'master_admin' ? `?location_id=${encodeURIComponent(teamLocationId)}` : '';
+      await apiRequest(`/admin/team-hierarchy/${item.hierarchy_id}${locationQuery}`, { method: 'DELETE' });
+      if (editingHierarchyId === item.hierarchy_id) setEditingHierarchyId(null);
       await fetchTeamHierarchy();
     } catch (err) { setTeamMasterError(err.message || 'Could not remove this position.'); }
   };
@@ -499,12 +569,51 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
     }
   };
 
-  const getPositionHierarchy = (departmentName, roleName, designationName) => teamHierarchy.find(item =>
-    item.department_name.toLowerCase() === String(departmentName || '').trim().toLowerCase() &&
-    item.role_name.toLowerCase() === String(roleName || '').trim().toLowerCase() &&
-    item.designation_name.toLowerCase() === String(designationName || '').trim().toLowerCase()
-  );
-  const assignedPositionHierarchy = getPositionHierarchy(department, role, designation);
+  const getPositionHierarchy = (departmentName, roleName, designationName, staffId = null) => (staffId
+    ? teamHierarchy.find(item => Number(item.assigned_staff_id) === Number(staffId))
+    : null) || teamHierarchy.find(item =>
+      item.department_name.toLowerCase() === String(departmentName || '').trim().toLowerCase() &&
+      item.role_name.toLowerCase() === String(roleName || '').trim().toLowerCase() &&
+      item.designation_name.toLowerCase() === String(designationName || '').trim().toLowerCase()
+    );
+  const assignedPositionHierarchy = getPositionHierarchy(department, role, designation, modal.data?.staff_id);
+  const assignedPositionSupervisor = assignedPositionHierarchy?.reports_to_manager_name || assignedPositionHierarchy?.reports_to_name;
+  const hierarchyDepartmentName = teamDepartments.find(item => String(item.department_id) === String(hierarchyDraft.department_id))?.department_name || '';
+  const hierarchyDepartmentStaff = staff.filter(person => person.active === 1 && String(person.department || '').trim().toLowerCase() === hierarchyDepartmentName.trim().toLowerCase());
+  const assignedElsewhere = new Set(teamHierarchy.filter(item => Number(item.hierarchy_id) !== Number(editingHierarchyId) && item.assigned_staff_id).map(item => Number(item.assigned_staff_id)));
+  const hierarchyAssignableStaff = hierarchyDepartmentStaff;
+  const hierarchyStaffPosition = person => teamHierarchy.find(item => Number(item.assigned_staff_id) === Number(person.staff_id));
+  const hierarchyCrossDepartmentManagers = staff.filter(person => {
+    if (person.active !== 1 || String(person.department || '').trim().toLowerCase() === hierarchyDepartmentName.trim().toLowerCase()) return false;
+    const position = hierarchyStaffPosition(person);
+    return Boolean(position?.reports_to_user_id && /manager/i.test(`${position.role_name} ${position.designation_name}`));
+  });
+  const hierarchyCrossDepartmentManagerPositions = teamHierarchy.filter(item => String(item.department_id) !== String(hierarchyDraft.department_id) && item.reports_to_user_id && /manager/i.test(`${item.role_name} ${item.designation_name}`));
+  const hierarchyDepartmentPositions = teamHierarchy.filter(item => String(item.department_id) === String(hierarchyDraft.department_id) && Number(item.hierarchy_id) !== Number(editingHierarchyId));
+  const hierarchyPersonLabel = person => {
+    const position = teamHierarchy.find(item => Number(item.assigned_staff_id) === Number(person.staff_id));
+    return position ? `${person.name} · ${position.designation_name} (${position.role_name})` : `${person.name}${person.designation || person.role ? ` · ${person.designation || person.role}` : ''}`;
+  };
+  const hierarchyManagers = teamOrgUsers.filter(user => user.role === 'reception' || user.role === 'admin');
+  const managerDraftRole = teamOptions.roles.find(item => Number(item.option_id) === Number(hierarchyDraft.role_option_id))?.option_name || '';
+  const managerDraftDesignation = teamOptions.designations.find(item => Number(item.option_id) === Number(hierarchyDraft.designation_option_id))?.option_name || '';
+  const isManagerHierarchyDraft = /manager/i.test(`${managerDraftRole} ${managerDraftDesignation}`);
+  const hierarchyBranchAdmins = hierarchyManagers.filter(user => user.role === 'admin');
+  const selectedReportingPosition = teamHierarchy.find(item => Number(item.hierarchy_id) === Number(hierarchyDraft.reports_to_hierarchy_id));
+  const hierarchyReportsToValue = hierarchyDraft.reports_to_hierarchy_id
+    ? selectedReportingPosition?.assigned_staff_id ? `staff:${selectedReportingPosition.assigned_staff_id}` : `position:${hierarchyDraft.reports_to_hierarchy_id}`
+    : hierarchyDraft.reports_to_user_id
+      ? `manager:${hierarchyDraft.reports_to_user_id}`
+      : hierarchyDraft.reports_to_staff_id ? `staff:${hierarchyDraft.reports_to_staff_id}` : '';
+  const unassignedTeamMembers = staff.filter(person => person.active === 1 && !String(person.department || '').trim());
+  const activeLocationName = activeLocation?.name || '';
+  const departmentsMasterPanel = <div key="departments-master" style={{ minWidth: 0, padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Departments</strong><span style={{ fontSize: 11, color: '#A8A29E' }}>{teamDepartments.length} departments</span></div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 120, overflowY: 'auto', margin: '10px 0', paddingRight: 4 }}>
+      {teamDepartments.length ? teamDepartments.map(item => <div key={item.department_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', background: '#FAF8F5', borderRadius: 7, fontSize: 12.5, color: '#57534E' }}><span>{item.department_name}</span><button type="button" aria-label={`Remove ${item.department_name}`} onClick={() => removeDepartment(item)} style={{ border: 0, padding: 3, color: '#A8A29E', background: 'transparent', cursor: 'pointer' }}><X size={14} /></button></div>) : <div style={{ padding: '8px 2px', color: '#A8A29E', fontSize: 12 }}>No departments yet.</div>}
+    </div>
+    <form onSubmit={addDepartment} style={{ display: 'flex', gap: 7 }}><input aria-label="New department" value={newDepartmentName} onChange={event => setNewDepartmentName(event.target.value)} maxLength={60} placeholder="e.g. Clinic, Front Desk, Operations" style={{ ...fieldInput, minWidth: 0, padding: '9px 10px', fontSize: 12 }} /><button type="submit" disabled={!newDepartmentName.trim()} style={{ flexShrink: 0, padding: '8px 11px', border: '1px solid #B88B4A', borderRadius: 7, color: '#FFFFFF', background: '#B88B4A', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: !newDepartmentName.trim() ? 0.55 : 1 }}>Add</button></form>
+  </div>;
 
   const handleToggleActive = async (s) => {
     try {
@@ -519,7 +628,7 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '28px', paddingTop: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>
@@ -529,7 +638,7 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
 
       </div>
 
-      {canManageTeamMaster && initialMasterView && <section className="card" style={{ padding: '18px 20px', border: '1px solid #EADBBE', borderRadius: 14, background: '#FFFDF9' }}>
+      {canManageTeamMaster && initialMasterView && <section className="card" style={{ padding: '26px 22px', border: '1px solid #EADBBE', borderRadius: 14, background: '#FFFDF9' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div>
             <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, fontSize: 16, color: '#292524' }}><Settings size={17} color="#9F7335" />{masterOptionType === 'designation' ? 'Designation Master' : 'Role Hierarchy Master'}</h2>
@@ -541,11 +650,15 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
         </div>
         {showTeamMaster && <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F0E7D9' }}>
           {teamMasterError && <div role="alert" style={{ marginBottom: 12, padding: '9px 11px', color: '#991B1B', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, fontSize: 12.5 }}>{teamMasterError}</div>}
+          {initialMasterView && activeLocation?.name && <div style={{ marginBottom: 14, color: '#72501F', fontSize: 12.5, fontWeight: 700 }}>Branch: {activeLocation.name}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: 16 }}>
-            {[
+            {(masterOptionType === 'designation' ? [
+              { type: 'designation', title: 'Designations', examples: 'Senior, Junior, Lead', items: teamOptions.designations },
+              { type: 'role', title: 'Roles', examples: 'Manager, Laser Therapist, Aesthetician', items: teamOptions.roles }
+            ] : [
               { type: 'role', title: 'Roles', examples: 'Manager, Laser Therapist, Aesthetician', items: teamOptions.roles },
               { type: 'designation', title: 'Designations', examples: 'Senior, Junior, Lead', items: teamOptions.designations }
-            ].filter(group => !masterOptionType || group.type === masterOptionType).map(group => <div key={group.type} style={{ minWidth: 0, padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
+            ]).filter(group => !masterOptionType || (masterOptionType === 'designation' && (group.type === 'designation' || group.type === 'role'))).flatMap(group => { const optionCard = <div key={group.type} style={{ minWidth: 0, padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                 <strong style={{ fontSize: 13.5, color: '#292524' }}>{group.title}</strong>
                 <span style={{ fontSize: 11, color: '#A8A29E' }}>{group.items.length} options</span>
@@ -560,42 +673,40 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
                 <input aria-label={`New ${group.type}`} value={newTeamOption[group.type]} onChange={event => setNewTeamOption(current => ({ ...current, [group.type]: event.target.value }))} maxLength={60} placeholder={group.examples} style={{ ...fieldInput, minWidth: 0, padding: '9px 10px', fontSize: 12 }} />
                 <button type="submit" disabled={!newTeamOption[group.type].trim() || !!savingTeamOption} style={{ flexShrink: 0, padding: '8px 11px', border: '1px solid #B88B4A', borderRadius: 7, color: '#FFFFFF', background: '#B88B4A', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: !newTeamOption[group.type].trim() || !!savingTeamOption ? 0.55 : 1 }}>{savingTeamOption === group.type ? 'Saving…' : 'Add'}</button>
               </form>
-            </div>)}
+            </div>; return group.type === 'role' && masterOptionType === 'designation' ? [optionCard, departmentsMasterPanel] : [optionCard]; })}
           </div>
-          {masterOptionType === 'role' && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 16, marginTop: 16 }}>
+          {masterOptionType === 'role' && <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, marginTop: 16 }}>
             <div style={{ padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Departments</strong><span style={{ fontSize: 11, color: '#A8A29E' }}>{teamDepartments.length} departments</span></div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 120, overflowY: 'auto', margin: '10px 0', paddingRight: 4 }}>
-                {teamDepartments.length ? teamDepartments.map(item => <div key={item.department_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 9px', background: '#FAF8F5', borderRadius: 7, fontSize: 12.5, color: '#57534E' }}><span>{item.department_name}</span><button type="button" aria-label={`Remove ${item.department_name}`} onClick={() => removeDepartment(item)} style={{ border: 0, padding: 3, color: '#A8A29E', background: 'transparent', cursor: 'pointer' }}><X size={14} /></button></div>) : <div style={{ padding: '8px 2px', color: '#A8A29E', fontSize: 12 }}>No departments yet.</div>}
-              </div>
-              <form onSubmit={addDepartment} style={{ display: 'flex', gap: 7 }}><input aria-label="New department" value={newDepartmentName} onChange={event => setNewDepartmentName(event.target.value)} maxLength={60} placeholder="e.g. Clinic, Front Desk, Operations" style={{ ...fieldInput, minWidth: 0, padding: '9px 10px', fontSize: 12 }} /><button type="submit" disabled={!newDepartmentName.trim()} style={{ flexShrink: 0, padding: '8px 11px', border: '1px solid #B88B4A', borderRadius: 7, color: '#FFFFFF', background: '#B88B4A', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: !newDepartmentName.trim() ? 0.55 : 1 }}>Add</button></form>
-              <div style={{ marginTop: 14 }}>
-                <div style={{ marginBottom: 8, color: '#78716C', fontSize: 11.5, fontWeight: 600 }}>Suggested studio categories</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {SUGGESTED_STUDIO_DEPARTMENTS.map(name => {
-                    const exists = teamDepartments.some(item => item.department_name.toLowerCase() === name.toLowerCase());
-                    return <button key={name} type="button" disabled={exists} onClick={() => saveDepartment(name)} style={{ padding: '6px 9px', border: '1px solid #EADBBE', borderRadius: 20, color: exists ? '#78716C' : '#8C6228', background: exists ? '#F5F2ED' : '#FFFCF7', fontSize: 11, cursor: exists ? 'default' : 'pointer', opacity: exists ? 0.7 : 1 }}>{exists ? '✓ ' : '+ '}{name}</button>;
-                  })}
-                </div>
-              </div>
-            </div>
-            <div style={{ padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
-              <div style={{ marginBottom: 10 }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Team Reporting Hierarchy</strong><p style={{ margin: '4px 0 0', fontSize: 11.5, color: '#8A8175' }}>Assign each role and designation to a team member in the same department.</p></div>
-              <form onSubmit={addHierarchyPosition} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 8, alignItems: 'end' }}>
-                <label style={fieldLabel}>Department<select required value={hierarchyDraft.department_id} onChange={event => setHierarchyDraft(current => ({ ...current, department_id: event.target.value, reports_to_staff_id: '' }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Select department</option>{teamDepartments.map(item => <option key={item.department_id} value={item.department_id}>{item.department_name}</option>)}</select></label>
+              <div style={{ marginBottom: 10 }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Team Reporting Hierarchy</strong><p style={{ margin: '4px 0 0', fontSize: 11.5, color: '#8A8175' }}>Create department positions now; assign team members and supervisors now or later.</p></div>
+              {unassignedTeamMembers.length > 0 && <div style={{ marginBottom: 10, padding: '8px 10px', border: '1px solid #F0D8A8', borderRadius: 8, background: '#FFFAEB', color: '#785B25', fontSize: 11.5 }}><strong>Assign these team members to a department first:</strong> {unassignedTeamMembers.map(person => person.name).join(', ')}. Edit them under Team; they will then appear in the matching Reports to list.</div>}
+              <form className="team-hierarchy-position-form" onSubmit={addHierarchyPosition} style={{ display: 'grid', gap: 10, alignItems: 'start' }}>
+                <label style={fieldLabel}>Department<select required value={hierarchyDraft.department_id} onChange={event => setHierarchyDraft(current => ({ ...current, department_id: event.target.value, assigned_staff_id: '', reports_to_hierarchy_id: '', reports_to_staff_id: '', reports_to_user_id: '', reports_to_user_ids: [] }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Select department</option>{teamDepartments.map(item => <option key={item.department_id} value={item.department_id}>{item.department_name}</option>)}</select></label>
                 <label style={fieldLabel}>Role<select required value={hierarchyDraft.role_option_id} onChange={event => setHierarchyDraft(current => ({ ...current, role_option_id: event.target.value }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Select role</option>{teamOptions.roles.map(item => <option key={item.option_id} value={item.option_id}>{item.option_name}</option>)}</select></label>
                 <label style={fieldLabel}>Designation<select required value={hierarchyDraft.designation_option_id} onChange={event => setHierarchyDraft(current => ({ ...current, designation_option_id: event.target.value }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Select designation</option>{teamOptions.designations.map(item => <option key={item.option_id} value={item.option_id}>{item.option_name}</option>)}</select></label>
-                <label style={fieldLabel}>Reports to<select value={hierarchyDraft.reports_to_staff_id} onChange={event => setHierarchyDraft(current => ({ ...current, reports_to_staff_id: event.target.value }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Top level</option>{staff.filter(person => person.active === 1 && person.department?.toLowerCase() === teamDepartments.find(item => String(item.department_id) === String(hierarchyDraft.department_id))?.department_name?.toLowerCase()).map(person => <option key={person.staff_id} value={person.staff_id}>{person.name} · {person.designation || person.role}</option>)}</select>{hierarchyDraft.department_id && !staff.some(person => person.active === 1 && person.department?.toLowerCase() === teamDepartments.find(item => String(item.department_id) === String(hierarchyDraft.department_id))?.department_name?.toLowerCase()) && <span style={{ fontSize: 10.5, color: '#8A8175', fontWeight: 400 }}>Add a team member to this department first.</span>}</label>
-                <button type="submit" disabled={!hierarchyDraft.department_id || !hierarchyDraft.role_option_id || !hierarchyDraft.designation_option_id} style={{ padding: '9px 12px', border: '1px solid #B88B4A', borderRadius: 7, color: '#FFFFFF', background: '#B88B4A', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Save reporting line</button>
+                <label style={fieldLabel}>Team member assigned to this position<select value={hierarchyDraft.assigned_staff_id ? String(hierarchyDraft.assigned_staff_id) : ''} onChange={event => setHierarchyDraft(current => ({ ...current, assigned_staff_id: event.target.value, reports_to_staff_id: current.reports_to_staff_id === event.target.value ? '' : current.reports_to_staff_id }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Leave vacant and assign later</option>{hierarchyAssignableStaff.map(person => { const currentPosition = hierarchyStaffPosition(person); const unavailable = assignedElsewhere.has(Number(person.staff_id)); return <option key={person.staff_id} value={person.staff_id} disabled={unavailable}>{person.name}{person.designation || person.role ? ` · ${person.designation || person.role}` : ''}{currentPosition ? ` — assigned: ${currentPosition.designation_name}` : unavailable ? ' — already assigned' : ''}</option>; })}</select></label>
+                {isManagerHierarchyDraft ? <fieldset style={{ ...fieldLabel, gridColumn: '1 / -1', margin: 0, padding: 10, border: '1px solid #E9D9BD', borderRadius: 8 }}><legend style={{ padding: '0 5px' }}>Reports to all Branch Admins</legend><div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>{hierarchyBranchAdmins.map(person => <label key={person.user_id} style={{ display: 'inline-flex', flexDirection: 'row', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 500 }}><input type="checkbox" checked={(hierarchyDraft.reports_to_user_ids || []).map(Number).includes(Number(person.user_id)) || Number(hierarchyDraft.reports_to_user_id) === Number(person.user_id)} onChange={event => setHierarchyDraft(current => { const selected = new Set((current.reports_to_user_ids || (current.reports_to_user_id ? [current.reports_to_user_id] : [])).map(Number)); if (event.target.checked) selected.add(Number(person.user_id)); else selected.delete(Number(person.user_id)); const ids = [...selected]; return { ...current, reports_to_user_ids: ids, reports_to_user_id: ids[0] || '', reports_to_hierarchy_id: '', reports_to_staff_id: '' }; })} />{person.name}</label>)}</div></fieldset> : <label style={fieldLabel}>Reports to<select value={hierarchyReportsToValue} onChange={event => {
+                  const [type, id] = event.target.value.split(':');
+                  setHierarchyDraft(current => ({ ...current, reports_to_hierarchy_id: type === 'position' ? id : '', reports_to_staff_id: type === 'staff' ? id : '', reports_to_user_id: type === 'manager' ? id : '', reports_to_user_ids: type === 'manager' ? [id] : [] }));
+                }} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">No supervisor assigned yet</option>{hierarchyManagers.length > 0 && <optgroup label="Branch manager / admin">{hierarchyManagers.map(person => <option key={person.user_id} value={`manager:${person.user_id}`}>{person.name} · {person.role === 'admin' ? 'Branch Admin' : 'Branch Manager'}</option>)}</optgroup>}{hierarchyDepartmentStaff.filter(person => Number(person.staff_id) !== Number(hierarchyDraft.assigned_staff_id)).length > 0 && <optgroup label={`${hierarchyDepartmentName} team members`}>{hierarchyDepartmentStaff.filter(person => Number(person.staff_id) !== Number(hierarchyDraft.assigned_staff_id)).map(person => <option key={person.staff_id} value={`staff:${person.staff_id}`}>{hierarchyPersonLabel(person)}</option>)}</optgroup>}{hierarchyCrossDepartmentManagers.filter(person => Number(person.staff_id) !== Number(hierarchyDraft.assigned_staff_id)).length > 0 && <optgroup label="Managers in other departments">{hierarchyCrossDepartmentManagers.filter(person => Number(person.staff_id) !== Number(hierarchyDraft.assigned_staff_id)).map(person => <option key={person.staff_id} value={`staff:${person.staff_id}`}>{hierarchyPersonLabel(person)} · {person.department}</option>)}</optgroup>}{hierarchyCrossDepartmentManagerPositions.filter(item => !item.assigned_staff_id).length > 0 && <optgroup label="Vacant Manager positions">{hierarchyCrossDepartmentManagerPositions.filter(item => !item.assigned_staff_id).map(item => <option key={item.hierarchy_id} value={`position:${item.hierarchy_id}`}>{item.department_name} · {item.designation_name} ({item.role_name})</option>)}</optgroup>}{hierarchyDepartmentPositions.filter(item => !item.assigned_staff_id).length > 0 && <optgroup label="Vacant department positions">{hierarchyDepartmentPositions.filter(item => !item.assigned_staff_id).map(item => <option key={item.hierarchy_id} value={`position:${item.hierarchy_id}`}>{item.designation_name} · {item.role_name} — vacant</option>)}</optgroup>}</select></label>}
+                <div className="team-hierarchy-position-actions" style={{ display: 'flex', gap: 6 }}><button type="submit" disabled={!teamLocationId || !hierarchyDraft.department_id || !hierarchyDraft.role_option_id || !hierarchyDraft.designation_option_id} style={{ padding: '9px 12px', border: '1px solid #B88B4A', borderRadius: 7, color: '#FFFFFF', background: '#B88B4A', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{editingHierarchyId ? 'Save changes' : 'Save position'}</button>{editingHierarchyId && <button type="button" onClick={() => { setEditingHierarchyId(null); setHierarchyDraft({ department_id: '', role_option_id: '', designation_option_id: '', assigned_staff_id: '', reports_to_hierarchy_id: '', reports_to_staff_id: '', reports_to_user_id: '', reports_to_user_ids: [] }); }} style={{ padding: '9px 12px', border: '1px solid #E7E5E4', borderRadius: 7, color: '#57534E', background: '#FFFFFF', fontSize: 12, cursor: 'pointer' }}>Cancel</button>}</div>
               </form>
               <div aria-label="Configured designation hierarchy" style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto', marginTop: 12 }}>
-                {teamHierarchy.length ? teamHierarchy.map(item => <div key={item.hierarchy_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 9px', background: '#FAF8F5', borderRadius: 7, fontSize: 12, color: '#57534E' }}><span><strong>{item.department_name}</strong> · {item.designation_name} ({item.role_name}) → {item.reports_to_name ? `${item.reports_to_name} · ${item.reports_to_staff_designation || item.reports_to_staff_role}` : 'Top level'}</span><button type="button" aria-label={`Remove ${item.designation_name} hierarchy position`} onClick={() => removeHierarchyPosition(item)} style={{ border: 0, padding: 3, flexShrink: 0, color: '#A8A29E', background: 'transparent', cursor: 'pointer' }}><X size={14} /></button></div>) : <div style={{ color: '#A8A29E', fontSize: 12 }}>No reporting lines configured yet.</div>}
+                {teamHierarchy.length ? teamHierarchy.map(item => {
+                  const parentName = item.reports_to_manager_name || item.reports_to_name;
+                  const members = item.assigned_staff_id
+                    ? staff.filter(person => person.active === 1 && Number(person.staff_id) === Number(item.assigned_staff_id))
+                    : staff.filter(person => person.active === 1 && person.department?.toLowerCase() === item.department_name.toLowerCase() && person.role?.toLowerCase() === item.role_name.toLowerCase() && person.designation?.toLowerCase() === item.designation_name.toLowerCase());
+                  const reportsToLabel = item.reports_to_manager_name ? `${item.reports_to_manager_name} · Manager` : item.reports_to_name ? `${item.reports_to_name} · ${item.reports_to_staff_designation || item.reports_to_staff_role}` : item.reports_to_id ? `${item.reports_to_designation} · ${item.reports_to_role}` : 'Top level';
+                  return <div key={item.hierarchy_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 9px', background: '#FAF8F5', borderRadius: 7, fontSize: 12, color: '#57534E' }}><span><strong>{item.department_name}</strong> · {item.designation_name} ({item.role_name})<br /><span style={{ color: '#8A8175', fontSize: 11 }}>{members.length ? `Assigned to: ${members.map(person => person.name).join(', ')}` : 'No team member assigned to this position'}</span><br /><span style={{ color: '#8A8175', fontSize: 11 }}>Reports to: {reportsToLabel}</span></span><div style={{ display: 'flex', gap: 4, flexShrink: 0 }}><button type="button" aria-label={`Edit ${item.designation_name} hierarchy position`} onClick={() => { const parentPosition = teamHierarchy.find(parent => Number(parent.hierarchy_id) === Number(item.reports_to_id)); setEditingHierarchyId(item.hierarchy_id); setHierarchyDraft({ department_id: String(item.department_id), role_option_id: String(item.role_option_id), designation_option_id: String(item.designation_option_id), assigned_staff_id: item.assigned_staff_id ? String(item.assigned_staff_id) : '', reports_to_hierarchy_id: parentPosition && !parentPosition.assigned_staff_id ? String(parentPosition.hierarchy_id) : '', reports_to_staff_id: item.reports_to_staff_id ? String(item.reports_to_staff_id) : parentPosition?.assigned_staff_id ? String(parentPosition.assigned_staff_id) : '', reports_to_user_id: item.reports_to_user_id ? String(item.reports_to_user_id) : '' }); }} style={{ border: 0, padding: 3, color: '#8C6228', background: 'transparent', cursor: 'pointer' }}><Edit2 size={14} /></button><button type="button" aria-label={`Remove ${item.designation_name} hierarchy position`} onClick={() => removeHierarchyPosition(item)} style={{ border: 0, padding: 3, color: '#A8A29E', background: 'transparent', cursor: 'pointer' }}><X size={14} /></button></div></div>;
+                }) : <div style={{ color: '#A8A29E', fontSize: 12 }}>No reporting lines configured yet.</div>}
               </div>
             </div>
           </div>}
           <p style={{ margin: '12px 0 0', fontSize: 11.5, color: '#8A8175' }}>Removing an option hides it from new selections. Existing team member records keep their saved values.</p>
         </div>}
       </section>}
+
+      {teamLocationId && !loading && initialMasterView && masterOptionType === 'role' && <TeamHierarchyFlowChart locationName={activeLocationName} branchUsers={teamOrgUsers} departments={teamDepartments} hierarchy={teamHierarchy} staff={staff} />}
 
       {/* Staff Grid */}
       {!initialMasterView && (loading ? (
@@ -645,6 +756,15 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
           </button>
           {staff.map(s => {
             const addressText = [s.address, s.city, s.state, s.pincode].filter(Boolean).join(', ');
+            const hierarchyAssignment = teamHierarchy.find(item => Number(item.assigned_staff_id) === Number(s.staff_id));
+            const parentHierarchy = hierarchyAssignment?.reports_to_id
+              ? teamHierarchy.find(item => Number(item.hierarchy_id) === Number(hierarchyAssignment.reports_to_id))
+              : null;
+            const assignedSupervisor = hierarchyAssignment?.reports_to_manager_name || hierarchyAssignment?.reports_to_name || parentHierarchy?.assigned_member_name || (parentHierarchy ? `${parentHierarchy.designation_name} · ${parentHierarchy.role_name}` : '');
+            const displayedDesignation = hierarchyAssignment?.designation_name || s.designation;
+            const displayedRole = hierarchyAssignment?.role_name || s.role;
+            const displayedDepartment = hierarchyAssignment?.department_name || s.department;
+            const designationLabel = displayedDesignation || (s.department ? 'Not assigned in hierarchy' : 'Department not assigned');
             return (
               <div
                 key={s.staff_id}
@@ -690,8 +810,9 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
                         <h2 style={{ fontSize: '21px', color: '#1C1917', fontWeight: '700', margin: 0, lineHeight: 1.3, overflowWrap: 'anywhere' }}>
                           {s.name}
                         </h2>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7, fontSize: 14, color: '#8C6228', fontWeight: 700, lineHeight: 1.35 }}><BriefcaseBusiness size={15} aria-hidden="true" style={{ flexShrink: 0 }} /><span>{s.designation || 'Designation not added'}</span></div>
-                        <div style={{ marginTop: 5, color: '#78716C', fontSize: 12 }}>{s.role || 'Role not added'}{s.department ? ` · ${s.department}` : ''}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 7, fontSize: 14, color: '#8C6228', fontWeight: 700, lineHeight: 1.35 }}><BriefcaseBusiness size={15} aria-hidden="true" style={{ flexShrink: 0 }} /><span>{designationLabel}</span></div>
+                        <div style={{ marginTop: 5, color: '#78716C', fontSize: 12 }}>{displayedRole || 'Role not added'}{displayedDepartment ? ` · ${displayedDepartment}` : ''}</div>
+                        {hierarchyAssignment && <div style={{ marginTop: 5, color: '#8A8175', fontSize: 11.5, lineHeight: 1.4 }}>Reports to: {assignedSupervisor || 'Not assigned'}</div>}
                       </div>
                     </div>
 
@@ -825,7 +946,7 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
               {s.photo_url && <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 14px' }}><img src={s.photo_url} alt={`${s.name} profile`} style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', border: '1px solid #EADBBE' }} /></div>}
               {detailRow('Phone', s.phone ? formatPhone(s.phone) : 'Not added')}
               {s.department && detailRow('Department', s.department)}
-              {s.department && getPositionHierarchy(s.department, s.role, s.designation) && detailRow('Reports to', getPositionHierarchy(s.department, s.role, s.designation).reports_to_name || 'Top level')}
+              {s.department && getPositionHierarchy(s.department, s.role, s.designation, s.staff_id) && detailRow('Reports to', getPositionHierarchy(s.department, s.role, s.designation, s.staff_id).reports_to_manager_name || getPositionHierarchy(s.department, s.role, s.designation, s.staff_id).reports_to_name || 'Top level')}
               {detailRow('Compensation', incentive ? `Base ${formatCurrency(salary)} + ${pct}% incentive` : `Fixed salary: ${formatCurrency(salary)}/mo`)}
               <h3 style={{ margin: '20px 0 4px', fontSize: '12px', color: '#78716C', letterSpacing: '0.05em' }}>KYC & IDENTIFICATION · {kycComplete ? 'VERIFIED' : 'PENDING'}</h3>
               {detailRow('PAN', s.pan_number || 'Not added')}
@@ -1172,8 +1293,8 @@ export default function StaffManagement({ branding, currentUser, initialMasterVi
                 </label>
                 {department && role && designation && <div role="status" style={{ padding: '10px 12px', border: `1px solid ${assignedPositionHierarchy ? '#D8C49E' : '#E7E5E4'}`, borderRadius: 8, background: assignedPositionHierarchy ? '#FAF6EE' : '#FAFAF9', color: assignedPositionHierarchy ? '#72501F' : '#78716C', fontSize: 12 }}>
                   {assignedPositionHierarchy
-                    ? assignedPositionHierarchy.reports_to_name
-                      ? <>Reporting line: <strong>{designation} ({role})</strong> reports to <strong>{assignedPositionHierarchy.reports_to_name}</strong>.</>
+                    ? assignedPositionSupervisor
+                      ? <>Reporting line: <strong>{designation} ({role})</strong> reports to <strong>{assignedPositionSupervisor}</strong>.</>
                       : <><strong>{designation} ({role})</strong> is configured as a top-level position.</>
                     : <>No reporting line is set for this combination yet. Add it under Master → Hierarchy.</>}
                 </div>}

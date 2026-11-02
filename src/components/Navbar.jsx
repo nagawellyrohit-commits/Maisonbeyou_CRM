@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, Check, Building2, ArrowLeft } from 'lucide-react';
+import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, CalendarDays, Check, Building2, ArrowLeft } from 'lucide-react';
 import { getStoredToken, getStoredUser, setStoredToken, setStoredUser, getStoredLocation, setStoredLocation, formatCurrency, formatDate, apiRequest } from '../utils/api';
 import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
@@ -16,6 +16,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   const [livePrivileges, setLivePrivileges] = useState(null);
   const switchMenuRef = useRef(null);
   const clientMenuRef = useRef(null);
+  const membershipPrivilegeRequestRef = useRef(0);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -41,18 +42,15 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   }, []);
 
   // Fetch fresh membership privileges whenever client or visits update
-  const fetchLivePrivileges = async (clientId) => {
+  const fetchLivePrivileges = async (clientId, membershipTier = null) => {
     if (!clientId) return;
+    const requestId = ++membershipPrivilegeRequestRef.current;
+    setLivePrivileges(null);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/clients/${clientId}/membership-privileges`, {
-        headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.privileges) {
-          setLivePrivileges(data.privileges);
-        }
+      const tierQuery = membershipTier ? `?tier=${encodeURIComponent(membershipTier)}` : '';
+      const data = await apiRequest(`/clients/${clientId}/membership-privileges${tierQuery}`);
+      if (requestId === membershipPrivilegeRequestRef.current && Array.isArray(data?.privileges)) {
+        setLivePrivileges(data.privileges);
       }
     } catch (e) {
       console.error('Error fetching live privileges:', e);
@@ -61,16 +59,17 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
 
   useEffect(() => {
     if (activeVisitClient?.client_id) {
-      fetchLivePrivileges(activeVisitClient.client_id);
+      fetchLivePrivileges(activeVisitClient.client_id, activeVisitClient.membershipTier || activeVisitClient.membership_tier);
     } else {
+      membershipPrivilegeRequestRef.current += 1;
       setLivePrivileges(null);
     }
-  }, [activeVisitClient?.client_id]);
+  }, [activeVisitClient?.client_id, activeVisitClient?.membershipTier, activeVisitClient?.membership_tier]);
 
   useEffect(() => {
     const handleVisitUpdate = () => {
       if (activeVisitClient?.client_id) {
-        fetchLivePrivileges(activeVisitClient.client_id);
+        fetchLivePrivileges(activeVisitClient.client_id, activeVisitClient.membershipTier || activeVisitClient.membership_tier);
       }
     };
     window.addEventListener('visit_created', handleVisitUpdate);
@@ -196,7 +195,30 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     const benefitsStatus = client.benefitsStatus || (hasUsedCredits ? 'Partially used' : 'Available');
 
     let perksWithStatus = [];
-    const sourcePrivileges = livePrivileges || (client.membership_privileges && Array.isArray(client.membership_privileges) && client.membership_privileges.length > 0 ? client.membership_privileges : null);
+    const configuredPlan = client.planInfo;
+    const configuredPlanPrivileges = configuredPlan ? [
+      ...(Array.isArray(configuredPlan.benefits) ? configuredPlan.benefits : [])
+        .filter(item => typeof item === 'string' && item.trim())
+        .map((name, index) => ({
+          id: `${configuredPlan.id || configuredPlan.name || tierKey}_benefit_${index + 1}`,
+          name: name.trim(),
+          allowedUses: 1,
+          type: 'benefit'
+        })),
+      ...(Array.isArray(configuredPlan.free_services) ? configuredPlan.free_services : [])
+        .filter(service => service && service.is_free !== false)
+        .map(service => ({
+          id: `membership_service_${service.service_id}`,
+          name: `${service.service_name || 'Complimentary service'} — complimentary`,
+          allowedUses: 1,
+          type: 'service'
+        }))
+    ] : null;
+    const sourcePrivileges = Array.isArray(livePrivileges) && livePrivileges.length > 0
+      ? livePrivileges
+      : (Array.isArray(client.membership_privileges) && client.membership_privileges.length > 0
+          ? client.membership_privileges
+          : configuredPlanPrivileges);
 
     if (sourcePrivileges) {
       perksWithStatus = sourcePrivileges.map(p => ({
@@ -236,7 +258,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
           { id: 'priv_eclat_packages', text: 'Access to member-only packages', name: 'Access to member-only packages', isUsed: false, allowedUses: 1 },
           { id: 'priv_eclat_consult', text: 'Free consultation anytime', name: 'Free consultation anytime', isUsed: false, allowedUses: 1 }
         ];
-      } else {
+      } else if (tierKey.includes('infini')) {
         perksWithStatus = [
           { id: 'priv_infini_analysis', text: 'Free comprehensive 3D skin & hair analysis twice a year', name: 'Free comprehensive 3D skin & hair analysis twice a year', isUsed: true, allowedUses: 2 },
           { id: 'priv_infini_bday', text: 'Birthday: ₹5000 voucher + complimentary luxury medi-facial', name: 'Birthday: ₹5000 voucher + complimentary luxury medi-facial', isUsed: false, allowedUses: 1 },
@@ -245,6 +267,8 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
           { id: 'priv_infini_vip', text: 'Dedicated relationship manager & VIP suite access', name: 'Dedicated relationship manager & VIP suite access', isUsed: true, allowedUses: 1 },
           { id: 'priv_infini_priority', text: 'Priority weekend & late-evening scheduling', name: 'Priority weekend & late-evening scheduling', isUsed: false, allowedUses: 1 }
         ];
+      } else {
+        perksWithStatus = [];
       }
     }
 
@@ -609,7 +633,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
             borderBottom: '1px solid #D8C3AA',
             fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif"
           }}>
-            ANNUAL PRIVILEGE
+            MEMBERSHIP BENEFITS
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1141,7 +1165,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                 </div>
               )}
             </div>
-          ) : activeTab === 'dashboard' && isAdmin ? (
+          ) : activeTab === 'dashboard' && (isAdmin || currentUser?.role === 'reception') ? (
             <button
               type="button"
               onClick={e => {
@@ -1259,6 +1283,16 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   )}
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+
+                  {isVisitor && (
+                    <button
+                      type="button"
+                      onClick={() => { setActiveTab('appointments'); setShowSwitchMenu(false); }}
+                      style={{ width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: activeTab === 'appointments' ? '#9F7335' : 'var(--text-main)', background: activeTab === 'appointments' ? 'var(--primary-subtle)' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', cursor: 'pointer', border: 0 }}
+                    >
+                      <CalendarDays size={15} /> Appointments
+                    </button>
+                  )}
 
                   <button
                     onClick={handleLogout}

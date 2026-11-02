@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import { PNG } from 'pngjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import db, { initDatabase, recordAuditLog, generateLocationCode, ensureTeamMasterOptions } from './db.js';
 import {
@@ -173,7 +173,7 @@ function permissionModulesForRequest(req) {
   const method = String(req.method || 'GET').toUpperCase();
   if (/^\/api\/admin\/branch-users(?:\/|$)/.test(route)) return ['user_management'];
   if (/^\/api\/admin\/team-options(?:\/|$)/.test(route)) return ['team'];
-  if (/^\/api\/admin\/team-(?:departments|hierarchy)(?:\/|$)/.test(route)) return ['team'];
+  if (/^\/api\/admin\/team-(?:departments|hierarchy|org-chart)(?:\/|$)/.test(route)) return ['team'];
   if (/^\/api\/locations(?:\/|$)/.test(route) && !route.startsWith('/api/locations-list')) return ['user_management'];
   if (/^\/api\/auth\/switch-role$/.test(route)) return ['user_management'];
   if (route === '/api/kyc/upload') return ['user_management'];
@@ -2512,23 +2512,6 @@ function isManagedBranchUser(user, locationId) {
 
 // ==================== BRANCH USER MANAGEMENT ====================
 // Master Admin can list all branches; Branch Admin is restricted to their own Manager/Visitor accounts.
-function isRegisteredTeamMember(phone, locationId) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (digits.length < 10) return false;
-  const teamPhones = db.prepare(`
-    SELECT phone FROM STAFF
-    WHERE active = 1 AND location_id = ? AND phone IS NOT NULL
-  `).all(locationId);
-
-  return teamPhones.some(({ phone: staffPhone }) => {
-    const staffDigits = String(staffPhone || '').replace(/\D/g, '');
-    if (staffDigits === digits) return true;
-    // Accept a local 10-digit number when the Team record includes its country code.
-    return digits.length === 10 && staffDigits.length > 10 && staffDigits.endsWith(digits);
-  });
-}
-
-const managerTeamMembershipError = 'This person is not registered as a team member at this branch. Add them under Team first, then create their Manager account.';
 
 app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
   try {
@@ -2568,7 +2551,7 @@ app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
 // Branch Admin can create Manager/Visitor accounts only in their own branch.
 app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
-    const { name, email, phone, role, location_id, designation, team_role } = req.body;
+    const { name, email, phone, role, location_id } = req.body;
     const targetLocId = req.user.role === 'master_admin' ? Number(location_id) : Number(req.locationId);
     const requestedPermissions = role === 'visitor' ? ['visitor_intake'] : req.body.permissions;
     if (!name || !email || !phone || !role || !targetLocId || !Array.isArray(requestedPermissions)) {
@@ -2578,13 +2561,9 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
     if (!['reception', 'visitor'].includes(role)) {
       return res.status(400).json({ error: 'Branch Admins can create Manager or Visitor accounts only.' });
     }
-    const cleanTeamRole = String(team_role || '').trim();
-    const cleanDesignation = String(designation || '').trim();
-    if (role === 'reception') {
-      if (!cleanTeamRole || !cleanDesignation) return res.status(400).json({ error: 'Choose a team role and designation from Master for this Manager.' });
-      if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanTeamRole)) return res.status(400).json({ error: 'Choose a team role from Master.' });
-      if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from Master.' });
-    }
+    const cleanDesignation = role === 'reception' ? 'Manager' : 'Visitor';
+    const cleanName = String(name || '').trim();
+    const cleanPhone = String(phone || '').trim();
 
     const loc = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
     if (!loc) {
@@ -2592,12 +2571,8 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = phone.trim();
     if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) return res.status(400).json({ error: 'Enter a valid email address.' });
     if (cleanPhone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a valid mobile number for OTP sign-in.' });
-    if (role === 'reception' && !isRegisteredTeamMember(cleanPhone, targetLocId)) {
-      return res.status(400).json({ error: managerTeamMembershipError });
-    }
     if (new Set(requestedPermissions).size !== requestedPermissions.length || requestedPermissions.some(key => !DASHBOARD_PERMISSION_KEYS.has(key)) || (role === 'reception' && requestedPermissions.includes('visitor_intake'))) {
       return res.status(400).json({ error: 'The selected dashboard permissions are invalid.' });
     }
@@ -2610,8 +2585,8 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
 
     const info = db.prepare(`
       INSERT INTO USERS (name, email, phone, designation, team_role, password_hash, role, active, location_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    `).run(name.trim(), cleanEmail, cleanPhone, (cleanDesignation || 'Visitor'), cleanTeamRole || null, hash, role, targetLocId);
+      VALUES (?, ?, ?, ?, NULL, ?, ?, 1, ?)
+    `).run(cleanName, cleanEmail, cleanPhone, cleanDesignation, hash, role, targetLocId);
 
     const newUserId = info.lastInsertRowid;
     db.prepare('INSERT INTO USER_ACCESS_PROFILES (user_id, location_id, permissions) VALUES (?, ?, ?)')
@@ -2623,7 +2598,7 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
       targetType: 'USER',
       targetId: newUserId,
       locationId: targetLocId,
-      details: { name: name.trim(), email: cleanEmail, role, location_id: targetLocId, permissions: requestedPermissions },
+      details: { name: cleanName, email: cleanEmail, role, location_id: targetLocId, permissions: requestedPermissions },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
@@ -2639,7 +2614,7 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
 app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
   try {
     const userId = Number(req.params.id);
-    const { name, phone, email, designation, team_role, role, location_id } = req.body;
+    const { name, phone, email, role, location_id } = req.body;
     let { permissions } = req.body;
 
     const existingUser = db.prepare('SELECT * FROM USERS WHERE user_id = ?').get(userId);
@@ -2657,13 +2632,7 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
     }
     const effectiveRole = role || existingUser.role;
     if (effectiveRole === 'visitor') permissions = ['visitor_intake'];
-    const cleanTeamRole = team_role === undefined ? existingUser.team_role : String(team_role || '').trim();
-    const cleanDesignation = designation === undefined ? existingUser.designation : String(designation || '').trim();
-    if (effectiveRole === 'reception') {
-      if (!cleanTeamRole || !cleanDesignation) return res.status(400).json({ error: 'Choose a team role and designation from Master for this Manager.' });
-      if (cleanTeamRole.toLowerCase() !== String(existingUser.team_role || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanTeamRole)) return res.status(400).json({ error: 'Choose a team role from Master.' });
-      if (cleanDesignation.toLowerCase() !== String(existingUser.designation || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from Master.' });
-    }
+    const cleanDesignation = effectiveRole === 'reception' ? 'Manager' : 'Visitor';
 
     if (Number(existingUser.location_id) !== Number(targetLocId)) {
       return res.status(403).json({ error: 'Branch user accounts cannot be moved between branches.' });
@@ -2673,9 +2642,6 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
     const cleanPhone = phone === undefined ? existingUser.phone : String(phone).trim();
     if (!/^\S+@\S+\.\S+$/.test(cleanEmail)) return res.status(400).json({ error: 'Enter a valid email address.' });
     if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 10) return res.status(400).json({ error: 'Enter a valid mobile number for OTP sign-in.' });
-    if (effectiveRole === 'reception' && !isRegisteredTeamMember(cleanPhone, targetLocId)) {
-      return res.status(400).json({ error: managerTeamMembershipError });
-    }
     const emailOwner = db.prepare('SELECT user_id FROM USERS WHERE LOWER(email) = ? AND user_id != ?').get(cleanEmail, userId);
     if (emailOwner) return res.status(409).json({ error: 'That email address is already assigned to another account.' });
     if (permissions !== undefined && (!Array.isArray(permissions) || new Set(permissions).size !== permissions.length || permissions.some(key => !DASHBOARD_PERMISSION_KEYS.has(key)) || (effectiveRole === 'reception' && permissions.includes('visitor_intake')))) {
@@ -2687,12 +2653,12 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
       SET name = COALESCE(?, name),
           phone = COALESCE(?, phone),
           email = COALESCE(?, email),
-          designation = COALESCE(?, designation),
-          team_role = CASE WHEN ? IS NOT NULL THEN ? ELSE team_role END,
+          designation = ?,
+          team_role = NULL,
           role = COALESCE(?, role),
           updated_at = CURRENT_TIMESTAMP
       WHERE user_id = ?
-    `).run(name ? name.trim() : null, cleanPhone, cleanEmail, designation === undefined ? null : cleanDesignation, team_role === undefined ? null : 1, team_role === undefined ? null : (cleanTeamRole || null), role || null, userId);
+    `).run(name ? name.trim() : null, cleanPhone, cleanEmail, cleanDesignation, role || null, userId);
 
     if (permissions !== undefined) {
       db.prepare(`UPDATE USER_ACCESS_PROFILES SET permissions = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND location_id = ?`)
@@ -2705,7 +2671,7 @@ app.put('/api/admin/branch-users/:id', authenticateToken, authorizeRoles('master
       targetType: 'USER',
       targetId: userId,
       locationId: targetLocId,
-      details: { old: { name: existingUser.name, role: existingUser.role, team_role: existingUser.team_role, location_id: existingUser.location_id }, updated: { name, phone, email, designation: cleanDesignation, team_role: cleanTeamRole, role, permissions } },
+      details: { old: { name: existingUser.name, role: existingUser.role, team_role: existingUser.team_role, location_id: existingUser.location_id }, updated: { name, phone, email, designation: cleanDesignation, team_role: null, role, permissions } },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
@@ -3231,6 +3197,22 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
          ${locFilterVisits}
     `).get(todayLocal, todayUTC, todayLocal, todayUTC, todayLocal, todayUTC, ...locFilterParams).count;
 
+    // Count paid/recorded membership purchase instances for this branch today.
+    // Membership migrations are intentionally excluded because they are not new sales.
+    const newMembershipsToday = db.prepare(`
+      SELECT COUNT(DISTINCT cm.membership_id) AS count
+      FROM CLIENT_MEMBERSHIPS cm
+      JOIN CLIENTS c ON c.client_id = cm.client_id
+      LEFT JOIN VISITS v ON v.visit_id = cm.purchase_visit_id
+      WHERE c.location_id = ?
+        AND cm.purchase_visit_id IS NOT NULL
+        AND (
+          date(cm.created_at, 'localtime') IN (date(?), date(?))
+          OR date(v.visit_date) IN (date(?), date(?))
+          OR date(v.created_at, 'localtime') IN (date(?), date(?))
+        )
+    `).get(targetLocId, todayLocal, todayUTC, todayLocal, todayUTC, todayLocal, todayUTC).count;
+
     // Detailed visit rows with service snapshots & staff names
     const visitsWithDetails = visitsToday.map(v => {
       const services = db.prepare(`
@@ -3263,6 +3245,7 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
         total_services: servicesTodayCount,
         total_revenue: totalRevenue,
         pending_balance: pendingBalance,
+        new_memberships: newMembershipsToday,
         membership_revenue: membershipRevenue,
         membership_visits_count: membershipVisitsCount
       },
@@ -3581,7 +3564,7 @@ export const TIER_PRIVILEGES_CONFIG = {
 };
 
 // Retrieve client's active membership purchase instance and privilege usage
-export function getClientMembershipPrivileges(clientId) {
+export function getClientMembershipPrivileges(clientId, requestedTier = null) {
   const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(clientId);
   if (!client) return { membership: null, privileges: [] };
 
@@ -3592,11 +3575,13 @@ export function getClientMembershipPrivileges(clientId) {
     ORDER BY membership_id DESC LIMIT 1
   `).get(clientId);
 
-  const rawTier = (client.membership_tier || '').trim();
+  const persistedTier = (client.membership_tier || '').trim();
+  const rawTier = (persistedTier || requestedTier || '').trim();
   const isMember = Boolean(rawTier && rawTier.toLowerCase() !== 'none' && rawTier.toLowerCase() !== 'non-member');
 
-  // If no CLIENT_MEMBERSHIPS record exists yet, but client is active member, auto-create
-  if (!membership && isMember) {
+  // Backfill a missing instance only for a tier actually saved on the client.
+  // A tier supplied from the currently open visit is display context, not a purchase.
+  if (!membership && persistedTier && isMember) {
     const tierCost = rawTier.toLowerCase().includes('lumiere') ? 50000 :
       rawTier.toLowerCase().includes('infini') ? 25000 :
       rawTier.toLowerCase().includes('eternal') ? 15000 :
@@ -3616,24 +3601,75 @@ export function getClientMembershipPrivileges(clientId) {
     membership = db.prepare('SELECT * FROM CLIENT_MEMBERSHIPS WHERE membership_id = ?').get(info.lastInsertRowid);
   }
 
-  if (!membership) {
+  if (!membership && !requestedTier) {
     return { membership: null, privileges: [] };
   }
 
-  // Get matching config key
-  const tKey = (membership.tier_name || '').toLowerCase();
-  let matchedConfig = TIER_PRIVILEGES_CONFIG.infini;
-  if (tKey.includes('lumiere')) matchedConfig = TIER_PRIVILEGES_CONFIG.lumiere;
-  else if (tKey.includes('eternal')) matchedConfig = TIER_PRIVILEGES_CONFIG.eternal;
-  else if (tKey.includes('eclat')) matchedConfig = TIER_PRIVILEGES_CONFIG.eclat;
+  // Resolve the plan from this client's branch first. Custom branch plans must
+  // never inherit privileges from a similarly positioned built-in tier.
+  let matchedConfig = null;
+  if (client.location_id) {
+    ensureMembershipPlansTable(client.location_id);
+    const candidates = [membership?.tier_name, client.membership_tier, requestedTier]
+      .filter(Boolean)
+      .map(value => String(value).trim().toLowerCase());
+    const branchPlans = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ?').all(client.location_id);
+    const plan = branchPlans.find(row => {
+      const identifiers = [row.tier, row.name, row.fullName, row.id]
+        .filter(Boolean)
+        .map(value => String(value).trim().toLowerCase());
+      return candidates.some(candidate => identifiers.includes(candidate));
+    });
+
+    let savedSnapshot = [];
+    try {
+      savedSnapshot = membership?.privileges_snapshot ? JSON.parse(membership.privileges_snapshot) : [];
+    } catch { savedSnapshot = []; }
+    if (Array.isArray(savedSnapshot) && savedSnapshot.length) {
+      matchedConfig = savedSnapshot;
+    } else if (plan) {
+      let benefits = [];
+      try {
+        benefits = Array.isArray(plan.benefits) ? plan.benefits : JSON.parse(plan.benefits || '[]');
+      } catch { benefits = []; }
+      const configuredBenefits = benefits
+        .filter(item => typeof item === 'string' && item.trim())
+        .map((name, index) => ({
+          id: `${plan.id}_benefit_${index + 1}`,
+          name: name.trim(),
+          allowedUses: 1,
+          type: 'benefit'
+        }));
+      const complimentaryServices = parseMembershipFreeServices(plan.free_services)
+        .filter(service => service && service.is_free !== false)
+        .map(service => ({
+          id: `membership_service_${service.service_id}`,
+          name: `${service.service_name || 'Complimentary service'} — complimentary`,
+          allowedUses: 1,
+          type: 'service'
+        }));
+      matchedConfig = [...configuredBenefits, ...complimentaryServices];
+    }
+  }
+
+  // Legacy built-in tiers keep their standard privileges. Unknown/custom tiers
+  // without a matching branch plan intentionally have no inferred benefits.
+  if (!matchedConfig) {
+    const tKey = `${membership?.tier_name || ''} ${client.membership_tier || ''} ${requestedTier || ''}`.toLowerCase();
+    if (tKey.includes('lumiere')) matchedConfig = TIER_PRIVILEGES_CONFIG.lumiere;
+    else if (tKey.includes('infini')) matchedConfig = TIER_PRIVILEGES_CONFIG.infini;
+    else if (tKey.includes('eternal')) matchedConfig = TIER_PRIVILEGES_CONFIG.eternal;
+    else if (tKey.includes('eclat')) matchedConfig = TIER_PRIVILEGES_CONFIG.eclat;
+    else matchedConfig = [];
+  }
 
   // Query completed redemptions for this SPECIFIC membership instance
-  const redemptions = db.prepare(`
+  const redemptions = membership ? db.prepare(`
     SELECT privilege_id, COUNT(*) as count 
     FROM MEMBERSHIP_PRIVILEGE_REDEMPTIONS 
     WHERE membership_id = ? AND status = 'completed'
     GROUP BY privilege_id
-  `).all(membership.membership_id);
+  `).all(membership.membership_id) : [];
 
   const redemptionMap = new Map();
   for (const r of redemptions) {
@@ -3764,14 +3800,29 @@ export function getFullClientRecord(clientId) {
 
   if (client) {
     const rawTier = client.membership_tier || '';
-    const tierCost = rawTier.toLowerCase().includes('lumiere') ? 50000 :
+    const canonicalCost = rawTier.toLowerCase().includes('lumiere') ? 50000 :
       rawTier.toLowerCase().includes('infini') ? 25000 :
       rawTier.toLowerCase().includes('eternal') ? 15000 :
       rawTier.toLowerCase().includes('eclat') ? 6000 : 0;
+    let configuredPlan = null;
+    if (client.location_id && rawTier) {
+      try {
+        ensureMembershipPlansTable(client.location_id);
+        const normalizePlanName = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const normalizedTier = normalizePlanName(rawTier);
+        configuredPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ?').all(client.location_id).find(plan =>
+          [plan.tier, plan.name, plan.fullName, plan.id].some(value => normalizePlanName(value) === normalizedTier)
+        ) || null;
+      } catch (error) {
+        console.warn('Could not resolve branch membership plan for client profile:', error.message);
+      }
+    }
 
+    const membershipCost = Number(configuredPlan?.price) || canonicalCost || Number(client.membership_cost) || 0;
+    const creditAllocation = Number(configuredPlan?.credits) || membershipCost;
     const totalCreditsUsed = fullVisits.reduce((sum, v) => sum + (parseFloat(v.membership_amount_used) || 0), 0);
-    const accurateBalance = tierCost > 0 ? Math.max(0, tierCost - totalCreditsUsed) : (client.membership_balance || 0);
-    client.membership_cost = tierCost;
+    const accurateBalance = creditAllocation > 0 ? Math.max(0, creditAllocation - totalCreditsUsed) : (client.membership_balance || 0);
+    client.membership_cost = membershipCost;
     client.total_membership_credits_used = totalCreditsUsed;
     client.membership_balance = accurateBalance;
 
@@ -3827,6 +3878,7 @@ function ensureMembershipPlansTable(locationId) {
     );
   `);
   try { db.exec("ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN free_services TEXT DEFAULT '[]'"); } catch (e) {}
+  try { db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1'); } catch (e) {}
 
   try { db.exec('ALTER TABLE MEMBERSHIP_PLANS ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id)'); } catch (e) {}
   db.prepare('UPDATE MEMBERSHIP_PLANS SET location_id = 1 WHERE location_id IS NULL').run();
@@ -3888,6 +3940,15 @@ function parseMembershipFreeServices(raw) {
   try { return JSON.parse(raw || '[]'); } catch { return []; }
 }
 
+function normalizeMembershipServiceName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\b(laser|hair|removal|service|treatment)\b/g, ' ')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 // Studio Membership Intelligence & Roster endpoint
 app.get('/api/memberships', authenticateToken, (req, res) => {
   try {
@@ -3913,17 +3974,20 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
     const memberRows = db.prepare(query).all(...params);
 
     const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? ORDER BY price ASC').all(locId);
-    const canonicalPlans = planRows.map(p => ({
+    const canonicalizePlan = p => ({
       ...p,
       priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
       benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || []),
       free_services: parseMembershipFreeServices(p.free_services),
       free_service_value: parseMembershipFreeServices(p.free_services).reduce((sum, service) => sum + (Number(service.price) || 0), 0)
-    }));
+    });
+    const allCanonicalPlans = planRows.map(canonicalizePlan);
+    const canonicalPlans = allCanonicalPlans.filter(p => Number(p.is_active ?? 1) === 1);
+    const archivedPlans = planRows.filter(p => Number(p.is_active ?? 1) !== 1).map(canonicalizePlan);
 
     const standardTierCosts = {};
     const tierCounts = {};
-    canonicalPlans.forEach(p => {
+    allCanonicalPlans.forEach(p => {
       standardTierCosts[p.tier] = p.price;
       tierCounts[p.tier] = 0;
     });
@@ -3934,7 +3998,7 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
 
     const members = memberRows.map(m => {
       const tierLower = (m.membership_tier || '').toLowerCase();
-      const matchedPlan = canonicalPlans.find(p => 
+      const matchedPlan = allCanonicalPlans.find(p =>
         (p.tier && tierLower.includes(p.tier.toLowerCase())) || 
         (p.name && tierLower.includes(p.name.toLowerCase())) ||
         (p.id && tierLower.includes(p.id.toLowerCase()))
@@ -3982,6 +4046,7 @@ app.get('/api/memberships', authenticateToken, (req, res) => {
 
     res.json({
       plans: canonicalPlans,
+      archived_plans: archivedPlans,
       program_title: programTitle,
       members,
       stats: {
@@ -4007,11 +4072,10 @@ app.get('/api/memberships/public', (req, res) => {
       return res.status(400).json({ error: 'Branch context is required to load membership plans.' });
     }
     ensureMembershipPlansTable(locId);
-    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? ORDER BY price ASC').all(locId);
+    const planRows = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY price ASC').all(locId);
     const canonicalPlans = planRows.map(p => {
-      const { discount_percent: _discountPercent, ...clientPlan } = p;
       return {
-        ...clientPlan,
+        ...p,
         priceFormatted: `₹${Number(p.price).toLocaleString('en-IN')}`,
         benefits: typeof p.benefits === 'string' ? JSON.parse(p.benefits) : (p.benefits || []),
         free_services: parseMembershipFreeServices(p.free_services),
@@ -4145,6 +4209,9 @@ const benefitsList = Array.isArray(benefits)
     if (!planExists) {
       return res.status(404).json({ error: 'Plan not found' });
     }
+    if (Number(planExists.is_active ?? 1) !== 1) {
+      return res.status(409).json({ error: 'This plan is archived. Restore it before editing.' });
+    }
 
     db.prepare(`
       UPDATE MEMBERSHIP_PLANS
@@ -4206,11 +4273,99 @@ app.delete('/api/memberships/plans/:id', authenticateToken, authorizeRoles('mast
     if (!locId) return res.status(400).json({ error: 'Branch context is required to delete a membership plan.' });
     ensureMembershipPlansTable(locId);
     const { id } = req.params;
-    db.prepare('DELETE FROM MEMBERSHIP_PLANS WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?))').run(locId, id, id, id);
-    res.json({ success: true, message: 'Membership plan deleted successfully' });
+    const archived = db.prepare(`
+      UPDATE MEMBERSHIP_PLANS SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)) AND COALESCE(is_active, 1) = 1
+    `).run(locId, id, id, id);
+    if (!archived.changes) return res.status(404).json({ error: 'Active membership plan not found.' });
+    res.json({ success: true, message: 'Membership plan archived. Existing member and report history has been preserved.' });
   } catch (err) {
     console.error('Delete membership plan error:', err);
     res.status(500).json({ error: 'Failed to delete membership plan' });
+  }
+});
+
+// Restore an archived plan so it can be sold and selected again.
+app.put('/api/memberships/plans/:id/restore', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+  try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to restore a membership plan.' });
+    ensureMembershipPlansTable(locId);
+    const { id } = req.params;
+    const restored = db.prepare(`
+      UPDATE MEMBERSHIP_PLANS SET is_active = 1, updated_at = CURRENT_TIMESTAMP
+      WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?)) AND COALESCE(is_active, 1) = 0
+    `).run(locId, id, id, id);
+    if (!restored.changes) return res.status(404).json({ error: 'Archived membership plan not found.' });
+    res.json({ success: true, message: 'Membership plan restored.' });
+  } catch (err) {
+    console.error('Restore membership plan error:', err);
+    res.status(500).json({ error: 'Failed to restore membership plan.' });
+  }
+});
+
+// Enrollment, credit usage, and status history for a branch membership plan.
+app.get('/api/memberships/plans/:id/history', authenticateToken, (req, res) => {
+  try {
+    const locId = req.locationId;
+    if (!locId) return res.status(400).json({ error: 'Branch context is required to view membership history.' });
+    ensureMembershipPlansTable(locId);
+    const plan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND (id = ? OR plan_id = ? OR LOWER(id) = LOWER(?))').get(locId, req.params.id, req.params.id, req.params.id);
+    if (!plan) return res.status(404).json({ error: 'Membership plan not found.' });
+    const planNames = new Set([plan.tier, plan.name, plan.fullName, plan.id].filter(Boolean).map(value => String(value).trim().toLowerCase()));
+    const instanceRows = db.prepare(`
+      SELECT cm.membership_id, cm.client_id, cm.tier_name, cm.cost, cm.credits_allocated,
+             cm.start_date, cm.expiry_date, cm.status, c.name, c.surname, c.phone, c.email,
+             COALESCE((
+               SELECT SUM(v.membership_amount_used) FROM VISITS v
+               WHERE v.client_id = cm.client_id
+                 AND LOWER(COALESCE(v.membership_tier, '')) = LOWER(cm.tier_name)
+                 AND substr(v.visit_date, 1, 10) >= cm.start_date
+                 AND substr(v.visit_date, 1, 10) <= cm.expiry_date
+             ), 0) AS credits_used
+      FROM CLIENT_MEMBERSHIPS cm JOIN CLIENTS c ON c.client_id = cm.client_id
+      WHERE c.location_id = ? ORDER BY cm.start_date DESC, cm.membership_id DESC
+    `).all(locId).filter(row => planNames.has(String(row.tier_name || '').trim().toLowerCase()));
+    const legacyRows = db.prepare(`
+      SELECT c.client_id, c.membership_tier AS tier_name, c.membership_cost AS cost,
+             c.membership_cost AS credits_allocated, c.membership_started_at AS start_date,
+             c.membership_expires_at AS expiry_date, c.membership_status AS status,
+             c.name, c.surname, c.phone, c.email,
+             COALESCE((SELECT SUM(v.membership_amount_used) FROM VISITS v
+               WHERE v.client_id = c.client_id AND LOWER(COALESCE(v.membership_tier, '')) = LOWER(c.membership_tier)
+                 AND (c.membership_started_at IS NULL OR substr(v.visit_date, 1, 10) >= substr(c.membership_started_at, 1, 10))
+                 AND (c.membership_expires_at IS NULL OR substr(v.visit_date, 1, 10) <= substr(c.membership_expires_at, 1, 10))), 0) AS credits_used
+      FROM CLIENTS c WHERE c.location_id = ? AND c.membership_tier IS NOT NULL
+        AND c.membership_tier != '' AND LOWER(c.membership_tier) NOT IN ('non-member', 'none')
+        AND NOT EXISTS (SELECT 1 FROM CLIENT_MEMBERSHIPS cm WHERE cm.client_id = c.client_id
+          AND cm.status = 'active' AND LOWER(cm.tier_name) = LOWER(c.membership_tier))
+    `).all(locId).filter(row => planNames.has(String(row.tier_name || '').trim().toLowerCase()))
+      .map(row => ({ ...row, membership_id: null, credits_allocated: Number(row.credits_allocated) || Number(plan.price) || 0 }));
+    const rows = [...instanceRows, ...legacyRows];
+    const migrationTableExists = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'MEMBERSHIP_MIGRATION_HISTORY'").get());
+    const transferredOutByInstance = migrationTableExists
+      ? new Map(db.prepare('SELECT from_membership_id, SUM(credits_transferred) AS transferred FROM MEMBERSHIP_MIGRATION_HISTORY WHERE location_id = ? GROUP BY from_membership_id').all(locId).map(row => [Number(row.from_membership_id), Number(row.transferred) || 0]))
+      : new Map();
+    const history = rows.map(row => {
+      const creditsUsed = Number(row.credits_used) || 0;
+      const creditsTransferred = row.membership_id ? (transferredOutByInstance.get(Number(row.membership_id)) || 0) : 0;
+      return {
+        ...row,
+        credits_used: creditsUsed,
+        credits_transferred: creditsTransferred,
+        remaining_credits: Math.max(0, Number(row.credits_allocated || 0) - creditsUsed - creditsTransferred)
+      };
+    });
+    res.json({
+      plan: { plan_id: plan.plan_id, id: plan.id, tier: plan.tier, name: plan.name, is_active: Number(plan.is_active ?? 1) === 1, created_at: plan.created_at, updated_at: plan.updated_at },
+      members: history,
+      total_members: history.length,
+      first_enrollment: history.length ? history.reduce((first, item) => item.start_date < first ? item.start_date : first, history[0].start_date) : null,
+      last_enrollment: history.length ? history.reduce((last, item) => item.start_date > last ? item.start_date : last, history[0].start_date) : null
+    });
+  } catch (err) {
+    console.error('Membership plan history error:', err);
+    res.status(500).json({ error: 'Failed to load membership history.' });
   }
 });
 
@@ -4229,7 +4384,8 @@ app.get('/api/clients/:id/membership-privileges', authenticateToken, (req, res) 
     if (Number(client.location_id) !== Number(activeLocId)) {
       return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
     }
-    const data = getClientMembershipPrivileges(clientId);
+    const requestedTier = typeof req.query.tier === 'string' ? req.query.tier.trim() : null;
+    const data = getClientMembershipPrivileges(clientId, requestedTier);
     res.json(data);
   } catch (error) {
     console.error('Membership privileges error:', error);
@@ -5585,13 +5741,15 @@ app.get('/api/staff', authenticateToken, (req, res) => {
 // Admin Staff with performance metrics & incentive calculations
 app.get('/api/admin/team-options', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
   try {
-    ensureTeamMasterOptions();
+    const locationId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!locationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(400).json({ error: 'Choose a branch to load its team roles and designations.' });
+    ensureTeamMasterOptions(locationId);
     const options = db.prepare(`
       SELECT option_id, option_type, option_name
       FROM TEAM_MASTER_OPTIONS
-      WHERE active = 1
+      WHERE location_id = ? AND active = 1
       ORDER BY option_type, option_name COLLATE NOCASE
-    `).all();
+    `).all(locationId);
     res.json({ roles: options.filter(option => option.option_type === 'role'), designations: options.filter(option => option.option_type === 'designation') });
   } catch (error) {
     console.error('Team master options error:', error);
@@ -5601,16 +5759,18 @@ app.get('/api/admin/team-options', authenticateToken, authorizeRoles('admin', 'r
 
 app.post('/api/admin/team-options', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
+    const locationId = req.user.role === 'master_admin' ? Number(req.body.location_id) : Number(req.locationId);
     const optionType = String(req.body.option_type || '').trim().toLowerCase();
     const optionName = String(req.body.option_name || '').trim().replace(/\s+/g, ' ');
+    if (!locationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(400).json({ error: 'Choose a valid branch for this team option.' });
     if (!['role', 'designation'].includes(optionType)) return res.status(400).json({ error: 'Choose Role or Designation.' });
     if (optionName.length < 2 || optionName.length > 60) return res.status(400).json({ error: 'Enter a name between 2 and 60 characters.' });
-    const existing = db.prepare(`SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE option_type = ? AND LOWER(option_name) = LOWER(?)`).get(optionType, optionName);
+    const existing = db.prepare(`SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = ? AND LOWER(option_name) = LOWER(?)`).get(locationId, optionType, optionName);
     if (existing) {
       db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 1 WHERE option_id = ?').run(existing.option_id);
       return res.json({ option: { option_id: existing.option_id, option_type: optionType, option_name: optionName } });
     }
-    const result = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (option_type, option_name) VALUES (?, ?)').run(optionType, optionName);
+    const result = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (location_id, option_type, option_name) VALUES (?, ?, ?)').run(locationId, optionType, optionName);
     res.status(201).json({ option: { option_id: result.lastInsertRowid, option_type: optionType, option_name: optionName } });
   } catch (error) {
     console.error('Create team master option error:', error);
@@ -5620,7 +5780,9 @@ app.post('/api/admin/team-options', authenticateToken, authorizeRoles('admin', '
 
 app.delete('/api/admin/team-options/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
-    const result = db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 0 WHERE option_id = ? AND active = 1').run(Number(req.params.id));
+    const locationId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Choose a branch before removing its team option.' });
+    const result = db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 0 WHERE option_id = ? AND location_id = ? AND active = 1').run(Number(req.params.id), locationId);
     if (!result.changes) return res.status(404).json({ error: 'Team option not found' });
     res.json({ success: true });
   } catch (error) {
@@ -5631,7 +5793,9 @@ app.delete('/api/admin/team-options/:id', authenticateToken, authorizeRoles('adm
 
 app.get('/api/admin/team-departments', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
   try {
-    const departments = db.prepare('SELECT department_id, department_name FROM TEAM_DEPARTMENTS WHERE active = 1 ORDER BY department_name COLLATE NOCASE').all();
+    const locationId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!locationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(400).json({ error: 'Choose a branch to load its departments.' });
+    const departments = db.prepare('SELECT department_id, department_name FROM TEAM_DEPARTMENTS WHERE location_id = ? AND active = 1 ORDER BY department_name COLLATE NOCASE').all(locationId);
     res.json({ departments });
   } catch (error) {
     console.error('Team departments error:', error);
@@ -5641,14 +5805,16 @@ app.get('/api/admin/team-departments', authenticateToken, authorizeRoles('admin'
 
 app.post('/api/admin/team-departments', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
+    const locationId = req.user.role === 'master_admin' ? Number(req.body.location_id) : Number(req.locationId);
     const departmentName = String(req.body.department_name || '').trim().replace(/\s+/g, ' ');
+    if (!locationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(400).json({ error: 'Choose a valid branch for this department.' });
     if (departmentName.length < 2 || departmentName.length > 60) return res.status(400).json({ error: 'Enter a department name between 2 and 60 characters.' });
-    const existing = db.prepare('SELECT department_id FROM TEAM_DEPARTMENTS WHERE LOWER(department_name) = LOWER(?)').get(departmentName);
+    const existing = db.prepare('SELECT department_id FROM TEAM_DEPARTMENTS WHERE location_id = ? AND LOWER(department_name) = LOWER(?)').get(locationId, departmentName);
     if (existing) {
       db.prepare('UPDATE TEAM_DEPARTMENTS SET active = 1 WHERE department_id = ?').run(existing.department_id);
       return res.json({ department: { department_id: existing.department_id, department_name: departmentName } });
     }
-    const result = db.prepare('INSERT INTO TEAM_DEPARTMENTS (department_name) VALUES (?)').run(departmentName);
+    const result = db.prepare('INSERT INTO TEAM_DEPARTMENTS (location_id, department_name) VALUES (?, ?)').run(locationId, departmentName);
     res.status(201).json({ department: { department_id: result.lastInsertRowid, department_name: departmentName } });
   } catch (error) {
     console.error('Create department error:', error);
@@ -5658,10 +5824,16 @@ app.post('/api/admin/team-departments', authenticateToken, authorizeRoles('admin
 
 app.delete('/api/admin/team-departments/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
+    const locationId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Choose a branch before removing its department.' });
     const departmentId = Number(req.params.id);
-    const hasPositions = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE department_id = ? AND active = 1 LIMIT 1').get(departmentId);
+    const department = db.prepare('SELECT department_name FROM TEAM_DEPARTMENTS WHERE department_id = ? AND location_id = ? AND active = 1').get(departmentId, locationId);
+    if (!department) return res.status(404).json({ error: 'Department not found in this branch.' });
+    const hasPositions = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE department_id = ? AND location_id = ? AND active = 1 LIMIT 1').get(departmentId, locationId);
     if (hasPositions) return res.status(409).json({ error: 'Remove the department positions before removing this department.' });
-    const result = db.prepare('UPDATE TEAM_DEPARTMENTS SET active = 0 WHERE department_id = ? AND active = 1').run(departmentId);
+    const hasStaff = db.prepare('SELECT 1 FROM STAFF WHERE location_id = ? AND LOWER(department) = LOWER(?) AND active = 1 LIMIT 1').get(locationId, department.department_name);
+    if (hasStaff) return res.status(409).json({ error: 'Reassign this branch’s active team members before removing the department.' });
+    const result = db.prepare('UPDATE TEAM_DEPARTMENTS SET active = 0 WHERE department_id = ? AND location_id = ? AND active = 1').run(departmentId, locationId);
     if (!result.changes) return res.status(404).json({ error: 'Department not found' });
     res.json({ success: true });
   } catch (error) {
@@ -5671,29 +5843,149 @@ app.delete('/api/admin/team-departments/:id', authenticateToken, authorizeRoles(
 });
 
 const teamHierarchySelect = `
-  SELECT h.hierarchy_id, h.department_id, d.department_name,
+  SELECT h.hierarchy_id, h.location_id, h.department_id, d.department_name,
          h.role_option_id, role.option_name AS role_name,
          h.designation_option_id, designation.option_name AS designation_name,
+         h.assigned_staff_id,
+         assigned_staff.name AS assigned_member_name,
          h.reports_to_hierarchy_id AS reports_to_id,
          parent_role.option_name AS reports_to_role,
          parent_designation.option_name AS reports_to_designation,
          h.reports_to_staff_id,
+         h.reports_to_user_id,
          supervisor.name AS reports_to_name,
          supervisor.role AS reports_to_staff_role,
-         supervisor.designation AS reports_to_staff_designation
+         supervisor.designation AS reports_to_staff_designation,
+         manager.name AS reports_to_manager_name,
+         manager.role AS reports_to_manager_role
   FROM TEAM_HIERARCHY h
-  JOIN TEAM_DEPARTMENTS d ON d.department_id = h.department_id
-  JOIN TEAM_MASTER_OPTIONS role ON role.option_id = h.role_option_id
-  JOIN TEAM_MASTER_OPTIONS designation ON designation.option_id = h.designation_option_id
+  JOIN TEAM_DEPARTMENTS d ON d.department_id = h.department_id AND d.location_id = h.location_id
+  JOIN TEAM_MASTER_OPTIONS role ON role.option_id = h.role_option_id AND role.location_id = h.location_id
+  JOIN TEAM_MASTER_OPTIONS designation ON designation.option_id = h.designation_option_id AND designation.location_id = h.location_id
   LEFT JOIN TEAM_HIERARCHY parent ON parent.hierarchy_id = h.reports_to_hierarchy_id
-  LEFT JOIN TEAM_MASTER_OPTIONS parent_role ON parent_role.option_id = parent.role_option_id
-  LEFT JOIN TEAM_MASTER_OPTIONS parent_designation ON parent_designation.option_id = parent.designation_option_id
+  LEFT JOIN TEAM_MASTER_OPTIONS parent_role ON parent_role.option_id = parent.role_option_id AND parent_role.location_id = h.location_id
+  LEFT JOIN TEAM_MASTER_OPTIONS parent_designation ON parent_designation.option_id = parent.designation_option_id AND parent_designation.location_id = h.location_id
+  LEFT JOIN STAFF assigned_staff ON assigned_staff.staff_id = h.assigned_staff_id AND assigned_staff.location_id = h.location_id
   LEFT JOIN STAFF supervisor ON supervisor.staff_id = h.reports_to_staff_id
+  LEFT JOIN USERS manager ON manager.user_id = h.reports_to_user_id
 `;
+
+function serializeTeamHierarchyPosition(position) {
+  const reportingUsers = db.prepare(`
+    SELECT user_id, name, role FROM USERS
+    WHERE location_id = ? AND active = 1 AND deleted_at IS NULL AND user_id IN (
+      SELECT user_id FROM TEAM_HIERARCHY_USER_REPORTS WHERE hierarchy_id = ?
+      UNION SELECT ? WHERE ? IS NOT NULL
+    )
+    ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, name COLLATE NOCASE
+  `).all(position.location_id, position.hierarchy_id, position.reports_to_user_id, position.reports_to_user_id);
+  const ids = reportingUsers.map(user => Number(user.user_id));
+  return {
+    ...position,
+    reports_to_user_ids: ids.length ? ids : (position.reports_to_user_id ? [Number(position.reports_to_user_id)] : []),
+    reports_to_user_names: reportingUsers.map(user => user.name),
+    reports_to_users: reportingUsers
+  };
+}
+
+function hierarchyPositionForStaff(staffId, locationId) {
+  return db.prepare(`
+    SELECT hierarchy.hierarchy_id, hierarchy.reports_to_staff_id
+    FROM STAFF person
+    JOIN TEAM_DEPARTMENTS department ON LOWER(department.department_name) = LOWER(person.department) AND department.location_id = person.location_id AND department.active = 1
+    JOIN TEAM_MASTER_OPTIONS role ON role.option_type = 'role' AND LOWER(role.option_name) = LOWER(person.role) AND role.location_id = person.location_id AND role.active = 1
+    JOIN TEAM_MASTER_OPTIONS designation ON designation.option_type = 'designation' AND LOWER(designation.option_name) = LOWER(person.designation) AND designation.location_id = person.location_id AND designation.active = 1
+    JOIN TEAM_HIERARCHY hierarchy ON hierarchy.department_id = department.department_id AND hierarchy.role_option_id = role.option_id AND hierarchy.designation_option_id = designation.option_id AND hierarchy.location_id = person.location_id AND hierarchy.active = 1
+    WHERE person.staff_id = ? AND person.location_id = ? AND person.active = 1
+    ORDER BY CASE WHEN hierarchy.assigned_staff_id = person.staff_id THEN 0 ELSE 1 END, hierarchy.hierarchy_id
+    LIMIT 1
+  `).get(staffId, locationId) || null;
+}
+
+function createsTeamHierarchyCycle(locationId, targetHierarchyId, reportsToStaffId) {
+  let cursor = hierarchyPositionForStaff(reportsToStaffId, locationId);
+  const visited = new Set();
+  while (cursor) {
+    if (Number(cursor.hierarchy_id) === Number(targetHierarchyId)) return true;
+    if (visited.has(Number(cursor.hierarchy_id))) return true;
+    visited.add(Number(cursor.hierarchy_id));
+    cursor = cursor.reports_to_staff_id ? hierarchyPositionForStaff(cursor.reports_to_staff_id, locationId) : null;
+  }
+  return false;
+}
+
+function isValidHierarchySupervisorStaff(staffId, locationId, departmentId) {
+  return Boolean(db.prepare(`
+    SELECT 1
+    FROM STAFF supervisor
+    WHERE supervisor.staff_id = ? AND supervisor.location_id = ? AND supervisor.active = 1
+      AND (
+        LOWER(supervisor.department) = LOWER((SELECT department_name FROM TEAM_DEPARTMENTS WHERE department_id = ? AND location_id = ? AND active = 1))
+        OR EXISTS (
+          SELECT 1
+          FROM TEAM_HIERARCHY manager_position
+          JOIN TEAM_MASTER_OPTIONS manager_role ON manager_role.option_id = manager_position.role_option_id AND manager_role.location_id = manager_position.location_id
+          JOIN TEAM_MASTER_OPTIONS manager_designation ON manager_designation.option_id = manager_position.designation_option_id AND manager_designation.location_id = manager_position.location_id
+          WHERE manager_position.assigned_staff_id = supervisor.staff_id
+            AND manager_position.location_id = supervisor.location_id
+            AND manager_position.active = 1
+            AND (manager_position.reports_to_user_id IS NOT NULL OR EXISTS (SELECT 1 FROM TEAM_HIERARCHY_USER_REPORTS linked_user WHERE linked_user.hierarchy_id = manager_position.hierarchy_id AND linked_user.location_id = manager_position.location_id))
+            AND (LOWER(manager_role.option_name) LIKE '%manager%' OR LOWER(manager_designation.option_name) LIKE '%manager%')
+        )
+      )
+  `).get(staffId, locationId, departmentId, locationId));
+}
+
+function isValidHierarchySupervisorPosition(hierarchyId, locationId, departmentId) {
+  return Boolean(db.prepare(`
+    SELECT 1
+    FROM TEAM_HIERARCHY supervisor_position
+    JOIN TEAM_MASTER_OPTIONS supervisor_role ON supervisor_role.option_id = supervisor_position.role_option_id AND supervisor_role.location_id = supervisor_position.location_id
+    JOIN TEAM_MASTER_OPTIONS supervisor_designation ON supervisor_designation.option_id = supervisor_position.designation_option_id AND supervisor_designation.location_id = supervisor_position.location_id
+    WHERE supervisor_position.hierarchy_id = ? AND supervisor_position.location_id = ? AND supervisor_position.active = 1
+      AND (
+        supervisor_position.department_id = ?
+        OR (
+          (supervisor_position.reports_to_user_id IS NOT NULL OR EXISTS (SELECT 1 FROM TEAM_HIERARCHY_USER_REPORTS linked_user WHERE linked_user.hierarchy_id = supervisor_position.hierarchy_id AND linked_user.location_id = supervisor_position.location_id))
+          AND (LOWER(supervisor_role.option_name) LIKE '%manager%' OR LOWER(supervisor_designation.option_name) LIKE '%manager%')
+          AND EXISTS (
+            SELECT 1 FROM USERS branch_lead
+            WHERE branch_lead.location_id = supervisor_position.location_id
+              AND branch_lead.role IN ('admin', 'reception') AND branch_lead.active = 1 AND branch_lead.deleted_at IS NULL
+              AND (branch_lead.user_id = supervisor_position.reports_to_user_id OR EXISTS (
+                SELECT 1 FROM TEAM_HIERARCHY_USER_REPORTS linked_user
+                WHERE linked_user.hierarchy_id = supervisor_position.hierarchy_id AND linked_user.user_id = branch_lead.user_id AND linked_user.location_id = supervisor_position.location_id
+              ))
+          )
+        )
+      )
+  `).get(hierarchyId, locationId, departmentId));
+}
+
+function createsHierarchyPositionCycle(locationId, targetHierarchyId, reportsToHierarchyId) {
+  let cursorId = Number(reportsToHierarchyId) || null;
+  const visited = new Set();
+  while (cursorId) {
+    if (Number(cursorId) === Number(targetHierarchyId) || visited.has(Number(cursorId))) return true;
+    visited.add(Number(cursorId));
+    const cursor = db.prepare(`
+      SELECT reports_to_hierarchy_id, reports_to_staff_id
+      FROM TEAM_HIERARCHY
+      WHERE hierarchy_id = ? AND location_id = ? AND active = 1
+    `).get(cursorId, locationId);
+    if (!cursor) return false;
+    if (cursor.reports_to_hierarchy_id) cursorId = Number(cursor.reports_to_hierarchy_id);
+    else if (cursor.reports_to_staff_id) cursorId = hierarchyPositionForStaff(cursor.reports_to_staff_id, locationId)?.hierarchy_id || null;
+    else cursorId = null;
+  }
+  return false;
+}
 
 app.get('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
   try {
-    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.active = 1 AND d.active = 1 ORDER BY d.department_name COLLATE NOCASE, designation.option_name COLLATE NOCASE, role.option_name COLLATE NOCASE`).all();
+    const targetLocId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!targetLocId) return res.status(400).json({ error: 'Choose a branch before loading its reporting hierarchy.' });
+    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.location_id = ? AND h.active = 1 AND d.active = 1 ORDER BY d.department_name COLLATE NOCASE, designation.option_name COLLATE NOCASE, role.option_name COLLATE NOCASE`).all(targetLocId).map(serializeTeamHierarchyPosition);
     res.json({ hierarchy });
   } catch (error) {
     console.error('Team hierarchy error:', error);
@@ -5701,22 +5993,67 @@ app.get('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 
   }
 });
 
+app.get('/api/admin/team-org-chart', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const targetLocId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!targetLocId) return res.status(400).json({ error: 'Choose a branch before loading its organization chart.' });
+    const location = db.prepare('SELECT location_id, name, code FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
+    if (!location) return res.status(404).json({ error: 'Branch not found.' });
+    const branchUsers = db.prepare(`
+      SELECT user_id, name, role, designation, team_role
+      FROM USERS
+      WHERE location_id = ? AND active = 1 AND deleted_at IS NULL AND role IN ('admin', 'reception')
+      ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, name COLLATE NOCASE
+    `).all(targetLocId);
+    res.json({ location, branch_users: branchUsers });
+  } catch (error) {
+    console.error('Team organization chart error:', error);
+    res.status(500).json({ error: 'Failed to load the branch organization chart' });
+  }
+});
+
 app.post('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
+    const targetLocId = req.user.role === 'master_admin' ? Number(req.body.location_id) : Number(req.locationId);
     const departmentId = Number(req.body.department_id);
     const roleOptionId = Number(req.body.role_option_id);
     const designationOptionId = Number(req.body.designation_option_id);
+    const assignedStaffId = req.body.assigned_staff_id ? Number(req.body.assigned_staff_id) : null;
+    const reportsToHierarchyId = req.body.reports_to_hierarchy_id ? Number(req.body.reports_to_hierarchy_id) : null;
     const reportsToStaffId = req.body.reports_to_staff_id ? Number(req.body.reports_to_staff_id) : null;
-    if (!departmentId || !roleOptionId || !designationOptionId) return res.status(400).json({ error: 'Department, role, and designation are required.' });
-    if (!db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_id = ? AND active = 1').get(departmentId)) return res.status(400).json({ error: 'Choose an active department.' });
-    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND option_type = 'role' AND active = 1").get(roleOptionId)) return res.status(400).json({ error: 'Choose an active role.' });
-    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND option_type = 'designation' AND active = 1").get(designationOptionId)) return res.status(400).json({ error: 'Choose an active designation.' });
-    if (reportsToStaffId && !db.prepare('SELECT 1 FROM STAFF WHERE staff_id = ? AND department = (SELECT department_name FROM TEAM_DEPARTMENTS WHERE department_id = ?) COLLATE NOCASE AND active = 1').get(reportsToStaffId, departmentId)) return res.status(400).json({ error: 'Choose an active team member assigned to this department.' });
-    const result = db.prepare(`
-      INSERT INTO TEAM_HIERARCHY (department_id, role_option_id, designation_option_id, reports_to_staff_id)
-      VALUES (?, ?, ?, ?)
-    `).run(departmentId, roleOptionId, designationOptionId, reportsToStaffId);
-    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.hierarchy_id = ?`).get(result.lastInsertRowid);
+    const reportsToUserIds = [...new Set((Array.isArray(req.body.reports_to_user_ids) ? req.body.reports_to_user_ids : req.body.reports_to_user_id ? [req.body.reports_to_user_id] : []).map(Number).filter(Boolean))];
+    const reportsToUserId = reportsToUserIds[0] || null;
+    if (!targetLocId || !departmentId || !roleOptionId || !designationOptionId) return res.status(400).json({ error: 'Branch, department, role, and designation are required.' });
+    if ([reportsToHierarchyId, reportsToStaffId].filter(Boolean).length + Number(reportsToUserIds.length > 0) > 1) return res.status(400).json({ error: 'Choose reporting users, a position, or a team member.' });
+    if (!db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_id = ? AND location_id = ? AND active = 1').get(departmentId, targetLocId)) return res.status(400).json({ error: 'Choose an active department from this branch.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND location_id = ? AND option_type = 'role' AND active = 1").get(roleOptionId, targetLocId)) return res.status(400).json({ error: 'Choose an active role from this branch.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND location_id = ? AND option_type = 'designation' AND active = 1").get(designationOptionId, targetLocId)) return res.status(400).json({ error: 'Choose an active designation from this branch.' });
+    if (assignedStaffId && !db.prepare(`
+      SELECT 1 FROM STAFF person
+      JOIN TEAM_DEPARTMENTS department ON LOWER(department.department_name) = LOWER(person.department) AND department.location_id = person.location_id AND department.active = 1
+      WHERE person.staff_id = ? AND person.location_id = ? AND person.active = 1 AND department.department_id = ?
+    `).get(assignedStaffId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose an active team member from this branch and department.' });
+    if (assignedStaffId && reportsToStaffId === assignedStaffId) return res.status(400).json({ error: 'A team member cannot report to themselves.' });
+    if (assignedStaffId && db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE assigned_staff_id = ? AND location_id = ? AND active = 1 LIMIT 1').get(assignedStaffId, targetLocId)) return res.status(409).json({ error: 'This team member is already assigned to a hierarchy position in this branch.' });
+    if (reportsToHierarchyId && !isValidHierarchySupervisorPosition(reportsToHierarchyId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose a position in this department or a Manager position reporting to this branch’s admin/manager.' });
+    if (reportsToStaffId && !isValidHierarchySupervisorStaff(reportsToStaffId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose a team member from this department or a Manager assigned to this branch.' });
+    if (reportsToStaffId) {
+      const supervisor = db.prepare('SELECT role, designation FROM STAFF WHERE staff_id = ?').get(reportsToStaffId);
+      const targetPosition = db.prepare('SELECT role.option_name AS role_name, designation.option_name AS designation_name FROM TEAM_MASTER_OPTIONS role JOIN TEAM_MASTER_OPTIONS designation ON designation.option_id = ? AND designation.location_id = ? WHERE role.option_id = ? AND role.location_id = ?').get(designationOptionId, targetLocId, roleOptionId, targetLocId);
+      if (supervisor && targetPosition && String(supervisor.role).toLowerCase() === targetPosition.role_name.toLowerCase() && String(supervisor.designation || '').toLowerCase() === targetPosition.designation_name.toLowerCase()) return res.status(400).json({ error: 'A position cannot report to a team member in the same position.' });
+    }
+    if (reportsToUserIds.some(userId => !db.prepare("SELECT 1 FROM USERS WHERE user_id = ? AND location_id = ? AND role IN ('admin', 'reception') AND active = 1 AND deleted_at IS NULL").get(userId, targetLocId))) return res.status(400).json({ error: 'Choose active Branch Admins or Managers from this branch.' });
+    const createPosition = db.transaction(() => {
+      const result = db.prepare(`
+        INSERT INTO TEAM_HIERARCHY (location_id, department_id, role_option_id, designation_option_id, assigned_staff_id, reports_to_hierarchy_id, reports_to_staff_id, reports_to_user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(targetLocId, departmentId, roleOptionId, designationOptionId, assignedStaffId, reportsToHierarchyId, reportsToStaffId, reportsToUserId);
+      const addReporter = db.prepare('INSERT INTO TEAM_HIERARCHY_USER_REPORTS (hierarchy_id, user_id, location_id) VALUES (?, ?, ?)');
+      reportsToUserIds.forEach(userId => addReporter.run(result.lastInsertRowid, userId, targetLocId));
+      return result.lastInsertRowid;
+    });
+    const newHierarchyId = createPosition();
+    const hierarchy = serializeTeamHierarchyPosition(db.prepare(`${teamHierarchySelect} WHERE h.hierarchy_id = ?`).get(newHierarchyId));
     res.status(201).json({ hierarchy });
   } catch (error) {
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That position is already listed in this department.' });
@@ -5725,12 +6062,82 @@ app.post('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin',
   }
 });
 
+app.put('/api/admin/team-hierarchy/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const targetLocId = req.user.role === 'master_admin' ? Number(req.body.location_id) : Number(req.locationId);
+    const hierarchyId = Number(req.params.id);
+    const departmentId = Number(req.body.department_id);
+    const roleOptionId = Number(req.body.role_option_id);
+    const designationOptionId = Number(req.body.designation_option_id);
+    const assignedStaffId = req.body.assigned_staff_id ? Number(req.body.assigned_staff_id) : null;
+    const reportsToHierarchyId = req.body.reports_to_hierarchy_id ? Number(req.body.reports_to_hierarchy_id) : null;
+    const reportsToStaffId = req.body.reports_to_staff_id ? Number(req.body.reports_to_staff_id) : null;
+    const reportsToUserIds = [...new Set((Array.isArray(req.body.reports_to_user_ids) ? req.body.reports_to_user_ids : req.body.reports_to_user_id ? [req.body.reports_to_user_id] : []).map(Number).filter(Boolean))];
+    const reportsToUserId = reportsToUserIds[0] || null;
+    const existing = db.prepare('SELECT * FROM TEAM_HIERARCHY WHERE hierarchy_id = ? AND location_id = ? AND active = 1').get(hierarchyId, targetLocId);
+    if (!existing) return res.status(404).json({ error: 'Reporting position not found in this branch.' });
+    if (!departmentId || !roleOptionId || !designationOptionId) return res.status(400).json({ error: 'Department, role, and designation are required.' });
+    if ([reportsToHierarchyId, reportsToStaffId].filter(Boolean).length + Number(reportsToUserIds.length > 0) > 1) return res.status(400).json({ error: 'Choose reporting users, a position, or a team member.' });
+    if (!db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_id = ? AND location_id = ? AND active = 1').get(departmentId, targetLocId)) return res.status(400).json({ error: 'Choose an active department from this branch.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND location_id = ? AND option_type = 'role' AND active = 1").get(roleOptionId, targetLocId)) return res.status(400).json({ error: 'Choose an active role from this branch.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_id = ? AND location_id = ? AND option_type = 'designation' AND active = 1").get(designationOptionId, targetLocId)) return res.status(400).json({ error: 'Choose an active designation from this branch.' });
+    if (assignedStaffId && !db.prepare(`
+      SELECT 1 FROM STAFF person
+      JOIN TEAM_DEPARTMENTS department ON LOWER(department.department_name) = LOWER(person.department) AND department.location_id = person.location_id AND department.active = 1
+      WHERE person.staff_id = ? AND person.location_id = ? AND person.active = 1 AND department.department_id = ?
+    `).get(assignedStaffId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose an active team member from this branch and department.' });
+    if (assignedStaffId && reportsToStaffId === assignedStaffId) return res.status(400).json({ error: 'A team member cannot report to themselves.' });
+    if (assignedStaffId && db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE assigned_staff_id = ? AND location_id = ? AND active = 1 AND hierarchy_id <> ? LIMIT 1').get(assignedStaffId, targetLocId, hierarchyId)) return res.status(409).json({ error: 'This team member is already assigned to another hierarchy position in this branch.' });
+    if (reportsToHierarchyId && !isValidHierarchySupervisorPosition(reportsToHierarchyId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose a position in this department or a Manager position reporting to this branch’s admin/manager.' });
+    if (reportsToHierarchyId && createsHierarchyPositionCycle(targetLocId, hierarchyId, reportsToHierarchyId)) return res.status(400).json({ error: 'This reporting line would create a loop in the department hierarchy.' });
+    if (reportsToStaffId && !isValidHierarchySupervisorStaff(reportsToStaffId, targetLocId, departmentId)) return res.status(400).json({ error: 'Choose a team member from this department or a Manager assigned to this branch.' });
+    if (reportsToStaffId) {
+      const supervisor = db.prepare('SELECT role, designation FROM STAFF WHERE staff_id = ?').get(reportsToStaffId);
+      const targetPosition = db.prepare('SELECT role.option_name AS role_name, designation.option_name AS designation_name FROM TEAM_MASTER_OPTIONS role JOIN TEAM_MASTER_OPTIONS designation ON designation.option_id = ? AND designation.location_id = ? WHERE role.option_id = ? AND role.location_id = ?').get(designationOptionId, targetLocId, roleOptionId, targetLocId);
+      if (supervisor && targetPosition && String(supervisor.role).toLowerCase() === targetPosition.role_name.toLowerCase() && String(supervisor.designation || '').toLowerCase() === targetPosition.designation_name.toLowerCase()) return res.status(400).json({ error: 'A position cannot report to a team member in the same position.' });
+      if (createsTeamHierarchyCycle(targetLocId, hierarchyId, reportsToStaffId)) return res.status(400).json({ error: 'This reporting line would create a loop in the department hierarchy.' });
+    }
+    if (reportsToUserIds.some(userId => !db.prepare("SELECT 1 FROM USERS WHERE user_id = ? AND location_id = ? AND role IN ('admin', 'reception') AND active = 1 AND deleted_at IS NULL").get(userId, targetLocId))) return res.status(400).json({ error: 'Choose active Branch Admins or Managers from this branch.' });
+    const updatePosition = db.transaction(() => {
+      db.prepare(`
+        UPDATE TEAM_HIERARCHY
+        SET department_id = ?, role_option_id = ?, designation_option_id = ?, assigned_staff_id = ?, reports_to_hierarchy_id = ?, reports_to_staff_id = ?, reports_to_user_id = ?
+        WHERE hierarchy_id = ? AND location_id = ?
+      `).run(departmentId, roleOptionId, designationOptionId, assignedStaffId, reportsToHierarchyId, reportsToStaffId, reportsToUserId, hierarchyId, targetLocId);
+      db.prepare('DELETE FROM TEAM_HIERARCHY_USER_REPORTS WHERE hierarchy_id = ? AND location_id = ?').run(hierarchyId, targetLocId);
+      const addReporter = db.prepare('INSERT INTO TEAM_HIERARCHY_USER_REPORTS (hierarchy_id, user_id, location_id) VALUES (?, ?, ?)');
+      reportsToUserIds.forEach(userId => addReporter.run(hierarchyId, userId, targetLocId));
+    });
+    updatePosition();
+    res.json({ hierarchy: serializeTeamHierarchyPosition(db.prepare(`${teamHierarchySelect} WHERE h.hierarchy_id = ? AND h.location_id = ?`).get(hierarchyId, targetLocId)) });
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That position is already listed in this department.' });
+    console.error('Update hierarchy position error:', error);
+    res.status(500).json({ error: 'Failed to update reporting line' });
+  }
+});
+
 app.delete('/api/admin/team-hierarchy/:id', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
   try {
+    const targetLocId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
+    if (!targetLocId) return res.status(400).json({ error: 'Choose a branch before editing its reporting hierarchy.' });
     const hierarchyId = Number(req.params.id);
-    const hasReports = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE reports_to_hierarchy_id = ? AND active = 1 LIMIT 1').get(hierarchyId);
+    const hasReports = db.prepare('SELECT 1 FROM TEAM_HIERARCHY WHERE reports_to_hierarchy_id = ? AND location_id = ? AND active = 1 LIMIT 1').get(hierarchyId, targetLocId);
     if (hasReports) return res.status(409).json({ error: 'Reassign the positions reporting here before removing this position.' });
-    const result = db.prepare('UPDATE TEAM_HIERARCHY SET active = 0 WHERE hierarchy_id = ? AND active = 1').run(hierarchyId);
+    const position = db.prepare(`${teamHierarchySelect} WHERE h.hierarchy_id = ? AND h.location_id = ?`).get(hierarchyId, targetLocId);
+    if (!position) return res.status(404).json({ error: 'Hierarchy position not found in this branch.' });
+    const hasStaffReports = db.prepare(`
+      SELECT 1
+      FROM TEAM_HIERARCHY child
+      JOIN STAFF supervisor ON supervisor.staff_id = child.reports_to_staff_id
+      WHERE child.location_id = ? AND child.active = 1
+        AND LOWER(supervisor.department) = LOWER(?)
+        AND LOWER(supervisor.role) = LOWER(?)
+        AND LOWER(COALESCE(supervisor.designation, '')) = LOWER(?)
+      LIMIT 1
+    `).get(targetLocId, position.department_name, position.role_name, position.designation_name);
+    if (hasStaffReports) return res.status(409).json({ error: 'Reassign the team members reporting here before removing this position.' });
+    const result = db.prepare('UPDATE TEAM_HIERARCHY SET active = 0 WHERE hierarchy_id = ? AND location_id = ? AND active = 1').run(hierarchyId, targetLocId);
     if (!result.changes) return res.status(404).json({ error: 'Hierarchy position not found' });
     res.json({ success: true });
   } catch (error) {
@@ -5739,9 +6146,9 @@ app.delete('/api/admin/team-hierarchy/:id', authenticateToken, authorizeRoles('a
   }
 });
 
-app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
+app.get('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
   try {
-    const locId = req.locationId;
+    const locId = req.user.role === 'master_admin' ? Number(req.query.location_id) : req.locationId;
     if (!locId) {
       return res.status(400).json({ error: 'Branch context (x-location-id) is required to manage staff.' });
     }
@@ -5825,18 +6232,15 @@ app.post('/api/admin/staff', authenticateToken, authorizeRoles('admin', 'recepti
     if (!name) {
       return res.status(400).json({ error: 'Staff name is required' });
     }
+    const targetLocId = req.locationId;
+    if (!targetLocId) return res.status(400).json({ error: 'Branch context (x-location-id) is required to add staff.' });
     const cleanRole = String(role || '').trim();
     const cleanDesignation = String(designation || '').trim();
     if (!cleanRole || !cleanDesignation) return res.status(400).json({ error: 'Role and designation are required.' });
-    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanRole)) return res.status(400).json({ error: 'Choose a role from the Team Master list.' });
-    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from the Team Master list.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(targetLocId, cleanRole)) return res.status(400).json({ error: 'Choose a role from this branch’s Team Master list.' });
+    if (!db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(targetLocId, cleanDesignation)) return res.status(400).json({ error: 'Choose a designation from this branch’s Team Master list.' });
     const cleanDepartment = String(department || '').trim();
-    if (cleanDepartment && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_name = ? COLLATE NOCASE AND active = 1').get(cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from the Master hierarchy.' });
-
-    const targetLocId = req.locationId;
-    if (!targetLocId) {
-      return res.status(400).json({ error: 'Branch context (x-location-id) is required to add staff.' });
-    }
+    if (cleanDepartment && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE location_id = ? AND department_name = ? COLLATE NOCASE AND active = 1').get(targetLocId, cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from this branch’s Team Master.' });
     const cleanSalaryType = salary_type === 'salary_plus_incentive' ? 'salary_plus_incentive' : 'fixed';
     const cleanSalaryAmount = Number(salary_amount) || 0;
     const cleanIncentivePct = cleanSalaryType === 'salary_plus_incentive' ? (Number(incentive_percentage) || 0) : 0;
@@ -5934,15 +6338,15 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
     }
     if (role !== undefined) {
       const cleanRole = String(role ?? '').trim();
-      if (!cleanRole || (cleanRole.toLowerCase() !== String(existing.role || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanRole))) return res.status(400).json({ error: 'Choose a role from the Team Master list.' });
+      if (!cleanRole || (cleanRole.toLowerCase() !== String(existing.role || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'role' AND option_name = ? COLLATE NOCASE AND active = 1").get(activeLocId, cleanRole))) return res.status(400).json({ error: 'Choose a role from this branch’s Team Master list.' });
     }
     if (designation !== undefined) {
       const cleanDesignation = String(designation ?? '').trim();
-      if (!cleanDesignation || (cleanDesignation.toLowerCase() !== String(existing.designation || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(cleanDesignation))) return res.status(400).json({ error: 'Choose a designation from the Team Master list.' });
+      if (!cleanDesignation || (cleanDesignation.toLowerCase() !== String(existing.designation || '').toLowerCase() && !db.prepare("SELECT 1 FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'designation' AND option_name = ? COLLATE NOCASE AND active = 1").get(activeLocId, cleanDesignation))) return res.status(400).json({ error: 'Choose a designation from this branch’s Team Master list.' });
     }
     if (department !== undefined) {
       const cleanDepartment = String(department ?? '').trim();
-      if (cleanDepartment && cleanDepartment.toLowerCase() !== String(existing.department || '').toLowerCase() && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE department_name = ? COLLATE NOCASE AND active = 1').get(cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from the Master hierarchy.' });
+      if (cleanDepartment && cleanDepartment.toLowerCase() !== String(existing.department || '').toLowerCase() && !db.prepare('SELECT 1 FROM TEAM_DEPARTMENTS WHERE location_id = ? AND department_name = ? COLLATE NOCASE AND active = 1').get(activeLocId, cleanDepartment)) return res.status(400).json({ error: 'Choose an active department from this branch’s Team Master.' });
     }
 
     const cleanSalaryType = salary_type !== undefined
@@ -6029,8 +6433,499 @@ app.put('/api/admin/staff/:id', authenticateToken, authorizeRoles('admin', 'rece
   }
 });
 
+function ensureVisitNotificationOutbox() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS VISIT_NOTIFICATION_OUTBOX (
+      notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER NOT NULL,
+      visit_id INTEGER NOT NULL,
+      event_key TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      provider TEXT,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sent_at DATETIME,
+      UNIQUE (visit_id, event_key, channel, recipient)
+    );
+  `);
+}
+
+function normalizeNotificationPhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.startsWith('91') && digits.length === 12) return `+${digits}`;
+  return digits.length >= 10 ? `+${digits}` : '';
+}
+
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+}
+
+async function deliverVisitNotification(channel, recipient, message, subject, html) {
+  if (channel === 'whatsapp') {
+    const sid = process.env.TWILIO_ACCOUNT_SID;
+    const auth = process.env.TWILIO_AUTH_TOKEN;
+    const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || (String(process.env.TWILIO_PHONE_NUMBER || '').startsWith('whatsapp:') ? process.env.TWILIO_PHONE_NUMBER : '');
+    if (sid && auth && twilioFrom) {
+      const params = new URLSearchParams({ To: `whatsapp:${recipient}`, From: twilioFrom, Body: message });
+      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${sid}:${auth}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params.toString(),
+        signal: AbortSignal.timeout(12000)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || `Twilio WhatsApp returned ${response.status}`);
+      return { provider: 'Twilio WhatsApp' };
+    }
+
+    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    if (accessToken && phoneNumberId) {
+      const version = process.env.WHATSAPP_API_VERSION || 'v21.0';
+      const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: recipient.replace('+', ''),
+          type: 'text',
+          text: { preview_url: false, body: message }
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || `WhatsApp Cloud API returned ${response.status}`);
+      return { provider: 'WhatsApp Cloud API' };
+    }
+
+    throw new Error('WhatsApp is not configured. Set Twilio WhatsApp or WhatsApp Cloud API credentials.');
+  }
+
+  if (channel === 'email') {
+    const resendKey = process.env.RESEND_API_KEY;
+    const resendFrom = process.env.RESEND_FROM_EMAIL;
+    if (resendKey && resendFrom) {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: resendFrom, to: [recipient], subject, html, text: message }),
+        signal: AbortSignal.timeout(12000)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || `Resend returned ${response.status}`);
+      return { provider: 'Resend' };
+    }
+
+    const sendGridKey = process.env.SENDGRID_API_KEY;
+    const sendGridFrom = process.env.SENDGRID_FROM_EMAIL;
+    if (sendGridKey && sendGridFrom) {
+      const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${sendGridKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: recipient }] }],
+          from: { email: sendGridFrom },
+          subject,
+          content: [{ type: 'text/plain', value: message }, { type: 'text/html', value: html }]
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) throw new Error(`SendGrid returned ${response.status}`);
+      return { provider: 'SendGrid' };
+    }
+
+    throw new Error('Email is not configured. Set Resend or SendGrid credentials.');
+  }
+
+  throw new Error(`Unsupported notification channel: ${channel}`);
+}
+
+async function sendVisitNotification({ visitId, locationId, eventKey, channel, recipient, message, subject, html }) {
+  if (!recipient) return;
+  ensureVisitNotificationOutbox();
+  db.prepare(`
+    INSERT OR IGNORE INTO VISIT_NOTIFICATION_OUTBOX (location_id, visit_id, event_key, channel, recipient, status)
+    VALUES (?, ?, ?, ?, ?, 'pending')
+  `).run(locationId, visitId, eventKey, channel, recipient);
+
+  const row = db.prepare(`
+    SELECT * FROM VISIT_NOTIFICATION_OUTBOX
+    WHERE visit_id = ? AND event_key = ? AND channel = ? AND recipient = ?
+  `).get(visitId, eventKey, channel, recipient);
+  if (!row || row.status === 'sent' || row.status === 'sending') return;
+
+  const claim = db.prepare(`
+    UPDATE VISIT_NOTIFICATION_OUTBOX
+    SET status = 'sending', attempts = attempts + 1, error = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE notification_id = ? AND status NOT IN ('sent', 'sending')
+  `).run(row.notification_id);
+  if (!claim.changes) return;
+
+  try {
+    const result = await deliverVisitNotification(channel, recipient, message, subject, html);
+    db.prepare(`
+      UPDATE VISIT_NOTIFICATION_OUTBOX
+      SET status = 'sent', provider = ?, sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error = NULL
+      WHERE notification_id = ?
+    `).run(result.provider, row.notification_id);
+  } catch (error) {
+    const messageText = String(error?.message || 'Delivery failed').slice(0, 500);
+    const status = messageText.includes('not configured') ? 'not_configured' : 'failed';
+    db.prepare(`
+      UPDATE VISIT_NOTIFICATION_OUTBOX
+      SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE notification_id = ?
+    `).run(status, messageText, row.notification_id);
+    console.error(`[Visit notification ${channel}] visit=${visitId}: ${messageText}`);
+  }
+}
+
+async function dispatchVisitNotifications(visitId) {
+  try {
+    ensureVisitNotificationOutbox();
+    const visit = db.prepare(`
+      SELECT v.*, c.name AS client_name, c.surname AS client_surname, c.phone AS client_phone,
+             c.primary_login_phone, c.email AS client_email, c.email_ids AS client_email_ids,
+             c.primary_login_email, l.name AS location_name
+      FROM VISITS v
+      JOIN CLIENTS c ON c.client_id = v.client_id
+      JOIN LOCATIONS l ON l.location_id = v.location_id
+      WHERE v.visit_id = ?
+    `).get(visitId);
+    if (!visit) return;
+
+    const services = db.prepare(`
+      SELECT vs.service_name_snapshot AS service_name, vs.staff_id, s.name AS staff_name
+      FROM VISIT_SERVICES vs
+      LEFT JOIN STAFF s ON s.staff_id = vs.staff_id
+      WHERE vs.visit_id = ?
+      ORDER BY vs.visit_service_id ASC
+    `).all(visitId);
+    const staff = [...new Set(services.map(item => item.staff_name).filter(Boolean))];
+    const date = visit.visit_date ? new Date(`${String(visit.visit_date).slice(0, 10)}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'your scheduled date';
+    const appointmentTime = visit.service_time || '';
+    const serviceList = services.map(item => item.service_name).filter(Boolean).join(', ') || 'your selected services';
+    const greeting = visit.client_name || 'there';
+    const branch = visit.location_name || 'Maison BeYou';
+    const phone = normalizeNotificationPhone(visit.primary_login_phone || visit.client_phone);
+    let emails = [];
+    try {
+      const parsed = JSON.parse(visit.client_email_ids || '[]');
+      if (Array.isArray(parsed)) emails = parsed;
+    } catch {}
+    const email = String(visit.primary_login_email || visit.client_email || emails[0] || '').trim().toLowerCase();
+    const recipients = [
+      { channel: 'whatsapp', address: phone },
+      { channel: 'email', address: email }
+    ].filter(item => item.address);
+    const commonDetails = `Branch: ${branch}\nDate: ${date}${appointmentTime ? `\nTime: ${appointmentTime}` : ''}\nServices: ${serviceList}${staff.length ? `\nYour specialist${staff.length > 1 ? 's' : ''}: ${staff.join(', ')}` : ''}\nVisit reference: ${visit.visit_id}`;
+    const escape = escapeHtml;
+
+    const notifications = [];
+    const allServicesAssigned = services.length > 0 && services.every(item => item.staff_id);
+    if (appointmentTime && allServicesAssigned) {
+      const scheduleSignature = createHash('sha256')
+        .update(`${visit.visit_date || ''}|${appointmentTime}|${services.map(item => `${item.service_name}:${item.staff_id}`).join('|')}`)
+        .digest('hex').slice(0, 16);
+      const eventKey = `appointment-${scheduleSignature}`;
+      const message = `Hi ${greeting}, your appointment at ${branch} is confirmed.\n${commonDetails}\nWe look forward to welcoming you!`;
+      const subject = `Appointment confirmed at ${branch}`;
+      const html = `<p>Hi ${escape(greeting)},</p><p>Your appointment at <strong>${escape(branch)}</strong> is confirmed.</p><ul><li><strong>Date:</strong> ${escape(date)}</li><li><strong>Time:</strong> ${escape(appointmentTime)}</li><li><strong>Services:</strong> ${escape(serviceList)}</li>${staff.length ? `<li><strong>Your specialist${staff.length > 1 ? 's' : ''}:</strong> ${escape(staff.join(', '))}</li>` : ''}<li><strong>Visit reference:</strong> ${escape(visit.visit_id)}</li></ul><p>We look forward to welcoming you!</p>`;
+      notifications.push(...recipients.map(item => sendVisitNotification({ visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address, message, subject, html })));
+    }
+
+    if (String(visit.payment_status).toLowerCase() === 'paid') {
+      const eventKey = 'payment-paid';
+      const amount = `₹${Number(visit.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const message = `Thank you for your payment, ${greeting}! We hope you enjoy your service.\n${commonDetails}\nAmount received: ${amount}`;
+      const subject = `Thank you for your payment — ${branch}`;
+      const html = `<p>Thank you for your payment, ${escape(greeting)}!</p><p>We hope you enjoy your service.</p><ul><li><strong>Branch:</strong> ${escape(branch)}</li><li><strong>Date:</strong> ${escape(date)}</li>${appointmentTime ? `<li><strong>Time:</strong> ${escape(appointmentTime)}</li>` : ''}<li><strong>Services:</strong> ${escape(serviceList)}</li>${staff.length ? `<li><strong>Your specialist${staff.length > 1 ? 's' : ''}:</strong> ${escape(staff.join(', '))}</li>` : ''}<li><strong>Amount received:</strong> ${escape(amount)}</li><li><strong>Visit reference:</strong> ${escape(visit.visit_id)}</li></ul>`;
+      notifications.push(...recipients.map(item => sendVisitNotification({ visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address, message, subject, html })));
+    }
+
+    await Promise.allSettled(notifications);
+  } catch (error) {
+    console.error(`Could not dispatch visit notifications for ${visitId}:`, error);
+  }
+}
+
+// Migrate one or more clients to another active branch membership plan while
+// preserving their old membership instances and sending a change notice.
+app.post('/api/memberships/migrate', authenticateToken, authorizeRoles('master_admin', 'admin'), async (req, res) => {
+  try {
+    const locationId = req.locationId;
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to migrate memberships.' });
+    ensureMembershipPlansTable(locationId);
+    try { db.exec('ALTER TABLE CLIENT_MEMBERSHIPS ADD COLUMN privileges_snapshot TEXT'); } catch {}
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS MEMBERSHIP_MIGRATION_HISTORY (
+        migration_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        location_id INTEGER NOT NULL,
+        client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+        from_plan_id INTEGER,
+        to_plan_id INTEGER,
+        from_membership_id INTEGER,
+        to_membership_id INTEGER,
+        from_tier TEXT NOT NULL,
+        to_tier TEXT NOT NULL,
+        credits_transferred REAL NOT NULL DEFAULT 0,
+        migrated_by INTEGER,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS MEMBERSHIP_MIGRATION_NOTIFICATION_OUTBOX (
+        notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        migration_id INTEGER NOT NULL REFERENCES MEMBERSHIP_MIGRATION_HISTORY(migration_id) ON DELETE CASCADE,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        provider TEXT,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sent_at DATETIME,
+        UNIQUE(migration_id, channel, recipient)
+      );
+    `);
+
+    const fromPlanId = Number(req.body.from_plan_id);
+    const toPlanId = Number(req.body.to_plan_id);
+    const clientIds = [...new Set((Array.isArray(req.body.client_ids) ? req.body.client_ids : []).map(Number).filter(Number.isInteger))];
+    const clientOptions = req.body.client_options && typeof req.body.client_options === 'object' ? req.body.client_options : {};
+    const migrationMode = req.body.migration_mode === 'custom' ? 'custom' : 'carry';
+    if (!fromPlanId || !toPlanId || !clientIds.length) return res.status(400).json({ error: 'Choose a source plan, destination plan, and at least one client.' });
+    if (clientIds.length > 100) return res.status(400).json({ error: 'Migrate up to 100 clients at a time.' });
+
+    const fromPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND plan_id = ?').get(locationId, fromPlanId);
+    const toPlan = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND plan_id = ? AND COALESCE(is_active, 1) = 1').get(locationId, toPlanId);
+    if (!fromPlan) return res.status(404).json({ error: 'Source membership plan not found for this branch.' });
+    if (!toPlan) return res.status(404).json({ error: 'Destination must be an active membership plan in this branch.' });
+    if (fromPlanId === toPlanId) return res.status(400).json({ error: 'Choose a different destination plan.' });
+
+    const sourceNames = new Set([fromPlan.tier, fromPlan.name, fromPlan.fullName, fromPlan.id].filter(Boolean).map(value => String(value).trim().toLowerCase()));
+    const today = new Date().toISOString().slice(0, 10);
+    const validityMatch = String(toPlan.validity || '').match(/(\d+)\s*(day|month|year)/i);
+    const expiry = new Date(`${today}T12:00:00Z`);
+    if (validityMatch) {
+      const count = Number(validityMatch[1]);
+      const unit = validityMatch[2].toLowerCase();
+      if (unit.startsWith('day')) expiry.setUTCDate(expiry.getUTCDate() + count);
+      else if (unit.startsWith('month')) expiry.setUTCMonth(expiry.getUTCMonth() + count);
+      else expiry.setUTCFullYear(expiry.getUTCFullYear() + count);
+    }
+    const expiryDate = expiry.toISOString().slice(0, 10);
+    const migrate = db.transaction(() => clientIds.map(clientId => {
+      const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ? AND location_id = ?').get(clientId, locationId);
+      if (!client) throw new Error(`Client ${clientId} is not in this branch.`);
+      let source = db.prepare(`SELECT * FROM CLIENT_MEMBERSHIPS WHERE client_id = ? AND status = 'active' ORDER BY membership_id DESC`).all(clientId)
+        .find(item => sourceNames.has(String(item.tier_name || '').trim().toLowerCase()));
+      if (!source && sourceNames.has(String(client.membership_tier || '').trim().toLowerCase()) && String(client.membership_status || '').toLowerCase() === 'active') {
+        const startDate = String(client.membership_started_at || today).slice(0, 10);
+        let sourceExpiry = String(client.membership_expires_at || '').slice(0, 10);
+        if (!sourceExpiry) {
+          const fallbackExpiry = new Date(`${startDate}T12:00:00Z`);
+          const sourceValidity = String(fromPlan.validity || '').match(/(\d+)\s*(day|month|year)/i);
+          if (sourceValidity) {
+            const amount = Number(sourceValidity[1]);
+            const unit = sourceValidity[2].toLowerCase();
+            if (unit.startsWith('day')) fallbackExpiry.setUTCDate(fallbackExpiry.getUTCDate() + amount);
+            else if (unit.startsWith('month')) fallbackExpiry.setUTCMonth(fallbackExpiry.getUTCMonth() + amount);
+            else fallbackExpiry.setUTCFullYear(fallbackExpiry.getUTCFullYear() + amount);
+          }
+          sourceExpiry = fallbackExpiry.toISOString().slice(0, 10);
+        }
+        const allocated = Number(client.membership_cost) || Number(fromPlan.credits) || Number(fromPlan.price) || 0;
+        const insertedSource = db.prepare(`
+          INSERT INTO CLIENT_MEMBERSHIPS (client_id, tier_name, cost, credits_allocated, start_date, expiry_date, status)
+          VALUES (?, ?, ?, ?, ?, ?, 'active')
+        `).run(clientId, client.membership_tier, allocated, allocated, startDate, sourceExpiry);
+        source = db.prepare('SELECT * FROM CLIENT_MEMBERSHIPS WHERE membership_id = ?').get(insertedSource.lastInsertRowid);
+      }
+      if (!source) throw new Error(`${client.name} does not have an active membership under ${fromPlan.tier}.`);
+      const used = Number(db.prepare(`
+        SELECT COALESCE(SUM(membership_amount_used), 0) AS used FROM VISITS
+        WHERE client_id = ? AND LOWER(COALESCE(membership_tier, '')) = LOWER(?)
+          AND substr(visit_date, 1, 10) >= ? AND substr(visit_date, 1, 10) <= ?
+      `).get(clientId, source.tier_name, source.start_date, source.expiry_date).used) || 0;
+      const sourceCredits = Number(source.credits_allocated) || Number(source.cost) || 0;
+      const transfer = Math.max(0, sourceCredits - used);
+      const sourcePrivileges = getClientMembershipPrivileges(clientId).privileges;
+      const requestedOptions = clientOptions[String(clientId)] || {};
+      const customizedCredits = Number(requestedOptions.credits);
+      const carriedCredits = migrationMode === 'custom' && Number.isFinite(customizedCredits)
+        ? Math.max(0, customizedCredits)
+        : transfer;
+      const allowedPrivileges = new Map(sourcePrivileges.map(privilege => [String(privilege.id), privilege]));
+      const requestedPrivilegeIds = Array.isArray(requestedOptions.privilege_ids)
+        ? requestedOptions.privilege_ids.map(String)
+        : sourcePrivileges.map(privilege => String(privilege.id));
+      const privilegeSnapshot = requestedPrivilegeIds
+        .filter(id => allowedPrivileges.has(id))
+        .map(id => {
+          const privilege = allowedPrivileges.get(id);
+          return { id: privilege.id, name: privilege.name, allowedUses: Number(privilege.allowedUses) || 1, type: privilege.type || 'benefit' };
+        });
+      db.prepare("UPDATE CLIENT_MEMBERSHIPS SET status = 'upgraded', updated_at = CURRENT_TIMESTAMP WHERE membership_id = ?").run(source.membership_id);
+      const totalCredits = migrationMode === 'custom' ? carriedCredits : transfer;
+      const inserted = db.prepare(`
+        INSERT INTO CLIENT_MEMBERSHIPS (client_id, tier_name, cost, credits_allocated, start_date, expiry_date, status, privileges_snapshot)
+        VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+      `).run(clientId, toPlan.name, totalCredits, totalCredits, today, expiryDate, JSON.stringify(privilegeSnapshot));
+      const copiedRedemptions = db.prepare(`
+        SELECT privilege_id, privilege_name, visit_id, redeemed_at, notes
+        FROM MEMBERSHIP_PRIVILEGE_REDEMPTIONS
+        WHERE membership_id = ? AND status = 'completed'
+      `).all(source.membership_id).filter(row => requestedPrivilegeIds.includes(String(row.privilege_id)));
+      const insertRedemption = db.prepare(`
+        INSERT INTO MEMBERSHIP_PRIVILEGE_REDEMPTIONS (membership_id, client_id, privilege_id, privilege_name, visit_id, redeemed_at, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+      `);
+      copiedRedemptions.forEach(row => insertRedemption.run(inserted.lastInsertRowid, clientId, row.privilege_id, row.privilege_name, row.visit_id, row.redeemed_at, `Carried from membership ${source.membership_id}${row.notes ? ` · ${row.notes}` : ''}`));
+      db.prepare(`
+        UPDATE CLIENTS SET membership_tier = ?, membership_status = 'active', membership_started_at = ?,
+          membership_expires_at = ?, membership_balance = ?, membership_cost = ?, membership_benefit_status = 'Available',
+          last_membership_amount_used = 0, last_benefit_used = NULL, last_benefit_date = NULL,
+          last_membership_benefit_used = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE client_id = ? AND location_id = ?
+      `).run(toPlan.name, today, expiryDate, totalCredits, totalCredits, clientId, locationId);
+      const history = db.prepare(`
+        INSERT INTO MEMBERSHIP_MIGRATION_HISTORY
+          (location_id, client_id, from_plan_id, to_plan_id, from_membership_id, to_membership_id, from_tier, to_tier, credits_transferred, migrated_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(locationId, clientId, fromPlan.plan_id, toPlan.plan_id, source.membership_id, inserted.lastInsertRowid, source.tier_name, toPlan.name, transfer, req.user?.user_id || null);
+      return { migration_id: Number(history.lastInsertRowid), client_id: clientId, name: `${client.name || ''} ${client.surname || ''}`.trim(), phone: client.primary_login_phone || client.phone, email: client.primary_login_email || client.email, from_tier: source.tier_name, to_tier: toPlan.name, credits_transferred: totalCredits, source_credits_remaining: transfer, privileges_carried: privilegeSnapshot.length };
+    }));
+
+    const migrated = migrate();
+    const notificationOutcomes = await Promise.allSettled(migrated.flatMap(item => {
+      const phone = normalizeNotificationPhone(item.phone);
+      const email = String(item.email || '').trim().toLowerCase();
+      const message = `Hi ${item.name || 'there'}, your Maison BeYou membership has been migrated from ${item.from_tier} to ${item.to_tier}. Your new plan starts ${today} and is valid through ${expiryDate}. Your remaining credit balance of ₹${item.credits_transferred.toLocaleString('en-IN')} has been carried forward.`;
+      const subject = `Your Maison BeYou membership has been updated`;
+      const html = `<p>Hi ${escapeHtml(item.name || 'there')},</p><p>Your Maison BeYou membership has been migrated from <strong>${escapeHtml(item.from_tier)}</strong> to <strong>${escapeHtml(item.to_tier)}</strong>.</p><p>Your new plan starts ${escapeHtml(today)} and is valid through ${escapeHtml(expiryDate)}. Your remaining credit balance of <strong>₹${item.credits_transferred.toLocaleString('en-IN')}</strong> has been carried forward.</p>`;
+      return [
+        ...(phone ? [{ channel: 'whatsapp', recipient: phone }] : []),
+        ...(email ? [{ channel: 'email', recipient: email }] : [])
+      ].map(async target => {
+        db.prepare(`INSERT OR IGNORE INTO MEMBERSHIP_MIGRATION_NOTIFICATION_OUTBOX (migration_id, channel, recipient, status) VALUES (?, ?, ?, 'pending')`).run(item.migration_id, target.channel, target.recipient);
+        const row = db.prepare('SELECT * FROM MEMBERSHIP_MIGRATION_NOTIFICATION_OUTBOX WHERE migration_id = ? AND channel = ? AND recipient = ?').get(item.migration_id, target.channel, target.recipient);
+        if (!row || row.status === 'sent') return row?.status || 'skipped';
+        try {
+          const delivery = await deliverVisitNotification(target.channel, target.recipient, message, subject, html);
+          db.prepare("UPDATE MEMBERSHIP_MIGRATION_NOTIFICATION_OUTBOX SET status = 'sent', provider = ?, sent_at = CURRENT_TIMESTAMP, error = NULL WHERE notification_id = ?").run(delivery.provider, row.notification_id);
+          return 'sent';
+        } catch (error) {
+          const messageText = String(error?.message || 'Delivery failed').slice(0, 500);
+          const status = messageText.includes('not configured') ? 'not_configured' : 'failed';
+          db.prepare('UPDATE MEMBERSHIP_MIGRATION_NOTIFICATION_OUTBOX SET status = ?, error = ? WHERE notification_id = ?').run(status, messageText, row.notification_id);
+          return status;
+        }
+      });
+    }));
+    const notificationResults = notificationOutcomes.filter(outcome => outcome.status === 'fulfilled').map(outcome => outcome.value);
+    const notificationStatus = notificationResults.some(status => status === 'sent') ? 'sent' : notificationResults.some(status => status === 'failed') ? 'failed' : 'not_configured_or_no_contact';
+    res.json({ success: true, migrated: migrated.length, from_plan: fromPlan.tier, to_plan: toPlan.tier, notification_status: notificationStatus, members: migrated });
+  } catch (err) {
+    console.error('Membership migration error:', err);
+    res.status(400).json({ error: err.message || 'Failed to migrate members.' });
+  }
+});
+
 // ==================== VISIT & BILLING CREATION ====================
-app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 'visitor', 'staff'), (req, res) => {
+const APPOINTMENT_WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DEFAULT_BRANCH_HOURS = Object.fromEntries(APPOINTMENT_WEEKDAYS.map(day => [day, { open: true, start: '10:00', end: '20:00' }]));
+const getBranchOperatingHours = locationId => {
+  const key = `branch:${locationId}:operating_hours`;
+  const row = db.prepare('SELECT setting_value FROM APP_SETTINGS WHERE setting_key = ?').get(key);
+  if (!row?.setting_value) return DEFAULT_BRANCH_HOURS;
+  try { return { ...DEFAULT_BRANCH_HOURS, ...JSON.parse(row.setting_value) }; } catch { return DEFAULT_BRANCH_HOURS; }
+};
+const formatAppointmentSlot = minutes => {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return new Date(Date.UTC(2000, 0, 1, hour, minute)).toLocaleTimeString('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true });
+};
+const appointmentSlotMinutes = slot => {
+  const match = String(slot || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+  let hour = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === 'PM') hour += 12;
+  return hour * 60 + Number(match[2]);
+};
+
+app.get('/api/branch/operating-hours', authenticateToken, (req, res) => {
+  if (!req.locationId) return res.status(400).json({ error: 'Branch context is required to view opening hours.' });
+  res.json({ hours: getBranchOperatingHours(req.locationId) });
+});
+
+app.put('/api/branch/operating-hours', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const locationId = req.locationId;
+    const submittedHours = req.body.hours;
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to save opening hours.' });
+    if (!submittedHours || typeof submittedHours !== 'object') return res.status(400).json({ error: 'Provide opening hours for the week.' });
+    const normalized = {};
+    for (const day of APPOINTMENT_WEEKDAYS) {
+      const item = submittedHours[day] || {};
+      const start = String(item.start || '10:00');
+      const end = String(item.end || '20:00');
+      if (item.open && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(end) || start >= end)) {
+        return res.status(400).json({ error: `Set a valid opening and closing time for ${day}.` });
+      }
+      normalized[day] = { open: Boolean(item.open), start, end };
+    }
+    db.prepare(`INSERT INTO APP_SETTINGS (setting_key, setting_value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = CURRENT_TIMESTAMP`)
+      .run(`branch:${locationId}:operating_hours`, JSON.stringify(normalized));
+    res.json({ success: true, hours: normalized });
+  } catch (error) {
+    console.error('Save branch hours error:', error);
+    res.status(500).json({ error: 'Could not save branch opening hours.' });
+  }
+});
+
+app.get('/api/appointments/slots', authenticateToken, (req, res) => {
+  try {
+    const locationId = req.locationId;
+    const date = String(req.query.date || '').slice(0, 10);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to view appointment slots.' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Choose a valid appointment date.' });
+    const weekday = APPOINTMENT_WEEKDAYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+    const dayHours = getBranchOperatingHours(locationId)[weekday] || { open: false, start: '10:00', end: '20:00' };
+    const toMinutes = value => { const [hour, minute] = String(value || '').split(':').map(Number); return hour * 60 + minute; };
+    const slots = [];
+    if (dayHours.open) {
+      const start = toMinutes(dayHours.start);
+      const end = toMinutes(dayHours.end);
+      for (let minutes = start; minutes < end; minutes += 30) slots.push(formatAppointmentSlot(minutes));
+    }
+    const booked = db.prepare(`
+      SELECT v.service_time AS slot, v.visit_id, c.name, c.surname,
+        (SELECT group_concat(vs.service_name_snapshot, ', ') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS services
+      FROM VISITS v JOIN CLIENTS c ON c.client_id = v.client_id
+      WHERE v.location_id = ? AND date(v.visit_date) = date(?) AND COALESCE(v.is_appointment, 0) = 1
+        AND v.service_time IS NOT NULL AND trim(v.service_time) != ''
+        AND LOWER(COALESCE(v.payment_status, '')) != 'cancelled'
+      ORDER BY v.service_time, v.visit_id
+    `).all(locationId, date);
+    res.json({ date, weekday, hours: dayHours, is_open: Boolean(dayHours.open), slots: slots.map(slot => ({ slot, booked: booked.filter(row => String(row.slot).toLowerCase() === slot.toLowerCase()).map(row => ({ visit_id: row.visit_id, client_name: `${row.name || ''} ${row.surname || ''}`.trim(), services: row.services || '' })) })) });
+  } catch (error) {
+    console.error('Appointment slots error:', error);
+    res.status(500).json({ error: 'Could not load appointment availability.' });
+  }
+});
+
+app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 'visitor', 'staff'), async (req, res) => {
   const transaction = db.transaction(() => {
     const {
       client_type, // 'new' or 'regular'
@@ -6054,6 +6949,24 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const todayDate = visit_date || localDate;
+    if (req.body.is_appointment) {
+      const date = String(todayDate).slice(0, 10);
+      const slot = String(service_time || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !slot) throw new Error('Choose an appointment date and an open time slot.');
+      if (date < localDate) throw new Error('Appointment date cannot be in the past.');
+      const weekday = APPOINTMENT_WEEKDAYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+      const hours = getBranchOperatingHours(req.locationId)[weekday];
+      const slotMinutes = appointmentSlotMinutes(slot);
+      const [openHour, openMinute] = String(hours?.start || '').split(':').map(Number);
+      const [closeHour, closeMinute] = String(hours?.end || '').split(':').map(Number);
+      const opensAt = openHour * 60 + openMinute;
+      const closesAt = closeHour * 60 + closeMinute;
+      if (!hours?.open || slotMinutes === null || slotMinutes < opensAt || slotMinutes >= closesAt || (slotMinutes - opensAt) % 30 !== 0) {
+        throw new Error('That appointment time is outside this branch’s opening hours. Select an open slot.');
+      }
+      const existingBooking = db.prepare(`SELECT visit_id FROM VISITS WHERE location_id = ? AND date(visit_date) = date(?) AND LOWER(trim(service_time)) = LOWER(?) AND COALESCE(is_appointment, 0) = 1 AND LOWER(COALESCE(payment_status, '')) != 'cancelled' LIMIT 1`).get(req.locationId, date, slot);
+      if (existingBooking) throw new Error('That appointment slot was just booked. Please select another open slot.');
+    }
     let finalClientId = client_id;
 
     // 1. Client resolution / creation
@@ -6155,21 +7068,23 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
     const membershipTier = req.body.membership_tier || null;
     const membershipPrice = parseFloat(req.body.membership_price) || 0;
     let membershipPlanForBenefits = null;
-    let authorizedFreeServiceIds = new Set();
-    let serverAppliedFreeService = false;
+    let freeServiceEntitlements = [];
+    const usedFreeServiceEntitlements = new Map();
     let serverAdjustedServicePricing = false;
+    let existingMembershipValid = false;
+    let membershipBeingPurchased = membershipPrice > 0;
+    let activeMembershipForBenefits = null;
     if (membershipTier) {
       const memberRow = finalClientId
         ? db.prepare('SELECT membership_tier, membership_status, membership_expires_at FROM CLIENTS WHERE client_id = ?').get(finalClientId)
         : null;
       const today = new Date().toISOString().slice(0, 10);
-      const existingMembershipValid = Boolean(memberRow &&
+      existingMembershipValid = Boolean(memberRow &&
         memberRow.membership_tier &&
         String(memberRow.membership_tier || '').toLowerCase() !== 'non-member' &&
         String(memberRow.membership_tier || '').toLowerCase() !== 'none' &&
         memberRow.membership_status === 'active' &&
         (!memberRow.membership_expires_at || String(memberRow.membership_expires_at).slice(0, 10) >= today));
-      const membershipBeingPurchased = membershipPrice > 0;
       if (existingMembershipValid || membershipBeingPurchased) {
         ensureMembershipPlansTable(clientLocationId);
         const membershipLookupTier = membershipBeingPurchased ? membershipTier : memberRow.membership_tier;
@@ -6180,13 +7095,31 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
           )
           ORDER BY plan_id DESC LIMIT 1
         `).get(clientLocationId, membershipLookupTier, membershipLookupTier, membershipLookupTier, membershipLookupTier) || null;
+        if (membershipBeingPurchased && membershipPlanForBenefits && Number(membershipPlanForBenefits.is_active ?? 1) !== 1) {
+          throw new Error('This membership plan is archived and is no longer available for purchase.');
+        }
         if (membershipBeingPurchased && !membershipPlanForBenefits) {
           throw new Error('Selected membership plan is not available at this branch. Refresh the membership list and try again.');
         }
         if (membershipPlanForBenefits) {
-          authorizedFreeServiceIds = new Set(parseMembershipFreeServices(membershipPlanForBenefits.free_services)
-            .filter(item => item?.is_free !== false)
-            .map(item => Number(item.service_id)));
+          freeServiceEntitlements = parseMembershipFreeServices(membershipPlanForBenefits.free_services)
+            .filter(item => item && item.is_free !== false && Number(item.service_id) > 0);
+          if (existingMembershipValid && !membershipBeingPurchased && finalClientId) {
+            activeMembershipForBenefits = db.prepare(`
+              SELECT membership_id FROM CLIENT_MEMBERSHIPS
+              WHERE client_id = ? AND status = 'active'
+              ORDER BY membership_id DESC LIMIT 1
+            `).get(finalClientId) || null;
+            if (activeMembershipForBenefits) {
+              const usedRows = db.prepare(`
+                SELECT privilege_id, COUNT(*) AS used_count
+                FROM MEMBERSHIP_PRIVILEGE_REDEMPTIONS
+                WHERE membership_id = ? AND status = 'completed'
+                GROUP BY privilege_id
+              `).all(activeMembershipForBenefits.membership_id);
+              usedRows.forEach(row => usedFreeServiceEntitlements.set(row.privilege_id, Number(row.used_count) || 0));
+            }
+          }
         }
       }
     }
@@ -6207,23 +7140,37 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         if (!branchService) {
           throw new Error('Access denied: A selected service belongs to another studio location.');
         }
-        const includedFreeService = authorizedFreeServiceIds.has(serviceId);
+        const serviceBenefitKey = normalizeMembershipServiceName(branchService.service_name);
+        const includedFreeService = freeServiceEntitlements.find(entitlement => {
+          const entitlementId = `membership_service_${entitlement.service_id}`;
+          const nameMatch = serviceBenefitKey && normalizeMembershipServiceName(entitlement.service_name) === serviceBenefitKey;
+          if (Number(entitlement.service_id) !== serviceId && !nameMatch) return false;
+          const historicalUseCount = membershipBeingPurchased
+            ? 0
+            : (usedFreeServiceEntitlements.get(entitlementId) || 0);
+          const cartUseCount = usedFreeServiceEntitlements.get(`cart:${entitlementId}`) || 0;
+          const allowedUses = Math.max(1, Number(entitlement.allowedUses) || 1);
+          return historicalUseCount + cartUseCount < allowedUses;
+        });
         if (includedFreeService) {
           if (Number(s.price) !== 0) serverAdjustedServicePricing = true;
-          if (!s.membership_benefit_service) serverAppliedFreeService = true;
           s.list_price = Number(branchService.price) || 0;
           s.price = 0;
           s.service_name = branchService.service_name;
           s.is_privilege = 1;
           s.membership_benefit_service = 1;
-          s.privilege_id = `membership_service_${serviceId}`;
-        } else if (s.membership_benefit_service) {
-          if (Number(s.price) !== Number(branchService.price || 0)) serverAdjustedServicePricing = true;
+          const entitlementId = `membership_service_${includedFreeService.service_id}`;
+          s.privilege_id = entitlementId;
+          usedFreeServiceEntitlements.set(`cart:${entitlementId}`, (usedFreeServiceEntitlements.get(`cart:${entitlementId}`) || 0) + 1);
+        } else {
+          if (Number(s.price) !== Number(branchService.price || 0) || s.membership_benefit_service) serverAdjustedServicePricing = true;
           s.list_price = Number(branchService.price) || 0;
           s.price = Number(branchService.price) || 0;
-          s.is_privilege = 0;
-          s.membership_benefit_service = 0;
-          if (String(s.privilege_id || '').startsWith('membership_service_')) s.privilege_id = null;
+          if (s.membership_benefit_service || String(s.privilege_id || '').startsWith('membership_service_')) {
+            s.is_privilege = 0;
+            s.membership_benefit_service = 0;
+            s.privilege_id = null;
+          }
         }
         if (s.staff_id) {
           const staffRow = db.prepare('SELECT location_id FROM STAFF WHERE staff_id = ?').get(s.staff_id);
@@ -6244,7 +7191,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       const branchPlan = db.prepare(`
         SELECT plan_id
         FROM MEMBERSHIP_PLANS
-        WHERE location_id = ? AND (
+        WHERE location_id = ? AND COALESCE(is_active, 1) = 1 AND (
           LOWER(tier) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(fullName) = LOWER(?)
         )
       `).get(clientLocationId, membershipTier, membershipTier, membershipTier);
@@ -6260,33 +7207,20 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
     let discountAmount = 0;
     const discVal = parseFloat(discount_value) || 0;
     const discType = discount_type === 'percentage' ? 'percentage' : 'fixed';
-
-    let netSubtotal;
-    if (serverAppliedFreeService) {
-      const memberDiscountPercent = Math.min(100, Math.max(0, Number(membershipPlanForBenefits?.discount_percent) || 0));
-      const memberDiscountAmount = Math.round(servicesSubtotal * memberDiscountPercent / 100);
-      const servicesAfterMemberDiscount = Math.max(0, servicesSubtotal - memberDiscountAmount);
-      const promoDiscountAmount = discType === 'percentage'
-        ? Math.round(servicesAfterMemberDiscount * Math.min(Math.max(discVal, 0), 100) / 100)
-        : Math.min(Math.max(discVal, 0), servicesAfterMemberDiscount);
-      discountAmount = memberDiscountAmount + promoDiscountAmount;
-      netSubtotal = servicesAfterMemberDiscount - promoDiscountAmount + membershipPrice;
-    } else {
-      if (discType === 'percentage') {
-        discountAmount = Math.round((subtotal * Math.min(Math.max(discVal, 0), 100)) / 100);
-      } else {
-        discountAmount = Math.min(Math.max(discVal, 0), subtotal);
-      }
-      netSubtotal = Math.max(0, subtotal - discountAmount);
-    }
+    const memberDiscountPercent = membershipPlanForBenefits
+      ? Math.min(100, Math.max(0, Number(membershipPlanForBenefits.discount_percent) || 0))
+      : 0;
+    const memberDiscountAmount = Math.round(servicesSubtotal * memberDiscountPercent / 100);
+    const servicesAfterMemberDiscount = Math.max(0, servicesSubtotal - memberDiscountAmount);
+    const promoDiscountAmount = discType === 'percentage'
+      ? Math.round(servicesAfterMemberDiscount * Math.min(Math.max(discVal, 0), 100) / 100)
+      : Math.min(Math.max(discVal, 0), servicesAfterMemberDiscount);
+    discountAmount = memberDiscountAmount + promoDiscountAmount;
+    const netSubtotal = Math.max(0, servicesAfterMemberDiscount - promoDiscountAmount) + membershipPrice;
     // 18% GST on overall amount
-    const taxAmount = !serverAppliedFreeService && req.body.tax_amount !== undefined && !isNaN(parseFloat(req.body.tax_amount))
-      ? parseFloat(req.body.tax_amount)
-      : Math.round(netSubtotal * 0.18);
+    const taxAmount = Math.round(netSubtotal * 0.18);
 
-    const totalAmount = !serverAppliedFreeService && req.body.total_amount !== undefined && !isNaN(parseFloat(req.body.total_amount))
-      ? parseFloat(req.body.total_amount)
-      : (netSubtotal + taxAmount);
+    const totalAmount = netSubtotal + taxAmount;
 
     // Validate client and available membership credit balance
     let validCreditUsed = 0;
@@ -6375,9 +7309,9 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         client_id, location_id, visit_date, subtotal, discount_type, discount_value,
         discount_amount, total_amount, amount_paid, balance,
         payment_method, payment_status, upi_ref, created_by, notes, created_at, service_time,
-        tax_amount, membership_price, membership_tier,
+        tax_amount, membership_price, membership_tier, is_appointment,
         membership_amount_used, membership_benefit_used, benefit_used_date, benefit_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       finalClientId,
       clientLocationId,
@@ -6399,6 +7333,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       taxAmount,
       membershipPrice,
       membershipTier,
+      req.body.is_appointment ? 1 : 0,
       validCreditUsed,
       req.body.membership_benefit_used || null,
       req.body.benefit_used_date || todayDate,
@@ -6539,6 +7474,27 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         expires,
         visitId
       );
+
+      const purchasedMembership = db.prepare(`
+        SELECT membership_id FROM CLIENT_MEMBERSHIPS
+        WHERE client_id = ? AND purchase_visit_id = ? AND status = 'active'
+        ORDER BY membership_id DESC LIMIT 1
+      `).get(finalClientId, visitId);
+      if (purchasedMembership) {
+        const insertRedemption = db.prepare(`
+          INSERT INTO MEMBERSHIP_PRIVILEGE_REDEMPTIONS (membership_id, client_id, privilege_id, privilege_name, visit_id, status)
+          VALUES (?, ?, ?, ?, ?, 'completed')
+        `);
+        for (const service of services.filter(item => item.membership_benefit_service && item.privilege_id)) {
+          const alreadyRecorded = db.prepare(`
+            SELECT 1 FROM MEMBERSHIP_PRIVILEGE_REDEMPTIONS
+            WHERE membership_id = ? AND visit_id = ? AND privilege_id = ?
+          `).get(purchasedMembership.membership_id, visitId, service.privilege_id);
+          if (!alreadyRecorded) {
+            insertRedemption.run(purchasedMembership.membership_id, finalClientId, service.privilege_id, service.service_name || 'Complimentary membership service', visitId);
+          }
+        }
+      }
     }
 
     // Recalculate client's membership balance and credit usage stats
@@ -6577,6 +7533,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 
   try {
     const result = transaction();
+    await dispatchVisitNotifications(result.visit_id);
     res.status(201).json({
       message: 'Visit successfully recorded.',
       visit: result
@@ -6637,7 +7594,7 @@ app.get('/api/visits/:id', authenticateToken, (req, res) => {
 });
 
 // Update visit staff assignment & payment status (Reception / Admin / Visitor)
-app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'reception', 'visitor', 'staff'), (req, res) => {
+app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'reception', 'visitor', 'staff'), async (req, res) => {
   try {
     const visitId = req.params.id;
     const { services, payment_method, amount_paid, payment_status, upi_ref, service_time, notes } = req.body;
@@ -6900,6 +7857,32 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
           expires,
           visitId
         );
+
+        const purchasedMembership = db.prepare(`
+          SELECT membership_id FROM CLIENT_MEMBERSHIPS
+          WHERE client_id = ? AND purchase_visit_id = ? AND status = 'active'
+          ORDER BY membership_id DESC LIMIT 1
+        `).get(existingVisit.client_id, visitId);
+        if (purchasedMembership) {
+          const benefitServices = db.prepare(`
+            SELECT service_name_snapshot, privilege_id
+            FROM VISIT_SERVICES
+            WHERE visit_id = ? AND is_privilege = 1 AND privilege_id LIKE 'membership_service_%'
+          `).all(visitId);
+          const insertRedemption = db.prepare(`
+            INSERT INTO MEMBERSHIP_PRIVILEGE_REDEMPTIONS (membership_id, client_id, privilege_id, privilege_name, visit_id, status)
+            VALUES (?, ?, ?, ?, ?, 'completed')
+          `);
+          for (const service of benefitServices) {
+            const alreadyRecorded = db.prepare(`
+              SELECT 1 FROM MEMBERSHIP_PRIVILEGE_REDEMPTIONS
+              WHERE membership_id = ? AND visit_id = ? AND privilege_id = ?
+            `).get(purchasedMembership.membership_id, visitId, service.privilege_id);
+            if (!alreadyRecorded) {
+              insertRedemption.run(purchasedMembership.membership_id, existingVisit.client_id, service.privilege_id, service.service_name_snapshot, visitId);
+            }
+          }
+        }
       }
 
       // Recalculate client total spend and membership balance = tier cost - total credits used
@@ -6958,6 +7941,8 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
       LEFT JOIN STAFF s ON vs.staff_id = s.staff_id
       WHERE vs.visit_id = ?
     `).all(visitId);
+
+    await dispatchVisitNotifications(visitId);
 
     res.json({
       message: 'Visit updated successfully',
@@ -7528,6 +8513,12 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
     function normalizeTier(tierName) {
       if (!tierName) return 'Other';
       const t = tierName.toLowerCase();
+      const normalizePlanKey = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const normalizedTier = normalizePlanKey(tierName);
+      const matchingPlan = catalogPlans.find(plan =>
+        [plan.tier, plan.name, plan.fullName, plan.id].some(value => normalizePlanKey(value) === normalizedTier)
+      );
+      if (matchingPlan) return matchingPlan.tier;
       if (t.includes('infini')) return 'Infini';
       if (t.includes('lumiere') || t.includes('lumière')) return 'Lumière';
       if (t.includes('eternal')) return 'Eternal';
@@ -7536,36 +8527,42 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
     }
 
     const memberClientsRaw = db.prepare(`
-      SELECT 
-        c.client_id,
-        c.name,
-        c.surname,
-        c.phone,
-        c.email,
-        c.reg_no,
-        c.membership_tier,
-        c.membership_cost,
-        c.membership_balance,
-        c.membership_started_at,
-        c.membership_expires_at,
-        c.membership_status,
-        c.location_id,
-        l.name as branch_name,
-        COALESCE((
-          SELECT SUM(v.membership_amount_used)
-          FROM VISITS v
-          WHERE v.client_id = c.client_id AND v.membership_amount_used > 0
-        ), 0) as visit_credits_used,
-        (SELECT COUNT(v.visit_id) FROM VISITS v WHERE v.client_id = c.client_id) as total_visits
-      FROM CLIENTS c
+      SELECT c.client_id, cm.membership_id, c.name, c.surname, c.phone, c.email, c.reg_no,
+        cm.tier_name AS membership_tier, cm.cost AS membership_cost,
+        cm.credits_allocated AS membership_credits_allocated, NULL AS membership_balance,
+        cm.start_date AS membership_started_at, cm.expiry_date AS membership_expires_at,
+        cm.status AS membership_status, c.location_id, l.name AS branch_name,
+        COALESCE((SELECT SUM(v.membership_amount_used) FROM VISITS v
+          WHERE v.client_id = c.client_id AND LOWER(COALESCE(v.membership_tier, '')) = LOWER(cm.tier_name)
+            AND substr(v.visit_date, 1, 10) >= cm.start_date AND substr(v.visit_date, 1, 10) <= cm.expiry_date), 0) AS visit_credits_used,
+        (SELECT COUNT(v.visit_id) FROM VISITS v WHERE v.client_id = c.client_id
+          AND LOWER(COALESCE(v.membership_tier, '')) = LOWER(cm.tier_name)
+          AND substr(v.visit_date, 1, 10) >= cm.start_date AND substr(v.visit_date, 1, 10) <= cm.expiry_date) AS total_visits
+      FROM CLIENT_MEMBERSHIPS cm
+      JOIN CLIENTS c ON c.client_id = cm.client_id
       LEFT JOIN LOCATIONS l ON c.location_id = l.location_id
-      WHERE c.membership_tier IS NOT NULL 
-        AND c.membership_tier != '' 
-        AND LOWER(c.membership_tier) != 'non-member'
+      WHERE 1 = 1 ${cLocParams.length ? 'AND c.location_id = ?' : ''}
+      UNION ALL
+      SELECT c.client_id, NULL AS membership_id, c.name, c.surname, c.phone, c.email, c.reg_no,
+        c.membership_tier, c.membership_cost, c.membership_cost AS membership_credits_allocated,
+        c.membership_balance, c.membership_started_at, c.membership_expires_at,
+        c.membership_status, c.location_id, l.name AS branch_name,
+        COALESCE((SELECT SUM(v.membership_amount_used) FROM VISITS v
+          WHERE v.client_id = c.client_id AND v.membership_amount_used > 0), 0) AS visit_credits_used,
+        (SELECT COUNT(v.visit_id) FROM VISITS v WHERE v.client_id = c.client_id) AS total_visits
+      FROM CLIENTS c LEFT JOIN LOCATIONS l ON c.location_id = l.location_id
+      WHERE c.membership_tier IS NOT NULL AND c.membership_tier != ''
+        AND LOWER(c.membership_tier) NOT IN ('non-member', 'none')
+        AND NOT EXISTS (SELECT 1 FROM CLIENT_MEMBERSHIPS cm WHERE cm.client_id = c.client_id
+          AND cm.status = 'active' AND LOWER(cm.tier_name) = LOWER(c.membership_tier))
         ${cLocParams.length ? 'AND c.location_id = ?' : ''}
-      ORDER BY c.client_id DESC
-    `).all(...cLocParams);
+      ORDER BY client_id DESC
+    `).all(...cLocParams, ...cLocParams);
 
+    const migrationTableExists = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'MEMBERSHIP_MIGRATION_HISTORY'").get());
+    const transferredCreditsByInstance = migrationTableExists
+      ? new Map(db.prepare('SELECT from_membership_id, SUM(credits_transferred) AS transferred FROM MEMBERSHIP_MIGRATION_HISTORY WHERE location_id = ? GROUP BY from_membership_id').all(locId).map(row => [Number(row.from_membership_id), Number(row.transferred) || 0]))
+      : new Map();
     const membersRoster = memberClientsRaw.map(m => {
       const tierGroup = normalizeTier(m.membership_tier);
       const matchingPlan = catalogPlans.find(plan =>
@@ -7573,14 +8570,17 @@ app.get('/api/reports', authenticateToken, authorizeRoles('admin'), (req, res) =
         (plan.name && m.membership_tier.toLowerCase().includes(plan.name.toLowerCase())) ||
         (plan.id && m.membership_tier.toLowerCase().includes(plan.id.toLowerCase()))
       );
-      const allocated = Number(m.membership_cost) > 0 ? Number(m.membership_cost) : (Number(standardTierCosts[tierGroup]) || Number(matchingPlan?.price) || 0);
-      const used = m.visit_credits_used > 0 ? m.visit_credits_used : Math.max(0, allocated - (m.membership_balance || 0));
-      const balance = (m.membership_balance !== null && m.membership_balance !== undefined && m.membership_balance > 0)
-        ? m.membership_balance 
-        : Math.max(0, allocated - used);
+      const allocated = Number(m.membership_credits_allocated) > 0 ? Number(m.membership_credits_allocated) : (Number(m.membership_cost) > 0 ? Number(m.membership_cost) : (Number(standardTierCosts[tierGroup]) || Number(matchingPlan?.price) || 0));
+      const used = m.membership_id
+        ? (Number(m.visit_credits_used) || 0)
+        : (m.visit_credits_used > 0 ? m.visit_credits_used : Math.max(0, allocated - (m.membership_balance || 0)));
+      const transferredOut = m.membership_id ? (transferredCreditsByInstance.get(Number(m.membership_id)) || 0) : 0;
+      const balance = Math.max(0, allocated - used - transferredOut);
 
       return {
         client_id: m.client_id,
+        membership_id: m.membership_id,
+        membership_transferred_out: transferredOut,
         name: `${m.name || ''} ${m.surname || ''}`.trim() || 'Client',
         phone: m.phone || '—',
         email: m.email || '—',

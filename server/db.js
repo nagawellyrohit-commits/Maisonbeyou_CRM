@@ -11,6 +11,7 @@ const db = new Database(dbPath);
 
 const DEFAULT_TEAM_MASTER_OPTIONS = [
   ['role', 'Manager'],
+  ['role', 'Team Member'],
   ['role', 'Laser Therapist'],
   ['role', 'Aesthetician'],
   ['role', 'Receptionist'],
@@ -36,19 +37,19 @@ const DEFAULT_TEAM_MASTER_OPTIONS = [
   ['designation', 'Associate'],
   ['designation', 'Senior Specialist'],
   ['designation', 'Lead Specialist'],
-  ['designation', 'Head of Department']
+  ['designation', 'Head of Department'],
+  ['designation', 'Team']
 ];
 
-export function ensureTeamMasterOptions() {
-  const activeCount = Number(db.prepare('SELECT COUNT(*) AS count FROM TEAM_MASTER_OPTIONS WHERE active = 1').get()?.count || 0);
-  const findOption = db.prepare('SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE option_type = ? AND LOWER(option_name) = LOWER(?)');
-  const insertOption = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (option_type, option_name) VALUES (?, ?)');
-  const restoreOption = db.prepare('UPDATE TEAM_MASTER_OPTIONS SET active = 1 WHERE option_id = ?');
+export function ensureTeamMasterOptions(locationId) {
+  const targetLocationId = Number(locationId);
+  if (!targetLocationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(targetLocationId)) return;
+  const findOption = db.prepare('SELECT option_id FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = ? AND LOWER(option_name) = LOWER(?)');
+  const insertOption = db.prepare('INSERT INTO TEAM_MASTER_OPTIONS (location_id, option_type, option_name) VALUES (?, ?, ?)');
   const ensureOptions = db.transaction(() => {
     for (const [type, name] of DEFAULT_TEAM_MASTER_OPTIONS) {
-      const existing = findOption.get(type, name);
-      if (!existing) insertOption.run(type, name);
-      else if (activeCount === 0) restoreOption.run(existing.option_id);
+      const existing = findOption.get(targetLocationId, type, name);
+      if (!existing) insertOption.run(targetLocationId, type, name);
     }
   });
   ensureOptions();
@@ -196,32 +197,44 @@ export function initDatabase() {
 
     CREATE TABLE IF NOT EXISTS TEAM_MASTER_OPTIONS (
       option_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       option_type TEXT NOT NULL CHECK(option_type IN ('role', 'designation')),
       option_name TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_MASTER_OPTIONS_UNIQUE
-      ON TEAM_MASTER_OPTIONS(option_type, LOWER(option_name));
+      ON TEAM_MASTER_OPTIONS(location_id, option_type, LOWER(option_name));
 
     CREATE TABLE IF NOT EXISTS TEAM_DEPARTMENTS (
       department_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       department_name TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_DEPARTMENTS_UNIQUE
-      ON TEAM_DEPARTMENTS(LOWER(department_name));
+      ON TEAM_DEPARTMENTS(location_id, LOWER(department_name));
 
     CREATE TABLE IF NOT EXISTS TEAM_HIERARCHY (
       hierarchy_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER REFERENCES LOCATIONS(location_id),
       department_id INTEGER NOT NULL REFERENCES TEAM_DEPARTMENTS(department_id),
       role_option_id INTEGER NOT NULL REFERENCES TEAM_MASTER_OPTIONS(option_id),
       designation_option_id INTEGER NOT NULL REFERENCES TEAM_MASTER_OPTIONS(option_id),
+      assigned_staff_id INTEGER REFERENCES STAFF(staff_id),
       reports_to_hierarchy_id INTEGER REFERENCES TEAM_HIERARCHY(hierarchy_id),
       reports_to_staff_id INTEGER REFERENCES STAFF(staff_id),
+      reports_to_user_id INTEGER REFERENCES USERS(user_id),
       active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS TEAM_HIERARCHY_USER_REPORTS (
+      hierarchy_id INTEGER NOT NULL REFERENCES TEAM_HIERARCHY(hierarchy_id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES USERS(user_id) ON DELETE CASCADE,
+      location_id INTEGER NOT NULL REFERENCES LOCATIONS(location_id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (hierarchy_id, user_id)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS IDX_TEAM_HIERARCHY_UNIQUE
       ON TEAM_HIERARCHY(department_id, role_option_id, designation_option_id)
@@ -323,6 +336,9 @@ export function initDatabase() {
     );
   `);
 
+  const teamOptionsWereGlobal = !db.pragma('table_info(TEAM_MASTER_OPTIONS)').some(column => column.name === 'location_id');
+  const teamDepartmentsWereGlobal = !db.pragma('table_info(TEAM_DEPARTMENTS)').some(column => column.name === 'location_id');
+
   // Safe migrations for services spotlight/media details
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN subtitle TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE SERVICES ADD COLUMN tag TEXT;`); } catch(e) {}
@@ -382,6 +398,7 @@ export function initDatabase() {
 
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN upi_ref TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN service_time TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN is_appointment INTEGER NOT NULL DEFAULT 0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN tax_amount REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_price REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
@@ -470,6 +487,11 @@ export function initDatabase() {
     );
   `);
 
+  // Keep per-purchase privilege snapshots so a migrated membership can retain
+  // the benefits that were promised when it was created, even if its plan is
+  // later edited or archived.
+  try { db.exec(`ALTER TABLE CLIENT_MEMBERSHIPS ADD COLUMN privileges_snapshot TEXT;`); } catch(e) {}
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS APP_SETTINGS (
       setting_key TEXT PRIMARY KEY,
@@ -549,15 +571,25 @@ export function initDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // Older single-branch demo accounts can point to a deleted location ID.
+  // Keep those orphaned visitor accounts from being treated as branch users.
+  db.prepare(`
+    UPDATE USERS
+    SET location_id = NULL, active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE LOWER(email) = 'visitor@maisonbeyou.com'
+      AND location_id IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM LOCATIONS WHERE LOCATIONS.location_id = USERS.location_id)
+  `).run();
   // Give existing desk accounts the intended access profile when upgrading
   // from the legacy role-only setup. Admin accounts are intentionally excluded.
   db.prepare(`
     INSERT OR IGNORE INTO USER_ACCESS_PROFILES (user_id, location_id, permissions)
-    SELECT user_id, location_id,
-      CASE WHEN role = 'visitor' THEN '["visitor_intake"]'
+    SELECT u.user_id, u.location_id,
+      CASE WHEN u.role = 'visitor' THEN '["visitor_intake"]'
            ELSE '["dashboard","visits","clients"]' END
-    FROM USERS
-    WHERE role IN ('reception', 'visitor') AND location_id IS NOT NULL
+    FROM USERS u
+    JOIN LOCATIONS l ON l.location_id = u.location_id
+    WHERE u.role IN ('reception', 'visitor') AND u.location_id IS NOT NULL
   `).run();
   const managerProfiles = db.prepare(`
     SELECT p.user_id, p.location_id, p.permissions
@@ -602,8 +634,74 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN upi_id TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN designation TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE STAFF ADD COLUMN department TEXT;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE TEAM_MASTER_OPTIONS ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id);`); } catch(e) {}
+  try { db.exec(`ALTER TABLE TEAM_DEPARTMENTS ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id);`); } catch(e) {}
   try { db.exec(`ALTER TABLE TEAM_HIERARCHY ADD COLUMN reports_to_staff_id INTEGER REFERENCES STAFF(staff_id);`); } catch(e) {}
-  ensureTeamMasterOptions();
+  try { db.exec(`ALTER TABLE TEAM_HIERARCHY ADD COLUMN assigned_staff_id INTEGER REFERENCES STAFF(staff_id);`); } catch(e) {}
+  try { db.exec(`ALTER TABLE TEAM_HIERARCHY ADD COLUMN location_id INTEGER REFERENCES LOCATIONS(location_id);`); } catch(e) {}
+  try { db.exec(`ALTER TABLE TEAM_HIERARCHY ADD COLUMN reports_to_user_id INTEGER REFERENCES USERS(user_id);`); } catch(e) {}
+  try {
+    const locations = db.prepare("SELECT location_id FROM LOCATIONS WHERE status = 'Active' OR status IS NULL ORDER BY location_id ASC").all();
+    const legacyLocationId = locations[0]?.location_id;
+    if (legacyLocationId) {
+      if (teamOptionsWereGlobal) db.prepare('UPDATE TEAM_MASTER_OPTIONS SET location_id = ? WHERE location_id IS NULL').run(legacyLocationId);
+      if (teamDepartmentsWereGlobal) db.prepare('UPDATE TEAM_DEPARTMENTS SET location_id = ? WHERE location_id IS NULL').run(legacyLocationId);
+      db.exec(`
+        DROP INDEX IF EXISTS IDX_TEAM_MASTER_OPTIONS_UNIQUE;
+        CREATE UNIQUE INDEX IDX_TEAM_MASTER_OPTIONS_UNIQUE
+          ON TEAM_MASTER_OPTIONS(location_id, option_type, LOWER(option_name));
+        DROP INDEX IF EXISTS IDX_TEAM_DEPARTMENTS_UNIQUE;
+        CREATE UNIQUE INDEX IDX_TEAM_DEPARTMENTS_UNIQUE
+          ON TEAM_DEPARTMENTS(location_id, LOWER(department_name));
+      `);
+      const copyOption = db.prepare(`
+        INSERT OR IGNORE INTO TEAM_MASTER_OPTIONS (location_id, option_type, option_name, active)
+        SELECT ?, option_type, option_name, active FROM TEAM_MASTER_OPTIONS
+        WHERE location_id = ?
+      `);
+      const copyDepartment = db.prepare(`
+        INSERT OR IGNORE INTO TEAM_DEPARTMENTS (location_id, department_name, active)
+        SELECT ?, department_name, active FROM TEAM_DEPARTMENTS
+        WHERE location_id = ?
+      `);
+      for (const location of locations) {
+        if (Number(location.location_id) === Number(legacyLocationId)) continue;
+        if (teamOptionsWereGlobal) copyOption.run(location.location_id, legacyLocationId);
+        if (teamDepartmentsWereGlobal) copyDepartment.run(location.location_id, legacyLocationId);
+      }
+    }
+  } catch (e) { console.error('Branch team master migration notice:', e.message); }
+  try {
+    const defaultHierarchyLocation = db.prepare("SELECT location_id FROM LOCATIONS WHERE status = 'Active' ORDER BY location_id ASC LIMIT 1").get()?.location_id;
+    if (defaultHierarchyLocation) db.prepare('UPDATE TEAM_HIERARCHY SET location_id = ? WHERE location_id IS NULL').run(defaultHierarchyLocation);
+    db.exec(`
+      UPDATE TEAM_HIERARCHY
+      SET reports_to_staff_id = NULL
+      WHERE reports_to_staff_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM STAFF supervisor
+        WHERE supervisor.staff_id = TEAM_HIERARCHY.reports_to_staff_id
+          AND supervisor.location_id = TEAM_HIERARCHY.location_id
+      );
+      UPDATE TEAM_HIERARCHY
+      SET reports_to_user_id = NULL
+      WHERE reports_to_user_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM USERS manager
+        WHERE manager.user_id = TEAM_HIERARCHY.reports_to_user_id
+          AND manager.location_id = TEAM_HIERARCHY.location_id
+      );
+      UPDATE TEAM_HIERARCHY
+      SET assigned_staff_id = NULL
+      WHERE assigned_staff_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM STAFF person
+        WHERE person.staff_id = TEAM_HIERARCHY.assigned_staff_id
+          AND person.location_id = TEAM_HIERARCHY.location_id
+      );
+      DROP INDEX IF EXISTS IDX_TEAM_HIERARCHY_UNIQUE;
+      CREATE UNIQUE INDEX IDX_TEAM_HIERARCHY_UNIQUE
+        ON TEAM_HIERARCHY(location_id, department_id, role_option_id, designation_option_id, IFNULL(assigned_staff_id, 0))
+        WHERE active = 1;
+    `);
+  } catch (e) { console.error('Team hierarchy branch migration notice:', e.message); }
   try { db.exec(`ALTER TABLE CLIENTS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN location_id INTEGER;`); } catch(e) {}
   try { db.exec(`ALTER TABLE LOCATIONS ADD COLUMN firm_type TEXT;`); } catch(e) {}
@@ -684,59 +782,31 @@ export function initDatabase() {
       `);
 
       insertLoc.run(
-        'Maison BeYou — Jubilee Hills Flagship',
-        'MB-B-HYD-001',
-        'branch',
-        'Road No. 36, Jubilee Hills',
-        'Hyderabad',
-        'Telangana',
-        '500033',
-        '+91 98200 12345',
-        'jubilee@maisonbeyou.com',
-        'Active',
-        'Ayesha Khan'
-      );
-
-      insertLoc.run(
-        'Maison BeYou — Bandra West Studio',
+        'Maison BeYou — Juhu Studio',
         'MB-B-MUM-001',
         'branch',
-        'Linking Road, Bandra West',
+        'Juhu Tara Road, Juhu',
         'Mumbai',
         'Maharashtra',
-        '400050',
-        '+91 98200 54321',
-        'bandra@maisonbeyou.com',
+        '400049',
+        '+91 98205 99003',
+        'juhu.visitor@maisonbeyou.com',
         'Active',
-        'Vikram Rathore'
+        'Juhu Reception Desk'
       );
 
       insertLoc.run(
-        'Maison BeYou — Indiranagar Franchise',
-        'MB-F-BEN-001',
-        'franchise',
-        '100ft Road, Indiranagar',
-        'Bengaluru',
-        'Karnataka',
-        '560038',
-        '+91 98800 11223',
-        'indiranagar@maisonbeyou.com',
-        'Active',
-        'Karan Verma'
-      );
-
-      insertLoc.run(
-        'Maison BeYou — Koregaon Park Franchise',
-        'MB-F-PUN-001',
-        'franchise',
-        'North Main Road, Koregaon Park',
-        'Pune',
+        'Maison BeYou — Goregaon West',
+        'MB-B-MUM-002',
+        'branch',
+        'Shop No– 1, M.G.Road, Goregaon West',
+        'Mumbai',
         'Maharashtra',
-        '411001',
-        '+91 98900 33445',
-        'koregaon@maisonbeyou.com',
+        '400104',
+        '+91 98678 55572',
+        'goregaon@maisonbeyou.com',
         'Active',
-        'Tanvi Deshmukh'
+        ''
       );
     }
 
@@ -840,51 +910,13 @@ function seedData() {
     insertUser.run('Maison Master Admin', 'master@maisonbeyou.com', bcrypt.hashSync('master123', salt), 'master_admin');
   }
 
-  // Multi-location sample staff and clients for isolation demo
-  try {
-    const loc2Staff = db.prepare('SELECT COUNT(*) as count FROM STAFF WHERE location_id = 2').get().count;
-    if (loc2Staff === 0) {
-      const insertStaffLoc = db.prepare(`INSERT INTO STAFF (name, role, phone, active, location_id) VALUES (?, ?, ?, 1, ?)`);
-      insertStaffLoc.run('Dr. Sameer Sen', 'Aesthetic Physician', '+91 98205 11223', 2);
-      insertStaffLoc.run('Natasha Rao', 'Skin & Laser Specialist', '+91 98205 22334', 2);
-    }
-
-    const loc3Staff = db.prepare('SELECT COUNT(*) as count FROM STAFF WHERE location_id = 3').get().count;
-    if (loc3Staff === 0) {
-      const insertStaffLoc = db.prepare(`INSERT INTO STAFF (name, role, phone, active, location_id) VALUES (?, ?, ?, 1, ?)`);
-      insertStaffLoc.run('Dr. Kavita Reddy', 'Consultant Dermatologist', '+91 98801 11223', 3);
-      insertStaffLoc.run('Deepak Nair', 'Senior Laser Therapist', '+91 98801 22334', 3);
-    }
-
-    const loc2Clients = db.prepare('SELECT COUNT(*) as count FROM CLIENTS WHERE location_id = 2').get().count;
-    if (loc2Clients === 0) {
-      const insertClientLoc = db.prepare(`
-        INSERT OR IGNORE INTO CLIENTS (name, surname, phone, email, location_id, total_visits, total_spend, status, membership_tier)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-      `);
-      insertClientLoc.run('Meera', 'Singhania', '9820500001', 'meera.s@example.com', 2, 3, 24000, 'LUMIÈRE PRIVILEGE');
-      insertClientLoc.run('Arjun', 'Kapoor', '9820500002', 'arjun.k@example.com', 2, 1, 8500, 'ÉCLAT ESSENTIALS');
-    }
-
-    const loc3Clients = db.prepare('SELECT COUNT(*) as count FROM CLIENTS WHERE location_id = 3').get().count;
-    if (loc3Clients === 0) {
-      const insertClientLoc = db.prepare(`
-        INSERT OR IGNORE INTO CLIENTS (name, surname, phone, email, location_id, total_visits, total_spend, status, membership_tier)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
-      `);
-      insertClientLoc.run('Ananya', 'Iyer', '9880100003', 'ananya.iyer@example.com', 3, 2, 18500, 'INFINI PRIVILEGE');
-    }
-  } catch(e) {
-    console.error('Multi-location seed notice:', e.message);
-  }
-
   // Check if staff exist
   const staffCount = db.prepare('SELECT COUNT(*) as count FROM STAFF').get().count;
   if (staffCount === 0) {
     console.log('Seeding initial staff...');
     const insertStaff = db.prepare(`
-      INSERT INTO STAFF (name, role, phone, active)
-      VALUES (?, ?, ?, 1)
+      INSERT INTO STAFF (name, role, phone, active, location_id)
+      VALUES (?, ?, ?, 1, 1)
     `);
 
     insertStaff.run('Dr. Ananya Sharma', 'Senior Aesthetician', '+91 98201 11223');
@@ -1199,25 +1231,15 @@ function seedData() {
     // Master Admin (HQ & Global Network)
     db.prepare("UPDATE USERS SET phone = '+91 98205 99000' WHERE role = 'master_admin'").run();
 
-    // Jubilee Hills Flagship (Location 1)
-    db.prepare("UPDATE USERS SET phone = '+91 98201 99001' WHERE location_id = 1 AND role = 'admin'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98201 99002' WHERE location_id = 1 AND role = 'reception'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98201 99003' WHERE location_id = 1 AND role = 'visitor'").run();
+    // Juhu Studio (Location 1 in a fresh database)
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99001' WHERE location_id = 1 AND role = 'admin'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99002' WHERE location_id = 1 AND role = 'reception'").run();
+    db.prepare("UPDATE USERS SET phone = '+91 98205 99003' WHERE location_id = 1 AND role = 'visitor'").run();
 
-    // Bandra West Studio (Location 2)
+    // Goregaon West (Location 2 in a fresh database)
     db.prepare("UPDATE USERS SET phone = '+91 98202 99001' WHERE location_id = 2 AND role = 'admin'").run();
     db.prepare("UPDATE USERS SET phone = '+91 98202 99002' WHERE location_id = 2 AND role = 'reception'").run();
     db.prepare("UPDATE USERS SET phone = '+91 98202 99003' WHERE location_id = 2 AND role = 'visitor'").run();
-
-    // Indiranagar Franchise (Location 3)
-    db.prepare("UPDATE USERS SET phone = '+91 98801 99001' WHERE location_id = 3 AND role = 'admin'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98801 99002' WHERE location_id = 3 AND role = 'reception'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98801 99003' WHERE location_id = 3 AND role = 'visitor'").run();
-
-    // Koregaon Park Franchise (Location 4)
-    db.prepare("UPDATE USERS SET phone = '+91 98900 99001' WHERE location_id = 4 AND role = 'admin'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98900 99002' WHERE location_id = 4 AND role = 'reception'").run();
-    db.prepare("UPDATE USERS SET phone = '+91 98900 99003' WHERE location_id = 4 AND role = 'visitor'").run();
 
     // Gachibowli Studio (Location 5)
     db.prepare("UPDATE USERS SET phone = '+91 98400 99881' WHERE location_id = 5 AND role = 'admin'").run();

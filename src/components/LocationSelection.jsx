@@ -236,18 +236,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
     setIsSelectingFirmTypeToAdd(false);
   }, [type]);
 
-  // Keep the active Juhu branch and branches created after it. Older seeded/demo
-  // records should not be mixed into this workspace; test branches stay hidden.
-  const juhuBranch = locations.find(loc => /juhu/i.test(`${loc.name || ''} ${loc.address || ''}`));
-  const branchLocations = type === 'branch'
-    ? locations.filter(loc => {
-        const isJuhu = /juhu/i.test(`${loc.name || ''} ${loc.address || ''}`);
-        const isLaterRealBranch = juhuBranch
-          && loc.location_id > juhuBranch.location_id
-          && !/\btest\b/i.test(loc.name || '');
-        return isJuhu || isLaterRealBranch;
-      })
-    : locations;
+  const branchLocations = locations;
 
   const handleApplyDateFilter = (newFilter) => {
     setDateFilter(newFilter);

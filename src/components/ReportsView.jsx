@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   BarChart3, IndianRupee, Users, Sparkles, Award,
@@ -47,6 +47,7 @@ export default function ReportsView({ onOpenClient, branding }) {
 
   // Executive KPI deep-dive popup modal tab state ('revenue' | 'ticket' | 'footfall' | 'memberships' | 'category' | 'payment' | 'staff' | 'services' | null)
   const [activeKpiModal, setActiveKpiModal] = useState(null);
+  const membershipRosterRef = useRef(null);
 
   // Draggable KPI cards state
   const [kpiCardOrder, setKpiCardOrder] = useState(() => {
@@ -133,6 +134,10 @@ export default function ReportsView({ onOpenClient, branding }) {
   const handleCardClick = (cardId) => {
     if (isDraggingRef.current) return;
     setActiveKpiModal(cardId);
+  };
+  const handleMembershipPlanSelect = (tier, isSelected) => {
+    setMembershipTierFilter(isSelected ? 'all' : tier);
+    requestAnimationFrame(() => membershipRosterRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
   const [footfallTab, setFootfallTab] = useState('all'); // 'all' | 'new' | 'old'
   const [footfallSearch, setFootfallSearch] = useState('');
@@ -411,13 +416,11 @@ export default function ReportsView({ onOpenClient, branding }) {
   const payment_methods = paymentMethods;
 
   // Valid tender payment modes (strictly excludes null and 'Other' non-tender entries as requested)
-  const displayPaymentMethods = useMemo(() => {
-    return (paymentMethods || []).filter(pm => {
-      if (!pm || !pm.payment_method) return false;
-      const method = String(pm.payment_method).trim().toLowerCase();
-      return method !== '' && method !== 'other' && method !== 'null' && method !== 'undefined';
-    });
-  }, [paymentMethods]);
+  const displayPaymentMethods = (paymentMethods || []).filter(pm => {
+    if (!pm || !pm.payment_method) return false;
+    const method = String(pm.payment_method).trim().toLowerCase();
+    return method !== '' && method !== 'other' && method !== 'null' && method !== 'undefined';
+  });
 
   // Unused services filtering
   const filteredUnusedServices = unused_services.filter(s => {
@@ -1841,7 +1844,9 @@ export default function ReportsView({ onOpenClient, branding }) {
               borderRadius: '16px',
               maxWidth: '860px',
               width: '100%',
+              height: '92vh',
               maxHeight: '92vh',
+              minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -2514,19 +2519,19 @@ export default function ReportsView({ onOpenClient, branding }) {
 
             {/* TAB 4: STUDIO MEMBERSHIPS & CLIENT CREDITS AUDIT */}
             {(activeKpiModal === 'memberships' || activeKpiModal === 'benchmarks') && (
-              <div style={{ padding: '22px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ flex: '1 1 0%', minHeight: 0, padding: '22px 24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '20px', boxSizing: 'border-box' }}>
                 
                 {/* 5 KPI Summary Badges */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
                   <div style={{ padding: '14px', background: '#FAF6EE', borderRadius: '10px', border: '1px solid #DAC493' }}>
                     <div style={{ fontSize: '11px', color: '#8C6828', fontWeight: '700', textTransform: 'uppercase' }}>Available Plans</div>
                     <div style={{ fontSize: '24px', fontWeight: '800', color: '#8C6828', marginTop: '4px' }}>{memberships.total_plans || 4} Plans</div>
-                    <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '2px' }}>Éclat, Eternal, Infini, Lumière</div>
+                    <div style={{ fontSize: '11px', color: '#8C6828', marginTop: '2px' }}>{(memberships.tier_breakdown || []).map(plan => plan.tier).join(', ') || 'No plans configured'}</div>
                   </div>
                   <div style={{ padding: '14px', background: '#FAF8F5', borderRadius: '10px', border: '1px solid #EFEAE2' }}>
                     <div style={{ fontSize: '11px', color: '#78716C', fontWeight: '700', textTransform: 'uppercase' }}>Enrolled Members</div>
                     <div style={{ fontSize: '24px', fontWeight: '800', color: '#1C1917', marginTop: '4px' }}>{memberships.total_members || 0}</div>
-                    <div style={{ fontSize: '11px', color: '#78716C', marginTop: '2px' }}>Active member clients</div>
+                    <div style={{ fontSize: '11px', color: '#78716C', marginTop: '2px' }}>Membership records across this branch</div>
                   </div>
                   <div style={{ padding: '14px', background: '#FAF8F5', borderRadius: '10px', border: '1px solid #EFEAE2' }}>
                     <div style={{ fontSize: '11px', color: '#78716C', fontWeight: '700', textTransform: 'uppercase' }}>Allocated Credits</div>
@@ -2569,7 +2574,15 @@ export default function ReportsView({ onOpenClient, branding }) {
                       return (
                         <div
                           key={t.tier}
-                          onClick={() => setMembershipTierFilter(isSelected ? 'all' : t.tier)}
+                          onClick={() => handleMembershipPlanSelect(t.tier, isSelected)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              handleMembershipPlanSelect(t.tier, isSelected);
+                            }
+                          }}
                           style={{
                             padding: '14px 16px',
                             borderRadius: '14px',
@@ -2651,14 +2664,14 @@ export default function ReportsView({ onOpenClient, branding }) {
                 </div>
 
                 {/* Member Roster & Search Table */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div ref={membershipRosterRef} style={{ display: 'flex', flexDirection: 'column', gap: '12px', scrollMarginTop: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
                     <div>
                       <h3 style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                        ENROLLED MEMBER ROSTER
+                        MEMBERSHIP CLIENT HISTORY
                       </h3>
                       <div style={{ fontSize: '12px', color: '#78716C', marginTop: '2px' }}>
-                        Showing {filteredMembershipMembers.length} of {memberships.total_members || 0} member clients
+                        Showing {filteredMembershipMembers.length} of {memberships.total_members || 0} membership records
                       </div>
                     </div>
                   </div>
@@ -2728,15 +2741,17 @@ export default function ReportsView({ onOpenClient, branding }) {
                   <div style={{
                     border: '1px solid #E7DFD5',
                     borderRadius: '10px',
-                    overflow: 'hidden',
+                    overflowX: 'auto',
+                    overflowY: 'auto',
                     maxHeight: '360px',
-                    overflowY: 'auto'
+                    minWidth: 0
                   }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                    <table style={{ width: '100%', minWidth: '940px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                       <thead style={{ background: '#FAF8F5', position: 'sticky', top: 0, zIndex: 2 }}>
                         <tr style={{ borderBottom: '1px solid #E7DFD5' }}>
                           <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Member Client</th>
                           <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Tier</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Status</th>
                           <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Total Credits</th>
                           <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Credits Used</th>
                           <th style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#57534E', fontSize: '11px', textTransform: 'uppercase' }}>Remaining Balance</th>
@@ -2748,8 +2763,8 @@ export default function ReportsView({ onOpenClient, branding }) {
                       <tbody>
                         {filteredMembershipMembers.length === 0 ? (
                           <tr>
-                            <td colSpan="8" style={{ padding: '28px', textAlign: 'center', color: '#78716C' }}>
-                              No member clients matching the selected criteria.
+                            <td colSpan="9" style={{ padding: '28px', textAlign: 'center', color: '#78716C' }}>
+                              No membership records matching the selected criteria.
                             </td>
                           </tr>
                         ) : (
@@ -2759,7 +2774,7 @@ export default function ReportsView({ onOpenClient, branding }) {
                             const tierBadgeBorder = m.tier_group === 'Infini' ? '#DAC493' : m.tier_group === 'Lumière' ? '#DDD6FE' : m.tier_group === 'Eternal' ? '#BFDBFE' : '#BBF7D0';
 
                             return (
-                              <tr key={m.client_id || idx} style={{ borderBottom: '1px solid #F5F5F4' }}>
+                            <tr key={m.membership_id || `${m.client_id}-${m.membership_tier}-${idx}`} style={{ borderBottom: '1px solid #F5F5F4' }}>
                                 <td style={{ padding: '10px 14px' }}>
                                   <div style={{ fontWeight: '700', color: '#1C1917' }}>{m.name}</div>
                                   <div style={{ fontSize: '11px', color: '#78716C' }}>{m.phone} • {m.reg_no}</div>
@@ -2781,6 +2796,7 @@ export default function ReportsView({ onOpenClient, branding }) {
                                     {m.membership_tier}
                                   </span>
                                 </td>
+                                <td style={{ padding: '10px 14px', textTransform: 'capitalize', color: m.membership_status === 'active' ? '#166534' : '#78716C', fontWeight: 700 }}>{m.membership_status || 'active'}</td>
                                 <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700', color: '#1C1917' }}>
                                   {formatCurrency(m.credits_allocated)}
                                 </td>
@@ -2810,7 +2826,7 @@ export default function ReportsView({ onOpenClient, branding }) {
                                 </td>
                                 <td style={{ padding: '10px 14px', textAlign: 'center' }}>
                                   <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                    <button
+                                    {String(m.membership_status || 'active').toLowerCase() === 'active' && <button
                                       type="button"
                                       onClick={() => setAdjustBalanceModal({ open: true, member: m, amount: String(m.remaining_balance ?? m.membership_balance ?? 0) })}
                                       style={{
@@ -2826,8 +2842,8 @@ export default function ReportsView({ onOpenClient, branding }) {
                                       title="Adjust client credit balance"
                                     >
                                       Adjust
-                                    </button>
-                                    <button
+                                    </button>}
+                                    {String(m.membership_status || 'active').toLowerCase() === 'active' && <button
                                       type="button"
                                       onClick={() => setExtendValidityModal({ open: true, member: m, date: m.membership_expires_at || '' })}
                                       style={{
@@ -2843,7 +2859,7 @@ export default function ReportsView({ onOpenClient, branding }) {
                                       title="Extend client membership validity date"
                                     >
                                       Extend
-                                    </button>
+                                    </button>}
                                     {onOpenClient && (
                                       <button
                                         type="button"
@@ -3481,7 +3497,7 @@ export default function ReportsView({ onOpenClient, branding }) {
                   <span>Based on <strong>{revenue.period_visits || 0}</strong> completed transactions</span>
                 )}
                 {(activeKpiModal === 'memberships' || activeKpiModal === 'benchmarks') && (
-                  <span>Showing <strong>{filteredMembershipMembers.length}</strong> of <strong>{memberships.total_members || 0}</strong> enrolled members • <strong>{formatCurrency(memberships.total_credits_used || 0)}</strong> redeemed till date</span>
+                  <span>Showing <strong>{filteredMembershipMembers.length}</strong> of <strong>{memberships.total_members || 0}</strong> membership records • <strong>{formatCurrency(memberships.total_credits_used || 0)}</strong> redeemed till date</span>
                 )}
                 {activeKpiModal === 'category' && (
                   <span>Showing <strong>{categories.length}</strong> service categories across <strong>{categories.reduce((acc, c) => acc + (c.total_services || 0), 0)}</strong> treatments</span>

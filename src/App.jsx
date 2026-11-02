@@ -217,6 +217,7 @@ export default function App() {
   const userHasAnyDashboardModule = currentUser && ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => canAccessModule(currentUser, module));
   const tabPermission = {
     'new-visit': 'visitor_intake',
+    appointments: null,
     clients: 'clients',
     'client-profile': 'clients',
     services: 'services',
@@ -229,7 +230,8 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
     const requiredModule = tabPermission[activeTab];
-    if ((requiredModule && !canAccessModule(currentUser, requiredModule)) || (activeTab === 'dashboard' && !userHasAnyDashboardModule)) {
+    const hasAppointmentAccess = canAccessModule(currentUser, 'visits') || canAccessModule(currentUser, 'visitor_intake');
+    if ((requiredModule && !canAccessModule(currentUser, requiredModule)) || (activeTab === 'appointments' && !hasAppointmentAccess) || (activeTab === 'dashboard' && !userHasAnyDashboardModule)) {
       setActiveTab('dashboard');
     }
   }, [currentUser, activeTab, userHasAnyDashboardModule]);
@@ -383,9 +385,10 @@ export default function App() {
           />
         )}
 
-        {canAccessModule(currentUser, 'visitor_intake') && activeTab === 'new-visit' && (
+        {(canAccessModule(currentUser, 'visitor_intake') || canAccessModule(currentUser, 'visits')) && ['new-visit', 'appointments'].includes(activeTab) && (
           <NewVisitWizard
-            key={`${wizardResetKey}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
+            key={`${wizardResetKey}_${activeTab}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
+            appointmentMode={activeTab === 'appointments'}
             preSelectedClient={preSelectedVisitClient}
             initialType={initialVisitType}
             currentUser={currentUser}

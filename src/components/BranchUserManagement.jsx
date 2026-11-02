@@ -1,28 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, Edit2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { DASHBOARD_MODULES, MANAGER_PERMISSION_MODULES } from '../utils/permissions';
 
 const emptyForm = {
   name: '',
-  designation: '',
   phone: '',
   email: '',
   role: 'reception',
-  teamRole: '',
   permissions: ['dashboard', 'visits', 'clients']
 };
 
 export default function BranchUserManagement({ activeLocation, branding }) {
   const [users, setUsers] = useState([]);
-  const [teamOptions, setTeamOptions] = useState({ roles: [], designations: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
+  const loadSequence = useRef(0);
 
-  const loadUsers = async () => {
+  const loadUsers = async ({ preserveError = false } = {}) => {
+    const sequence = ++loadSequence.current;
     setLoading(true);
     try {
       // Master Admin can manage accounts across branches, so always scope this
@@ -31,27 +30,18 @@ export default function BranchUserManagement({ activeLocation, branding }) {
         ? `?location_id=${encodeURIComponent(activeLocation.location_id)}`
         : '';
       const result = await apiRequest(`/admin/branch-users${branchQuery}`);
+      if (sequence !== loadSequence.current) return;
       setUsers(result.users || []);
-      setError('');
+      if (!preserveError) setError('');
       window.dispatchEvent(new Event('branch_users_updated'));
     } catch (err) {
-      setError(err.message || 'Could not load branch users.');
+      if (sequence === loadSequence.current) setError(err.message || 'Could not load branch users.');
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current) setLoading(false);
     }
   };
 
-  const loadTeamOptions = async () => {
-    try {
-      const result = await apiRequest('/admin/team-options');
-      setTeamOptions({ roles: result.roles || [], designations: result.designations || [] });
-    } catch (err) {
-      console.error('Could not load Master role and designation options:', err);
-      setError(err.message || 'Could not load Role and Designation Master options.');
-    }
-  };
-
-  useEffect(() => { loadUsers(); loadTeamOptions(); }, [activeLocation?.location_id]);
+  useEffect(() => { loadUsers(); }, [activeLocation?.location_id]);
 
   const startCreate = () => {
     setEditingUser(null);
@@ -63,11 +53,9 @@ export default function BranchUserManagement({ activeLocation, branding }) {
     setEditingUser(user);
     setForm({
       name: user.name || '',
-      designation: user.designation || (user.role === 'reception' ? 'Manager' : 'Visitor'),
       phone: user.phone || '',
       email: user.email || '',
       role: user.role,
-      teamRole: user.team_role || '',
       permissions: Array.isArray(user.permissions) ? user.permissions : []
     });
     setError('');
@@ -88,17 +76,11 @@ export default function BranchUserManagement({ activeLocation, branding }) {
       setError('Mobile number and email address are required.');
       return;
     }
-    if (form.role === 'reception' && (!form.teamRole || !form.designation)) {
-      setError('Choose a team role and designation from Master.');
-      return;
-    }
     setSaving(true);
     setError('');
     try {
       const payload = {
         name: form.name.trim(),
-        designation: form.role === 'reception' ? form.designation.trim() : 'Visitor',
-        team_role: form.role === 'reception' ? form.teamRole : '',
         phone: form.phone.trim(),
         email: form.email.trim().toLowerCase(),
         role: form.role,
@@ -114,7 +96,9 @@ export default function BranchUserManagement({ activeLocation, branding }) {
       setEditingUser(null);
       setForm(emptyForm);
     } catch (err) {
-      setError(err.message || 'Could not save this account.');
+      const message = err.message || 'Could not save this account.';
+      await loadUsers({ preserveError: true });
+      setError(message);
     } finally {
       setSaving(false);
     }
@@ -158,7 +142,7 @@ export default function BranchUserManagement({ activeLocation, branding }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <strong style={{ display: 'block', color: '#29231E', fontSize: 15 }}>{user.name}</strong>
-          <span style={{ color: '#9F7335', fontSize: 12 }}>{user.team_role ? `${user.team_role}${user.designation ? ` · ${user.designation}` : ''}` : (user.designation || (user.role === 'reception' ? 'Manager' : 'Visitor'))} · {user.role === 'reception' ? 'Manager access' : 'Visitor access'}</span>
+          <span style={{ color: '#9F7335', fontSize: 12 }}>{user.role === 'reception' ? 'Manager access' : 'Visitor access'}</span>
         </div>
         <span style={{ alignSelf: 'flex-start', borderRadius: 999, padding: '4px 9px', fontSize: 10, fontWeight: 800, color: user.active ? '#3F6B4A' : '#78716C', background: user.active ? '#EDF7EE' : '#F1EFEB' }}>{user.active ? 'ACTIVE' : 'INACTIVE'}</span>
       </div>
@@ -234,21 +218,11 @@ export default function BranchUserManagement({ activeLocation, branding }) {
           </div>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 10 }}>
+              <label style={labelStyle}>Account access<select value={form.role} onChange={e => setForm(current => ({ ...current, role: e.target.value, name: '', phone: '', email: '', permissions: e.target.value === 'reception' ? ['dashboard', 'visits', 'clients'] : ['visitor_intake'] }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="reception">Manager</option><option value="visitor">Visitor</option></select></label>
               <label style={labelStyle}>Full name *<input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} /></label>
-              <label style={labelStyle}>Account access<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value, permissions: e.target.value === 'reception' ? ['dashboard', 'visits', 'clients'] : ['visitor_intake'] })} style={{ ...inputStyle, cursor: 'pointer' }}><option value="reception">Manager</option><option value="visitor">Visitor</option></select></label>
-              {form.role === 'reception' && <>
-                <label style={labelStyle}>Team role *<select required value={form.teamRole} onChange={e => setForm(current => ({ ...current, teamRole: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="">Select a role</option>{form.teamRole && !teamOptions.roles.some(item => item.option_name === form.teamRole) && <option value={form.teamRole}>{form.teamRole} (saved)</option>}{teamOptions.roles.map(item => <option key={item.option_id} value={item.option_name}>{item.option_name}</option>)}</select><span style={{ fontSize: 10, color: '#A8A29E', fontWeight: 400 }}>Scroll to browse roles from Master.</span></label>
-                <label style={labelStyle}>Designation *<select required value={form.designation} onChange={e => setForm(current => ({ ...current, designation: e.target.value }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="">Select a designation</option>{form.designation && !teamOptions.designations.some(item => item.option_name === form.designation) && <option value={form.designation}>{form.designation} (saved)</option>}{teamOptions.designations.map(item => <option key={item.option_id} value={item.option_name}>{item.option_name}</option>)}</select><span style={{ fontSize: 10, color: '#A8A29E', fontWeight: 400 }}>Scroll to browse designations from Master.</span></label>
-              </>}
               <label style={labelStyle}>Mobile number *<input required type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} /></label>
               <label style={labelStyle}>Email address *<input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={inputStyle} /></label>
             </div>
-
-            {form.role === 'reception' && (
-              <div style={{ border: '1px solid #E9D9BD', borderRadius: 9, padding: '10px 12px', color: '#785624', background: '#FAF6EE', fontSize: 12.5 }}>
-                Managers must already be registered under Team at this branch. Use the same mobile number as their Team profile.
-              </div>
-            )}
 
             <div style={{ borderTop: '1px solid #EEE7DD', paddingTop: 15 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#8C6228', fontWeight: 800, fontSize: 13, marginBottom: 10 }}><ShieldCheck size={16} /> {form.role === 'visitor' ? 'Visitor access' : 'Dashboard modules'}</div>

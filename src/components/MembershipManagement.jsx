@@ -3,7 +3,7 @@ import {
   Crown, Sparkles, Users, Search, Filter, Plus, Calendar, Clock,
   ArrowRight, ShieldCheck, CheckCircle2, AlertCircle,
   ChevronRight, Edit2, ExternalLink, X, DollarSign, Wallet,
-  CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Image as ImageIcon,
+  CreditCard, Gift, Star, Check, UserPlus, Trash2, Layers, Archive, Image as ImageIcon,
   Upload
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
@@ -59,6 +59,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     || (effectiveRole === 'reception' && canAccessModule(user, 'membership'));
 
   const [plans, setPlans] = useState([]);
+  const [archivedPlans, setArchivedPlans] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({
@@ -73,6 +74,18 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   const membershipRequestId = useRef(0);
 
   const [selectedTier, setSelectedTier] = useState(null);
+  const [membershipTab, setMembershipTab] = useState('plans');
+  const [selectedHistoryPlan, setSelectedHistoryPlan] = useState(null);
+  const [planHistory, setPlanHistory] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [migrationFromPlanId, setMigrationFromPlanId] = useState('');
+  const [migrationToPlanId, setMigrationToPlanId] = useState('');
+  const [selectedMigrationClients, setSelectedMigrationClients] = useState([]);
+  const [migrationMode, setMigrationMode] = useState('carry');
+  const [customMigrationCredits, setCustomMigrationCredits] = useState({});
+  const [customMigrationPrivileges, setCustomMigrationPrivileges] = useState({});
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState('');
 
   // Modals state
   const [enrollModal, setEnrollModal] = useState(false);
@@ -168,6 +181,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       if (res.plans) {
         setPlans(res.plans);
       }
+      setArchivedPlans(res.archived_plans || []);
       if (res.program_title) {
         setProgramTitle(res.program_title);
         setTempTitle(res.program_title);
@@ -181,6 +195,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         overall_usage_pct: 0,
         tier_counts: {}
       });
+      return res;
     } catch (err) {
       if (requestId === membershipRequestId.current) {
         console.error('Failed to load memberships:', err);
@@ -204,7 +219,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   useEffect(() => {
     // Never leave the previous branch's memberships visible during a switch.
     setPlans([]);
+    setArchivedPlans([]);
     setMembers([]);
+    setSelectedHistoryPlan(null);
+    setPlanHistory(null);
     setStats({ total_members: 0, total_allocated: 0, total_used: 0, total_balance: 0, overall_usage_pct: 0, tier_counts: {} });
     setProgramTitle('WORLD OF PRIVILEGES');
     setTempTitle('WORLD OF PRIVILEGES');
@@ -656,7 +674,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       });
       if (res && res.success) {
         setDeleteConfirmModal({ open: false, planId: null, planName: '', deleting: false });
+        setMembershipTab('archived');
         await fetchMemberships();
+        const archived = [...archivedPlans, ...plans].find(plan => plan.id === deleteConfirmModal.planId || String(plan.plan_id) === String(deleteConfirmModal.planId));
+        if (archived) loadPlanHistory(archived);
         notifyMembershipChanged();
       } else {
         alert(res?.error || 'Failed to delete plan');
@@ -666,6 +687,80 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       console.error('Delete plan error:', err);
       alert('Error deleting plan: ' + err.message);
       setDeleteConfirmModal(prev => ({ ...prev, deleting: false }));
+    }
+  };
+
+  const loadPlanHistory = async plan => {
+    if (!plan) return;
+    setSelectedHistoryPlan(plan);
+    setPlanHistory(null);
+    setHistoryLoading(true);
+    try {
+      const history = await apiRequest(`/memberships/plans/${encodeURIComponent(plan.id)}/history`);
+      setPlanHistory(history);
+    } catch (error) {
+      setPlanHistory({ error: error.message || 'Could not load membership history.' });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleRestorePlan = async plan => {
+    try {
+      await apiRequest(`/memberships/plans/${encodeURIComponent(plan.id)}/restore`, { method: 'PUT' });
+      setSelectedHistoryPlan(null);
+      setPlanHistory(null);
+      await fetchMemberships();
+      notifyMembershipChanged();
+    } catch (error) {
+      alert(error.message || 'Could not restore the plan.');
+    }
+  };
+
+  const selectedMigrationPlan = archivedPlans.find(plan => String(plan.plan_id) === String(migrationFromPlanId) || plan.id === migrationFromPlanId)
+    || plans.find(plan => String(plan.plan_id) === String(migrationFromPlanId) || plan.id === migrationFromPlanId);
+  const migrationCandidates = selectedMigrationPlan
+    ? members.filter(member => member.tier_group === selectedMigrationPlan.tier && String(member.membership_status || '').toLowerCase() === 'active')
+    : [];
+  const sourceMigrationPrivileges = selectedMigrationPlan ? [
+    ...(Array.isArray(selectedMigrationPlan.benefits) ? selectedMigrationPlan.benefits : []).map((name, index) => ({ id: `${selectedMigrationPlan.id}_benefit_${index + 1}`, name, type: 'benefit' })),
+    ...(Array.isArray(selectedMigrationPlan.free_services) ? selectedMigrationPlan.free_services : []).filter(service => service && service.is_free !== false).map(service => ({ id: `membership_service_${service.service_id}`, name: `${service.service_name || 'Complimentary service'} — complimentary`, type: 'service' }))
+  ] : [];
+
+  const handleMigrationSubmit = async () => {
+    if (!migrationFromPlanId || !migrationToPlanId || !selectedMigrationClients.length) return;
+    const destination = plans.find(plan => String(plan.plan_id) === String(migrationToPlanId) || plan.id === migrationToPlanId);
+    if (!window.confirm(`Migrate ${selectedMigrationClients.length} selected client(s) to ${destination?.tier || 'the selected plan'} using ${migrationMode === 'carry' ? 'their current remaining credits and benefits' : 'your customized credits and benefits'}? WhatsApp/email notices will be attempted for available client contacts.`)) return;
+    setMigrationBusy(true);
+    setMigrationMessage('');
+    try {
+      const result = await apiRequest('/memberships/migrate', {
+        method: 'POST',
+        body: JSON.stringify({
+          from_plan_id: migrationFromPlanId,
+          to_plan_id: migrationToPlanId,
+          client_ids: selectedMigrationClients,
+          migration_mode: migrationMode,
+          client_options: Object.fromEntries(selectedMigrationClients.map(clientId => [String(clientId), {
+            credits: customMigrationCredits[clientId],
+            privilege_ids: customMigrationPrivileges[clientId]
+          }]))
+        })
+      });
+      const notificationText = result.notification_status === 'sent'
+        ? 'Client notification sent.'
+        : result.notification_status === 'failed'
+          ? 'Migration completed, but notification delivery failed.'
+          : 'Migration completed. Notification provider or client contact is unavailable.';
+      setMigrationMessage(`${result.migrated} client(s) migrated from ${result.from_plan} to ${result.to_plan}. ${notificationText}`);
+      setSelectedMigrationClients([]);
+      setMembershipTab('archived');
+      await fetchMemberships();
+      notifyMembershipChanged();
+    } catch (error) {
+      setMigrationMessage(error.message || 'Migration failed.');
+    } finally {
+      setMigrationBusy(false);
     }
   };
 
@@ -681,7 +776,20 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
       </div>
 
+      {canManagePlans && (
+        <div role="tablist" aria-label="Membership administration" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, borderBottom: '1px solid #E7DFD5', paddingBottom: 10 }}>
+          {[
+            ['plans', 'Active Plans'],
+            ['archived', `Archived Plans (${archivedPlans.length})`],
+            ['migrate', 'Migrate Members']
+          ].map(([tab, label]) => (
+            <button key={tab} type="button" role="tab" aria-selected={membershipTab === tab} onClick={() => setMembershipTab(tab)} style={{ padding: '9px 14px', borderRadius: 8, border: membershipTab === tab ? '1px solid #B88B4A' : '1px solid #E7DFD5', background: membershipTab === tab ? '#FAF6EE' : '#FFFFFF', color: membershipTab === tab ? '#8C6228' : '#57534E', fontWeight: 700, cursor: 'pointer' }}>{label}</button>
+          ))}
+        </div>
+      )}
+
       {/* SECTION 1: WORLD OF PRIVILEGES SHOWCASE (MATCHING IMAGE 2) */}
+      {membershipTab === 'plans' && (
       <div>
         <div style={{ textAlign: 'center', marginBottom: '22px', position: 'relative' }}>
           {isEditingTitle ? (
@@ -1080,10 +1188,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                             gap: '4px',
                             transition: 'all 0.15s ease'
                           }}
-                          title="Delete membership plan"
+                          title="Archive membership plan and preserve its history"
                         >
-                          <Trash2 size={12} />
-                          Delete
+                          <Archive size={12} />
+                          Archive
                         </button>
                       </div>
                     )}
@@ -1329,6 +1437,91 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           )}
         </div>
       </div>
+      )}
+
+      {canManagePlans && membershipTab === 'archived' && (
+        <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ padding: '16px 18px', border: '1px solid #E7DFD5', borderRadius: 12, background: '#FAF8F5' }}>
+            <h2 style={{ margin: '0 0 5px', fontSize: 18, color: '#292524' }}>Archived membership plans</h2>
+            <p style={{ margin: 0, fontSize: 13, color: '#78716C' }}>Archived plans are hidden from new enrollments and upgrades. Existing memberships and their reports remain available here.</p>
+          </div>
+          {archivedPlans.length === 0 ? (
+            <div style={{ padding: 28, border: '1px dashed #D6C7B3', borderRadius: 12, textAlign: 'center', color: '#78716C' }}>No archived plans for this branch.</div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 300px))', gap: 16 }}>
+              {archivedPlans.map(plan => (
+                <article key={plan.plan_id} style={{ padding: 16, border: '1px solid #D9C7AF', borderRadius: 14, background: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div><div style={{ fontWeight: 800, color: '#292524' }}>{plan.tier}</div><div style={{ fontSize: 12, color: '#78716C', marginTop: 3 }}>{plan.name} · {formatCurrency(plan.price)}</div></div>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: '#7C2D12', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 99, padding: '4px 8px' }}>ARCHIVED</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={() => loadPlanHistory(plan)} style={{ flex: 1, padding: '8px 10px', border: '1px solid #DAC493', borderRadius: 7, background: '#FAF6EE', color: '#8C6228', fontWeight: 700, cursor: 'pointer' }}>View membership history</button>
+                    <button type="button" onClick={() => handleRestorePlan(plan)} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', color: '#57534E', fontWeight: 700, cursor: 'pointer' }}>Restore</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {selectedHistoryPlan && (
+            <section style={{ padding: 18, border: '1px solid #E7DFD5', borderRadius: 12, background: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+                <div><h3 style={{ margin: 0, fontSize: 17, color: '#292524' }}>{selectedHistoryPlan.tier} · Membership history</h3><div style={{ marginTop: 4, fontSize: 12, color: '#78716C' }}>{historyLoading ? 'Loading history…' : planHistory?.error || `${planHistory?.total_members || 0} membership records · ${planHistory?.first_enrollment ? `${formatDate(planHistory.first_enrollment)} to ${formatDate(planHistory.last_enrollment)}` : 'No enrollment dates'}`}</div></div>
+                <button type="button" onClick={() => { setSelectedHistoryPlan(null); setPlanHistory(null); }} style={{ padding: '6px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', cursor: 'pointer' }}>Close details</button>
+              </div>
+              {!historyLoading && planHistory?.members?.length > 0 && (
+                <div style={{ overflowX: 'auto', border: '1px solid #EEE7DD', borderRadius: 9 }}>
+                  <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead><tr style={{ background: '#FAF8F5', textAlign: 'left' }}>{['Client', 'Phone', 'Status', 'Started', 'Expires', 'Credits', 'Used', 'Transferred', 'Remaining'].map(label => <th key={label} style={{ padding: '9px 10px', color: '#57534E' }}>{label}</th>)}</tr></thead>
+                    <tbody>{planHistory.members.map(row => <tr key={row.membership_id || row.client_id} style={{ borderTop: '1px solid #F0ECE4' }}>
+                      <td style={{ padding: '9px 10px', fontWeight: 700 }}>{`${row.name || ''} ${row.surname || ''}`.trim()}</td><td style={{ padding: '9px 10px' }}>{row.phone || '—'}</td><td style={{ padding: '9px 10px', textTransform: 'capitalize' }}>{row.status || 'active'}</td><td style={{ padding: '9px 10px' }}>{formatDate(row.start_date)}</td><td style={{ padding: '9px 10px' }}>{formatDate(row.expiry_date)}</td><td style={{ padding: '9px 10px', textAlign: 'right' }}>{formatCurrency(row.credits_allocated)}</td><td style={{ padding: '9px 10px', textAlign: 'right' }}>{formatCurrency(row.credits_used)}</td><td style={{ padding: '9px 10px', textAlign: 'right', color: row.credits_transferred ? '#8C6228' : '#57534E' }}>{row.credits_transferred ? formatCurrency(row.credits_transferred) : '—'}</td><td style={{ padding: '9px 10px', textAlign: 'right', fontWeight: 800 }}>{formatCurrency(row.remaining_credits)}</td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              )}
+              {!historyLoading && planHistory?.members?.length === 0 && <div style={{ fontSize: 13, color: '#78716C' }}>No client membership records are linked to this plan yet.</div>}
+            </section>
+          )}
+        </section>
+      )}
+
+      {canManagePlans && membershipTab === 'migrate' && (
+        <section style={{ padding: 18, border: '1px solid #E7DFD5', borderRadius: 14, background: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div><h2 style={{ margin: 0, fontSize: 18, color: '#292524' }}>Migrate membership clients</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 13 }}>Review each client’s available and used credits, then carry their benefits forward or customize the new membership. WhatsApp and email notices are attempted when contact details and provider settings are available.</p></div>
+          {migrationMessage && <div role="status" style={{ padding: '10px 12px', borderRadius: 8, background: migrationMessage.toLowerCase().includes('failed') ? '#FEF2F2' : '#F0FDF4', color: migrationMessage.toLowerCase().includes('failed') ? '#B42318' : '#166534', fontSize: 13 }}>{migrationMessage}</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, fontWeight: 700, color: '#57534E' }}>Move clients from<select value={migrationFromPlanId} onChange={event => { setMigrationFromPlanId(event.target.value); setSelectedMigrationClients([]); }} style={{ padding: '10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }}><option value="">Select source membership</option>{[...archivedPlans, ...plans].map(plan => <option key={plan.plan_id} value={plan.plan_id}>{plan.tier}{Number(plan.is_active ?? 1) ? ' · Active' : ' · Archived'}</option>)}</select></label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, fontWeight: 700, color: '#57534E' }}>Move clients to<select value={migrationToPlanId} onChange={event => setMigrationToPlanId(event.target.value)} style={{ padding: '10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }}><option value="">Select destination membership</option>{plans.filter(plan => String(plan.plan_id) !== String(migrationFromPlanId)).map(plan => <option key={plan.plan_id} value={plan.plan_id}>{plan.tier}</option>)}</select></label>
+          </div>
+          {selectedMigrationPlan && <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}><strong style={{ fontSize: 13, color: '#292524' }}>Active clients on {selectedMigrationPlan.tier} ({migrationCandidates.length})</strong><button type="button" onClick={() => setSelectedMigrationClients(selectedMigrationClients.length === migrationCandidates.length ? [] : migrationCandidates.map(member => member.client_id))} style={{ border: 0, background: 'transparent', color: '#8C6228', fontWeight: 700, cursor: 'pointer' }}>{selectedMigrationClients.length === migrationCandidates.length ? 'Clear selection' : 'Select all'}</button></div>
+          </div>}
+          {selectedMigrationPlan && migrationCandidates.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div role="tablist" aria-label="Migration credit and benefit options" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {[['carry', 'Same credits & benefits'], ['custom', 'Customize migration']].map(([value, label]) => <button key={value} type="button" role="tab" aria-selected={migrationMode === value} onClick={() => setMigrationMode(value)} style={{ padding: '9px 13px', borderRadius: 8, border: migrationMode === value ? '1px solid #B88B4A' : '1px solid #E7DFD5', background: migrationMode === value ? '#FAF6EE' : '#FFFFFF', color: migrationMode === value ? '#8C6228' : '#57534E', fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 8, background: '#FAF6EE', color: '#785B25', fontSize: 12 }}>{migrationMode === 'carry' ? 'Carry each selected client’s current remaining credit balance. Their source membership benefits and already-used benefit counts are carried forward. The source record remains in history.' : 'Set a new credit balance and choose which source membership benefits each selected client keeps. Unchecked benefits will not be available on the migrated membership.'}</div>
+            <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #EEE7DD', borderRadius: 10 }}>
+              {migrationCandidates.map(member => {
+                const isSelected = selectedMigrationClients.includes(member.client_id);
+                const selectedPrivilegeIds = customMigrationPrivileges[member.client_id] || sourceMigrationPrivileges.map(privilege => privilege.id);
+                return <div key={member.client_id} style={{ padding: '12px 14px', borderBottom: '1px solid #F0ECE4', background: isSelected ? '#FFFEFB' : '#FFFFFF' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={isSelected} onChange={event => setSelectedMigrationClients(current => event.target.checked ? [...new Set([...current, member.client_id])] : current.filter(id => id !== member.client_id))} />
+                    <span style={{ flex: 1 }}><strong>{member.name}</strong><span style={{ display: 'block', fontSize: 11, color: '#78716C' }}>{member.phone || 'No phone'} · Total {formatCurrency(member.cost)} · Used {formatCurrency(member.used)} · Available {formatCurrency(member.balance)}</span></span>
+                  </label>
+                  {isSelected && migrationMode === 'custom' && <div style={{ margin: '12px 0 0 27px', display: 'grid', gridTemplateColumns: 'minmax(180px, 260px) minmax(220px, 1fr)', gap: 14 }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, fontWeight: 700, color: '#57534E' }}>New available credits<input type="number" min="0" step="1" value={customMigrationCredits[member.client_id] ?? member.balance ?? 0} onChange={event => setCustomMigrationCredits(current => ({ ...current, [member.client_id]: event.target.value }))} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7 }} /></label>
+                    <fieldset style={{ margin: 0, padding: '8px 10px', border: '1px solid #E7DFD5', borderRadius: 8 }}><legend style={{ padding: '0 4px', fontSize: 11, fontWeight: 700, color: '#57534E' }}>Benefits to carry forward</legend>{sourceMigrationPrivileges.length ? <div style={{ display: 'grid', gap: 6 }}>{sourceMigrationPrivileges.map(privilege => <label key={privilege.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 11, color: '#57534E' }}><input type="checkbox" checked={selectedPrivilegeIds.includes(privilege.id)} onChange={event => setCustomMigrationPrivileges(current => ({ ...current, [member.client_id]: event.target.checked ? [...new Set([...selectedPrivilegeIds, privilege.id])] : selectedPrivilegeIds.filter(id => id !== privilege.id) }))} />{privilege.name}</label>)}</div> : <span style={{ fontSize: 11, color: '#78716C' }}>No benefits are configured on this source plan.</span>}</fieldset>
+                  </div>}
+                </div>;
+              })}
+            </div>
+          </div>}
+          <div><button type="button" disabled={migrationBusy || !migrationFromPlanId || !migrationToPlanId || selectedMigrationClients.length === 0} onClick={handleMigrationSubmit} style={{ padding: '10px 16px', border: 0, borderRadius: 8, background: migrationBusy || !migrationFromPlanId || !migrationToPlanId || selectedMigrationClients.length === 0 ? '#D6C4A3' : '#B88B4A', color: '#FFFFFF', fontWeight: 800, cursor: migrationBusy ? 'wait' : 'pointer' }}>{migrationBusy ? 'Migrating…' : `Migrate ${selectedMigrationClients.length} selected client(s)`}</button></div>
+        </section>
+      )}
 
       {/* ENROLL CLIENT MODAL */}
       {enrollModal && (
@@ -2716,7 +2909,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
               left: 0,
               right: 0,
               height: '4px',
-              background: '#DC2626'
+              background: '#B88B4A'
             }} />
 
             {/* Alert Icon */}
@@ -2724,35 +2917,35 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
               width: '52px',
               height: '52px',
               borderRadius: '50%',
-              background: '#FEE2E2',
+              background: '#FAF6EE',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               margin: '0 auto 14px'
             }}>
-              <AlertCircle size={28} color="#DC2626" />
+              <Archive size={26} color="#B88B4A" />
             </div>
 
             <h3 style={{ fontSize: '19px', fontWeight: '800', color: '#1C1917', margin: '0 0 8px 0' }}>
-              Confirm Permanent Deletion
+              Archive Membership Plan
             </h3>
 
             <p style={{ fontSize: '13.5px', color: '#57534E', lineHeight: 1.5, margin: '0 0 14px 0' }}>
-              Do you need to delete <strong>"{deleteConfirmModal.planName}"</strong>?
+              Archive <strong>"{deleteConfirmModal.planName}"</strong>?
             </p>
 
             <div style={{
               padding: '12px 14px',
               borderRadius: '8px',
-              background: '#FEF2F2',
-              border: '1px solid #FECACA',
+              background: '#FFFBEB',
+              border: '1px solid #FDE68A',
               fontSize: '12.5px',
-              color: '#991B1B',
+              color: '#785B25',
               lineHeight: 1.45,
               marginBottom: '20px',
               textAlign: 'left'
             }}>
-              <strong>Confirm:</strong> This will be completely deleting the membership card permanently from both the membership page and the visitor membership screen.
+              This hides the plan from new enrollments and upgrades. Existing client memberships, credit history, and reports are retained. You can restore the plan later.
             </div>
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -2783,7 +2976,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                   padding: '10px 16px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: '#DC2626',
+                  background: '#B88B4A',
                   color: '#FFFFFF',
                   fontSize: '13px',
                   fontWeight: '700',
@@ -2792,11 +2985,11 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)'
+                  boxShadow: '0 4px 12px rgba(184, 139, 74, 0.25)'
                 }}
               >
-                <Trash2 size={14} />
-                {deleteConfirmModal.deleting ? 'Deleting...' : 'Confirm Delete'}
+                <Archive size={14} />
+                {deleteConfirmModal.deleting ? 'Archiving...' : 'Confirm Archive'}
               </button>
             </div>
           </div>

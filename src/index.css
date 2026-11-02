@@ -2437,6 +2437,24 @@ textarea {
 }
 
 /* Master-only Studio Management and All Branches appearance. */
+.team-master-screen,
+.team-master-screen * {
+  font-family: var(--font-sans), "Segoe UI", Arial, sans-serif !important;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+}
+
+.team-master-screen input,
+.team-master-screen select,
+.team-master-screen textarea {
+  font-size: 14px !important;
+  line-height: 1.45;
+}
+
+.team-master-screen label {
+  line-height: 1.45;
+}
+
 .app-shell h1,
 .app-shell h2,
 .app-shell h3,
@@ -2554,4 +2572,36 @@ textarea {
   border-color: var(--master-border, #D99A64) !important;
   border-width: var(--master-border-width, 1px) !important;
   border-radius: var(--master-card-radius, 22px) !important;
+}
+.team-hierarchy-position-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.team-hierarchy-position-form > label {
+  min-width: 0;
+}
+
+.team-hierarchy-position-form > label select {
+  width: 100%;
+}
+
+.team-hierarchy-position-actions {
+  grid-column: 1 / -1;
+  justify-self: end;
+  width: fit-content;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .team-hierarchy-position-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .team-hierarchy-position-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

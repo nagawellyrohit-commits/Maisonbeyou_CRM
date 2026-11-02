@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Building2, Handshake,
+  Building2, Handshake, CalendarDays, Clock3,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
   Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut, Palette,
@@ -12,6 +12,7 @@ import ClientsList from './ClientsList';
 import ServiceManagement from './ServiceManagement';
 import StaffManagement from './StaffManagement';
 import MembershipManagement from './MembershipManagement';
+import BusinessHoursManagement from './BusinessHoursManagement';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import BranchUserManagement from './BranchUserManagement';
@@ -486,7 +487,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
     regular_clients: 0,
     total_services: 0,
     total_revenue: 0,
-    pending_balance: 0
+    pending_balance: 0,
+    new_memberships: 0
   };
 
   return (
@@ -532,7 +534,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Dashboard controls without the branch hero tab */}
       <div style={{
-        display: isActualAdmin && !isManagerDashboardPreview ? 'none' : 'flex',
+        display: (isActualAdmin || dashboardUser?.role === 'reception') && !isManagerDashboardPreview ? 'none' : 'flex',
         alignItems: 'center',
         justifyContent: 'flex-end',
         gap: '14px',
@@ -644,10 +646,14 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   </div>
 
                   {[
+                    { id: 'appointments', label: 'Appointments', icon: CalendarDays, show: hasModuleAccess('visits') || hasModuleAccess('visitor_intake') },
                     { id: 'visits', label: dashboardViewRole === 'manager' || dashboardUser?.role === 'reception' ? 'Manager Dashboard' : 'Dashboard', icon: LayoutDashboard, show: hasModuleAccess('dashboard') || hasModuleAccess('visits') },
                     { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) },
                     { id: 'team-master', label: 'Master', icon: Settings, show: isAdmin && hasModuleAccess('team') },
                     { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
+                    { id: 'services', label: 'Services', icon: Scissors, show: !isAdmin && hasModuleAccess('services') },
+                    { id: 'staff', label: 'Team', icon: Users, show: !isAdmin && hasModuleAccess('team') },
+                    { id: 'membership', label: 'Membership', icon: Crown, show: !isAdmin && hasModuleAccess('membership') },
                     { id: 'reports', label: 'Reports', icon: BarChart3, show: hasModuleAccess('reports') },
                   ].filter(item => item.show).map(item => {
                     const Icon = item.icon;
@@ -777,6 +783,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           setShowDashboardRoleMenu(false);
                           if (item.id === 'branch_details') {
                             setIsKycModalOpen(true);
+                            return;
+                          }
+                          if (item.id === 'appointments') {
+                            onNavigateTab?.('appointments');
                             return;
                           }
                           if (item.id === 'visitor_intake') {
@@ -1054,7 +1064,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
               </div>
 
-          {/* Pending Balance */}
+          {/* New Memberships */}
           <div className="card" style={{
             padding: '20px 22px 24px 22px',
             display: 'flex',
@@ -1065,14 +1075,14 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', minHeight: '34px' }}>
               <div style={{ fontSize: '11.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.06em', lineHeight: 1.35 }}>
-                Pending Balance
+                New Memberships
               </div>
               <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'var(--primary-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <AlertCircle size={19} color="#B88B4A" />
+                <Crown size={19} color="#B88B4A" />
               </div>
             </div>
             <div style={{ fontSize: '30px', fontWeight: '800', color: 'var(--text-main)', marginTop: '16px', lineHeight: 1, letterSpacing: '-0.02em', fontFamily: 'var(--font-sans)' }}>
-              {formatCurrency(summary.pending_balance)}
+              {Number(summary.new_memberships || 0).toLocaleString('en-IN')}
             </div>
           </div>
           </>}
@@ -1613,15 +1623,16 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'staff' && hasModuleAccess('team') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <StaffManagement branding={branding} currentUser={dashboardUser} />
+          <StaffManagement branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} />
         </div>
       )}
 
       {activeSection === 'team-master' && isAdmin && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in team-master-screen" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
           <div role="tablist" aria-label="Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, padding: '5px 2px 12px' }}>
             {[
               { id: 'services', label: 'Services', description: 'Service catalog', icon: Scissors },
+              { id: 'hours', label: 'Hours', description: 'Opening hours', icon: Clock3 },
               { id: 'membership', label: 'Membership', description: 'Plans & privileges', icon: Crown },
               { id: 'designation', label: 'Designation', description: 'Seniority levels', icon: UserCheck },
               { id: 'team', label: 'Team', description: 'Team members', icon: Users },
@@ -1640,11 +1651,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             })}
           </div>
 
-          {masterTab === 'hierarchy' && <StaffManagement key="master-hierarchy" branding={branding} currentUser={dashboardUser} initialMasterView masterOptionType="role" />}
-          {masterTab === 'designation' && <StaffManagement key="master-designation" branding={branding} currentUser={dashboardUser} initialMasterView masterOptionType="designation" />}
+          {masterTab === 'hierarchy' && <StaffManagement key={`master-hierarchy-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} initialMasterView masterOptionType="role" />}
+          {masterTab === 'designation' && <StaffManagement key={`master-designation-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} initialMasterView masterOptionType="designation" />}
           {masterTab === 'services' && <ServiceManagement branding={branding} />}
+          {masterTab === 'hours' && <BusinessHoursManagement key={`master-hours-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} activeLocation={activeLocation} />}
           {masterTab === 'membership' && <MembershipManagement onOpenClient={onOpenClient} activeLocation={activeLocation} currentUser={dashboardUser} branding={branding} />}
-          {masterTab === 'team' && <StaffManagement branding={branding} currentUser={dashboardUser} />}
+          {masterTab === 'team' && <StaffManagement key={`master-team-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} />}
           {masterTab === 'user-access' && <BranchUserManagement activeLocation={activeLocation} branding={branding} />}
         </div>
       )}

@@ -19,6 +19,11 @@ import LoginPreferenceSelector from './LoginPreferenceSelector';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 import { renderCategoryIcon } from '../utils/categoryIcons';
 
+const normalizeMembershipServiceName = (value) => String(value || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/\b(laser|hair|removal|service|treatment|complimentary|free)\b/g, ' ')
+  .replace(/[^a-z0-9]/g, '');
+
 export const MEMBERSHIP_PLANS = [
   {
     id: 'eclat',
@@ -150,7 +155,7 @@ export const getTodayDateStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-export default function NewVisitWizard({ preSelectedClient, initialType, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation }) {
+export default function NewVisitWizard({ preSelectedClient, initialType, appointmentMode = false, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation }) {
   // Wizard Steps:
   // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'billing-payment' -> 'confirmation'
   const [step, setStep] = useState(() => {
@@ -303,12 +308,29 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   });
+  const [appointmentSlots, setAppointmentSlots] = useState([]);
+  const [appointmentSlotsLoading, setAppointmentSlotsLoading] = useState(false);
+  const [appointmentDayOpen, setAppointmentDayOpen] = useState(true);
+  const [appointmentDayHours, setAppointmentDayHours] = useState(null);
+  const [selectedAppointmentSlot, setSelectedAppointmentSlot] = useState('');
   const [phoneCheckMessage, setPhoneCheckMessage] = useState(null); // { exists: boolean, client: object }
   const [registeredClientModal, setRegisteredClientModal] = useState(null); // { client, reg_no }
   const [isRegisteringDirectly, setIsRegisteringDirectly] = useState(false);
   const [isSubmittingClient, setIsSubmittingClient] = useState(false);
   const [registeredClient, setRegisteredClient] = useState(null);
   const [copiedRegNo, setCopiedRegNo] = useState(false);
+
+  useEffect(() => {
+    if (!appointmentMode) return;
+    let cancelled = false;
+    setAppointmentSlotsLoading(true);
+    setSelectedAppointmentSlot('');
+    apiRequest(`/appointments/slots?date=${encodeURIComponent(visitDate)}`)
+      .then(result => { if (!cancelled) { setAppointmentSlots(result.slots || []); setAppointmentDayOpen(Boolean(result.is_open)); setAppointmentDayHours(result.hours || null); } })
+      .catch(error => { if (!cancelled) { setAppointmentSlots([]); setAppointmentDayOpen(false); setAppointmentDayHours(null); setSubmitError(error.message || 'Could not load appointment slots.'); } })
+      .finally(() => { if (!cancelled) setAppointmentSlotsLoading(false); });
+    return () => { cancelled = true; };
+  }, [appointmentMode, visitDate, selectedLocation?.location_id]);
 
   // Regular Client Selection
   const [selectedRegularClient, setSelectedRegularClient] = useState(preSelectedClient || null);
@@ -607,21 +629,14 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
   useEffect(() => {
     const activeClient = selectedRegularClient || clientHistory?.client || preSelectedClient;
     if (activeClient?.client_id) {
-      const token = localStorage.getItem('token');
-      fetch(`/api/clients/${activeClient.client_id}/membership-privileges`, {
-        headers: { ...(token ? { 'Authorization': `Bearer ${token}` } : {}) }
-      })
-        .then(res => res.json())
-        .then(data => {
-          if (data?.privileges) {
-            setClientPrivileges(data.privileges);
-          }
-        })
-        .catch(() => {});
+      const tier = activeClient.membership_tier || activeClient.membershipTier || '';
+      apiRequest(`/clients/${activeClient.client_id}/membership-privileges${tier ? `?tier=${encodeURIComponent(tier)}` : ''}`)
+        .then(data => setClientPrivileges(Array.isArray(data?.privileges) ? data.privileges : []))
+        .catch(() => setClientPrivileges([]));
     } else {
       setClientPrivileges([]);
     }
-  }, [selectedRegularClient?.client_id, clientHistory?.client?.client_id, preSelectedClient?.client_id]);
+  }, [selectedRegularClient?.client_id, selectedRegularClient?.membership_tier, selectedRegularClient?.membershipTier, clientHistory?.client?.client_id, clientHistory?.client?.membership_tier, preSelectedClient?.client_id, preSelectedClient?.membership_tier]);
 
   // Active client sync is handled comprehensively downstream in the dedicated getLoggedInClient & onClientChange hook
 
@@ -632,6 +647,54 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       if (!priv) return;
 
       setSelectedServices(prev => {
+        if (String(priv.id || '').startsWith('membership_service_')) {
+          const entitlementId = String(priv.id);
+          const benefitPlan = activeMembership?.plan || findConfiguredMembershipPlan(
+            selectedRegularClient?.membership_tier || clientHistory?.client?.membership_tier || preSelectedClient?.membership_tier
+          );
+          const entitlement = (benefitPlan?.free_services || []).find(item => entitlementId === `membership_service_${item.service_id}`);
+          if (!entitlement) {
+            setToastNotification('This complimentary service is not configured for the active branch membership.');
+            return prev;
+          }
+          const planPurchaseInCart = Boolean(activeMembership?.plan && (Number(activeMembership.price || activeMembership.plan.price) || 0) > 0);
+          const recordedEntitlement = clientPrivileges.find(item => item.id === entitlementId);
+          const maxAvailable = planPurchaseInCart ? 1 : (Number(recordedEntitlement?.remainingUses) || 0);
+          const alreadyInCart = prev.filter(item => item.privilege_id === entitlementId).length;
+          if (alreadyInCart >= maxAvailable) {
+            setToastNotification('This complimentary service benefit has already been used or added to this visit.');
+            return prev;
+          }
+
+          const entitlementKey = normalizeMembershipServiceName(entitlement.service_name || entitlement.name);
+          const catalogService = categories.flatMap(category => category.services || []).find(service =>
+            Number(service.service_id) === Number(entitlement.service_id) ||
+            (entitlementKey && normalizeMembershipServiceName(service.service_name || service.name) === entitlementKey)
+          );
+          if (!catalogService) {
+            setToastNotification('Choose the matching service from the service catalog to use this complimentary benefit.');
+            return prev;
+          }
+          const existingServiceIndex = prev.findIndex(item => item.service_id &&
+            Number(item.service_id) === Number(catalogService.service_id) && !item.membership_benefit_service);
+          const complimentaryItem = {
+            temp_id: existingServiceIndex >= 0 ? prev[existingServiceIndex].temp_id : `priv_${entitlementId}_${Date.now()}`,
+            service_id: catalogService.service_id,
+            service_name: catalogService.service_name,
+            price: 0,
+            list_price: Number(catalogService.price) || 0,
+            staff_id: existingServiceIndex >= 0 ? prev[existingServiceIndex].staff_id : null,
+            is_privilege: true,
+            membership_benefit_service: true,
+            privilege_id: entitlementId
+          };
+          const next = existingServiceIndex >= 0
+            ? prev.map((item, index) => index === existingServiceIndex ? complimentaryItem : item)
+            : [...prev, complimentaryItem];
+          setToastNotification(`✓ ${catalogService.service_name} is complimentary with your membership.`);
+          return next;
+        }
+
         const alreadyInCart = prev.some(s => s.is_privilege && s.privilege_id === priv.id);
         if (alreadyInCart) {
           setToastNotification(`Privilege "${priv.name}" is already in cart`);
@@ -678,7 +741,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       window.removeEventListener('add_privilege_to_cart', handleAddPrivilege);
       window.removeEventListener('remove_privilege_from_cart', handleRemovePrivilege);
     };
-  }, []);
+  }, [activeMembership, selectedRegularClient, clientHistory, preSelectedClient, clientPrivileges, dynamicMembershipPlans, categories]);
 
   // Broadcast currently in-cart privilege IDs to Navbar and other components
   useEffect(() => {
@@ -1377,10 +1440,19 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
     .replace(/[^a-z0-9]/g, '');
   const normalizedTierName = normalizeMembershipName(applicableTierName);
   const membershipPlanOptions = dynamicMembershipPlans;
+  const selectedMembershipPlanId = isPurchasingMembership ? activeMembership?.plan?.id : null;
+  const branchConfiguredDiscountPlan = membershipPlanOptions.find(plan =>
+    (selectedMembershipPlanId && String(plan.id) === String(selectedMembershipPlanId)) ||
+    [plan.tier, plan.name, plan.fullName, plan.id]
+      .some(value => normalizeMembershipName(value) === normalizedTierName)
+  );
   const configuredDiscountPlan = isPurchasingMembership
-    ? activeMembership?.plan
-    : membershipPlanOptions.find(plan => [plan.tier, plan.name, plan.fullName, plan.id]
-      .some(value => normalizeMembershipName(value) === normalizedTierName));
+    ? {
+        ...(branchConfiguredDiscountPlan || {}),
+        ...(activeMembership?.plan || {}),
+        discount_percent: activeMembership?.plan?.discount_percent ?? activeMembership?.plan?.discountPercent ?? branchConfiguredDiscountPlan?.discount_percent ?? branchConfiguredDiscountPlan?.discountPercent
+      }
+    : branchConfiguredDiscountPlan;
   const configuredDiscountValue = configuredDiscountPlan?.discount_percent ?? configuredDiscountPlan?.discountPercent;
   const parsedMembershipDiscount = configuredDiscountValue === undefined || configuredDiscountValue === null
     ? 0
@@ -1526,7 +1598,29 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       (!expiry || expiry.getTime() >= Date.now()));
     const benefitPlan = activeMembership?.plan || (currentMembershipValid ? findConfiguredMembershipPlan(tierName) : null);
     const freeServices = Array.isArray(benefitPlan?.free_services) ? benefitPlan.free_services : [];
-    const includedService = currentMembershipValid && freeServices.find(item => Number(item.service_id) === Number(service.service_id) && item.is_free !== false);
+    const serviceBenefitKey = normalizeMembershipServiceName(service.service_name || service.name);
+    const isNewMembershipPurchase = Boolean(activeMembership?.plan && (Number(activeMembership.price || activeMembership.plan.price) || 0) > 0);
+    const cartPrivilegeIds = selectedServices
+      .filter(item => item.privilege_id)
+      .map(item => item.privilege_id);
+    const includedService = currentMembershipValid && freeServices.find(item => {
+      if (item?.is_free === false) return false;
+      const directMatch = Number(item.service_id) === Number(service.service_id);
+      const itemBenefitKey = normalizeMembershipServiceName(item.service_name || item.name);
+      const nameMatch = serviceBenefitKey && itemBenefitKey && serviceBenefitKey === itemBenefitKey;
+      if (!directMatch && !nameMatch) return false;
+
+      const entitlementId = `membership_service_${item.service_id}`;
+      const recordedEntitlement = clientPrivileges.find(privilege => privilege.id === entitlementId);
+      const remainingUses = isNewMembershipPurchase
+        ? 1
+        : (recordedEntitlement ? Number(recordedEntitlement.remainingUses) || 0 : 0);
+      const manuallyAddedBenefit = selectedServices.some(cartItem =>
+        !cartItem.service_id && cartItem.privilege_id === entitlementId
+      );
+      const usesInCart = cartPrivilegeIds.filter(id => id === entitlementId).length - (manuallyAddedBenefit ? 1 : 0);
+      return usesInCart < remainingUses;
+    });
     const listPrice = Number(service.price) || 0;
     const isFreeWithMembership = Boolean(includedService);
     const newItem = {
@@ -1539,9 +1633,12 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
       is_repeat: isRepeat,
       is_privilege: isFreeWithMembership,
       membership_benefit_service: isFreeWithMembership,
-      privilege_id: isFreeWithMembership ? `membership_service_${service.service_id}` : null
+      privilege_id: isFreeWithMembership ? `membership_service_${includedService.service_id}` : null
     };
-    setSelectedServices(prev => [...prev, newItem]);
+    setSelectedServices(prev => [
+      ...prev.filter(item => !(isFreeWithMembership && !item.service_id && item.privilege_id === newItem.privilege_id)),
+      newItem
+    ]);
     setToastNotification(isFreeWithMembership
       ? `✓ ${service.service_name} is included free with ${benefitPlan.name || tierName} (value ${formatCurrency(listPrice)})`
       : `✓ Added "${service.service_name}" (${formatCurrency(listPrice)}) to visit`);
@@ -1846,7 +1943,8 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
         email_ids: clientType === 'new' ? clientEmails.filter(e => e.trim().length > 0) : (selectedRegularClient?.email_ids || []),
         visit_date: visitDate,
         submitted_at: new Date().toISOString(),
-        service_time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }),
+        service_time: appointmentMode ? selectedAppointmentSlot : new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }),
+        is_appointment: appointmentMode,
         services: selectedServices.length > 0 ? selectedServices.map(s => ({
           service_id: s.service_id,
           service_name: s.service_name,
@@ -6937,6 +7035,23 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                 </div>
               </div>
 
+              {appointmentMode && (
+                <section aria-label="Appointment date and time" style={{ margin: '24px 0 8px', padding: '16px', border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
+                    <div><h3 style={{ margin: 0, color: '#292524', fontSize: 16 }}>Choose an appointment slot</h3><p style={{ margin: '4px 0 0', fontSize: 12, color: '#78716C' }}>{appointmentDayHours?.open ? `Branch hours: ${appointmentDayHours.start}–${appointmentDayHours.end}. Green slots are open; grey slots are booked.` : 'This branch is closed on the selected day.'}</p></div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: '#57534E' }}>Appointment date<input type="date" min={getTodayDateStr()} value={visitDate} onChange={event => setVisitDate(event.target.value)} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }} /></label>
+                  </div>
+                  {appointmentSlotsLoading ? <div style={{ padding: '16px 8px', color: '#78716C', fontSize: 13 }}>Checking branch availability…</div> : !appointmentDayOpen ? <div style={{ padding: 12, color: '#78716C', background: '#F5F5F4', borderRadius: 8, fontSize: 12 }}>No appointments can be booked for this branch on this day.</div> : appointmentSlots.length === 0 ? <div style={{ padding: 12, color: '#78716C', background: '#FAF8F5', borderRadius: 8, fontSize: 12 }}>No appointment slots are available for this date.</div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
+                    {appointmentSlots.map(item => {
+                      const isBooked = item.booked?.length > 0;
+                      const isSelected = selectedAppointmentSlot === item.slot;
+                      const bookedClient = item.booked?.[0]?.client_name;
+                      return <button key={item.slot} type="button" disabled={isBooked} onClick={() => setSelectedAppointmentSlot(item.slot)} title={isBooked ? `Booked${bookedClient ? ` by ${bookedClient}` : ''}` : `Book ${item.slot}`} style={{ minHeight: 56, padding: '8px 9px', borderRadius: 9, border: isSelected ? '2px solid #B88B4A' : isBooked ? '1px solid #E7E5E4' : '1px solid #A7D7B5', background: isSelected ? '#B88B4A' : isBooked ? '#F5F5F4' : '#F0FDF4', color: isSelected ? '#FFFFFF' : isBooked ? '#A8A29E' : '#166534', cursor: isBooked ? 'not-allowed' : 'pointer', textAlign: 'center' }}><strong style={{ display: 'block', fontSize: 12 }}>{item.slot}</strong><span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700 }}>{isBooked ? (bookedClient || 'Booked') : isSelected ? 'Selected' : 'Open'}</span></button>;
+                    })}
+                  </div>}
+                </section>
+              )}
+
               {/* Bottom Action Row (Matching Image 2) */}
               <div style={{
                 display: 'flex',
@@ -6996,7 +7111,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                   )}
                 </div>
 
-                {/* PROCEED TO CHECKOUT */}
+                {/* PROCEED TO CHECKOUT / BOOK APPOINTMENT */}
                 <button
                   type="button"
                   onClick={async () => {
@@ -7009,7 +7124,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                       }
                     }
                   }}
-                  disabled={selectedServices.length === 0 && !activeMembership}
+                  disabled={(selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))}
                   style={{
                     borderRadius: '9999px',
                     background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)',
@@ -7020,13 +7135,13 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                     border: 'none',
-                    cursor: (selectedServices.length === 0 && !activeMembership) ? 'not-allowed' : 'pointer',
+                    cursor: ((selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))) ? 'not-allowed' : 'pointer',
                     boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)',
-                    opacity: (selectedServices.length === 0 && !activeMembership) ? 0.5 : 1,
+                    opacity: ((selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))) ? 0.5 : 1,
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  PROCEED TO CHECKOUT
+                  {appointmentMode ? 'BOOK APPOINTMENT' : 'PROCEED TO CHECKOUT'}
                 </button>
               </div>
             </div>
@@ -7505,7 +7620,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                       textAlign: 'left'
                     }}
                   >
-                    Payment<br />Received
+                    Thank You for<br />Your Payment
                   </div>
                 </div>
 
@@ -7521,8 +7636,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, onCance
                     marginTop: '34px'
                   }}
                 >
-                  You're all set.<br />
-                  Let the pampering begin!
+                  We hope you enjoy<br />your service.
                 </div>
 
                 {/* Subtle Reset / Complete Button */}
