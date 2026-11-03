@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, Edit2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { DASHBOARD_MODULES, MANAGER_PERMISSION_MODULES } from '../utils/permissions';
+import { showConfirm } from '../utils/messageBox';
 
 const emptyForm = {
   name: '',
@@ -117,7 +118,7 @@ export default function BranchUserManagement({ activeLocation, branding }) {
   };
 
   const deleteUser = async (user) => {
-    const confirmed = window.confirm(`Delete ${user.name}? They will no longer be able to sign in. Past visits and records will be preserved.`);
+    const confirmed = await showConfirm(`Delete ${user.name}? They will no longer be able to sign in. Past visits and records will be preserved.`, { title: 'Delete account', confirmLabel: 'Delete account' });
     if (!confirmed) return;
     try {
       await apiRequest(`/admin/branch-users/${user.user_id}`, { method: 'DELETE' });

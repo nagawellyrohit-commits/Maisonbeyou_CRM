@@ -31,7 +31,7 @@ const roleDashboardButtonStyle = {
   cursor: 'pointer'
 };
 
-export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard, branding, onPreviewBranding, onSaveBranding }) {
+export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard, branding, onPreviewBranding, onSaveBranding, requestedSection, onRequestedSectionHandled, requestedPaymentVisit, onPaymentFlowComplete }) {
   const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
   const [currentLocation, setCurrentLocation] = useState(activeLocation);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
@@ -135,6 +135,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
     window.addEventListener('reset_dashboard_section', handleResetDashboard);
     return () => window.removeEventListener('reset_dashboard_section', handleResetDashboard);
   }, [initialSection]);
+
+  useEffect(() => {
+    if (!requestedSection) return;
+    setActiveSection(requestedSection);
+    onRequestedSectionHandled?.();
+  }, [requestedSection, onRequestedSectionHandled]);
 
   // Staff allocation & Payment verification state for Reception
   const [staffList, setStaffList] = useState([]);
@@ -364,14 +370,19 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       ? parseFloat(visit.membership_balance)
       : (isExistingMember ? tierBase : 0);
 
-    // Initial membership credit used:
-    // If existing member and has credits available, default to using credits for the visit
+    // Top up any credits already reserved for this visit, using the available
+    // membership balance to cover the remaining bill when possible.
+    const previouslyPaid = Number(visit.amount_paid) || 0;
+    const previouslyCredited = ['Pending', 'Partially Paid'].includes(visit.payment_status)
+      ? (Number(visit.membership_amount_used) || 0)
+      : 0;
+    const availableForThisVisit = Math.max(0, clientBal) + previouslyCredited;
     let initialCredit = 0;
     let initialMethod = 'UPI';
 
-    if (isExistingMember && clientBal > 0) {
-      initialCredit = Math.min(visit.total_amount, clientBal);
-      const remainingForManual = Math.max(0, visit.total_amount - initialCredit);
+    if (isExistingMember && availableForThisVisit > 0) {
+      initialCredit = Math.min(Math.max(0, Number(visit.total_amount) - previouslyPaid), availableForThisVisit);
+      const remainingForManual = Math.max(0, visit.total_amount - previouslyPaid - initialCredit);
       initialMethod = remainingForManual === 0 ? 'Membership' : (visit.payment_method || 'UPI');
       setSettlementTab('membership');
     } else {
@@ -381,7 +392,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       else if (visit.payment_method === 'UPI') initialMethod = 'UPI';
     }
 
-    const remainingForManual = Math.max(0, visit.total_amount - initialCredit);
+    const remainingForManual = Math.max(0, visit.total_amount - previouslyPaid - initialCredit);
 
     setPaymentForm({
       amount_paid: remainingForManual,
@@ -394,6 +405,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       benefit_status: visit.benefit_status || 'Available'
     });
   };
+
+  useEffect(() => {
+    if (requestedPaymentVisit) openPaymentModal(requestedPaymentVisit);
+  }, [requestedPaymentVisit?.visit_id]);
 
   const handleCheckPayment = (visit) => {
     // 1. If it is paid via UPI: only view UPI reference id and how much paid
@@ -414,7 +429,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       const upgradePrice = pendingUpgradePlan ? (parseFloat(pendingUpgradePlan.price) || 0) : 0;
       const effectiveTotalBill = baseBill + upgradePrice;
 
-      const manualAmount = parseFloat(paymentForm.amount_paid) || 0;
+      const manualAmountEntered = parseFloat(paymentForm.amount_paid) || 0;
+      const manualAmount = (Number(paymentModalVisit.amount_paid) || 0) + manualAmountEntered;
       const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
       const totalSettled = manualAmount + creditUsed;
       const method = paymentForm.payment_method || 'Cash';
@@ -473,6 +489,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       setTimeout(() => setActionToast(null), 3500);
       setPaymentModalVisit(null);
       await fetchDashboardData(true);
+      if (requestedPaymentVisit) onPaymentFlowComplete?.();
     } catch (err) {
       alert('Error updating payment: ' + (err.message || 'Failed'));
     } finally {
@@ -494,9 +511,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   return (
     <div className="animate-fade-in dashboard-reference-style" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
 
-      {isOriginalMasterAdmin && onSwitchLocation && (
-        <div style={{ display: 'flex', alignItems: 'center', marginTop: '14px', marginBottom: '-6px' }}>
-          <button
+      {(isOriginalMasterAdmin && onSwitchLocation) || activeSection === 'team-master' ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '14px', marginBottom: activeSection === 'team-master' ? '14px' : '-6px' }}>
+          {isOriginalMasterAdmin && onSwitchLocation ? <button
             type="button"
             className="dashboard-reference-button"
             onClick={onSwitchLocation}
@@ -528,9 +545,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           >
             <ArrowLeft size={15} strokeWidth={2.2} />
             <span>{branding?.dashboard_back_label || 'Back'}</span>
-          </button>
+          </button> : <span />}
+          {activeSection === 'team-master' && <button
+            type="button"
+            onClick={() => setMasterTab('hours')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 999, border: '1px solid #D99A64', background: masterTab === 'hours' ? '#FAF6EE' : '#FFFFFF', color: '#4B4038', fontSize: 12, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(87,58,32,0.06)' }}
+          >
+            <Clock3 size={15} color="#B88B4A" />
+            <span>Opening hours</span>
+          </button>}
         </div>
-      )}
+      ) : null}
 
       {/* Dashboard controls without the branch hero tab */}
       <div style={{
@@ -892,7 +917,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       </div>
 
       {/* Today's Summary Grid (Section 3 Requirement) */}
-      {activeSection !== 'team-master' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
+      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1136,7 +1161,6 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Type</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Services</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Amount</th>
-                  <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Payment Status</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Staff</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600', verticalAlign: 'middle' }}>Service Timing</th>
                   <th style={{ padding: '14px 20px', fontWeight: '600', textAlign: 'right', verticalAlign: 'middle' }}>Actions</th>
@@ -1145,6 +1169,14 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               <tbody>
                 {data.visits.map((v) => {
                   const visitTime = formatVisitTime(v.created_at);
+                  const assignedStaffNames = [...new Set((v.services || []).map(service => service.staff_name).filter(Boolean))];
+                  const membershipPurchase = Number(v.membership_price) > 0 ? {
+                    visit_service_id: `membership-${v.visit_id}`,
+                    service_name_snapshot: `Membership: ${v.membership_tier || v.effective_membership_tier || 'New membership'}`,
+                    price_snapshot: Number(v.membership_price),
+                    is_membership_purchase: true
+                  } : null;
+                  const visitDisplayItems = [...(v.services || []), ...(membershipPurchase ? [membershipPurchase] : [])];
 
                   let statusBadgeClass = 'badge-paid';
                   if (v.payment_status === 'Partially Paid') statusBadgeClass = 'badge-partial';
@@ -1197,7 +1229,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
                       {/* Services */}
                       <td style={{ padding: '14px 16px', maxWidth: '320px', verticalAlign: 'top' }}>
-                        {v.services && v.services.length > 1 ? (
+                        {visitDisplayItems.length > 1 || membershipPurchase ? (
                           <div
                             style={{ position: 'relative', display: 'inline-block' }}
                             onMouseEnter={() => setHoveredServicesVisitId(v.visit_id)}
@@ -1206,7 +1238,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
                               <div
                                 onClick={() => setHoveredServicesVisitId(prev => prev === v.visit_id ? null : v.visit_id)}
-                                title="Hover or click to view all services"
+                                title="Hover or click to view services and membership details"
                                 style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
@@ -1223,8 +1255,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                   transition: 'all 0.15s ease'
                                 }}
                               >
-                                <Scissors size={13} color="#B88B4A" />
-                                <span>{v.services.length} Services</span>
+                                {membershipPurchase ? <Crown size={13} color="#B88B4A" /> : <Scissors size={13} color="#B88B4A" />}
+                                <span>{visitDisplayItems.length} {membershipPurchase ? 'Items' : 'Services'}</span>
                                 <ChevronDown
                                   size={13}
                                   color="#B88B4A"
@@ -1234,10 +1266,6 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                   }}
                                 />
                               </div>
-                            </div>
-
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', paddingLeft: '2px', lineHeight: '16px' }}>
-                              {v.services[0]?.service_name_snapshot} + {v.services.length - 1} more
                             </div>
 
                             {/* Floating Services Box / Popover */}
@@ -1267,7 +1295,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                   marginBottom: '8px'
                                 }}>
                                   <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#B88B4A' }}>
-                                    All Services ({v.services.length})
+                                    Services & Membership ({visitDisplayItems.length})
                                   </span>
                                   <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>
                                     Total: {formatCurrency(v.total_amount)}
@@ -1275,9 +1303,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                 </div>
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
-                                  {v.services.map((s, idx) => (
+                                  {visitDisplayItems.map((s, idx) => (
                                     <div
-                                      key={idx}
+                                      key={s.visit_service_id || `${s.service_name_snapshot}-${idx}`}
                                       style={{
                                         display: 'flex',
                                         justifyContent: 'space-between',
@@ -1289,10 +1317,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                       }}
                                     >
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <span style={{ color: '#B88B4A', fontWeight: '700' }}>•</span>
+                                        {s.is_membership_purchase ? <Crown size={13} color="#B88B4A" /> : <span style={{ color: '#B88B4A', fontWeight: '700' }}>•</span>}
                                         <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
                                           {s.service_name_snapshot}
                                         </span>
+                                        {s.is_membership_purchase && <span style={{ fontSize: 9, fontWeight: 750, color: '#8C6228', background: '#F1E6D3', borderRadius: 4, padding: '2px 5px' }}>PURCHASE</span>}
                                         {(s.is_privilege === 1 || s.is_privilege === true || parseFloat(s.price_snapshot) === 0) && (
                                           <span style={{
                                             fontSize: '9.5px',
@@ -1308,8 +1337,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                           </span>
                                         )}
                                       </div>
-                                      <span style={{ fontWeight: '700', color: (s.is_privilege || parseFloat(s.price_snapshot) === 0) ? '#9E7437' : '#B88B4A', fontSize: '12px' }}>
-                                        {(s.is_privilege || parseFloat(s.price_snapshot) === 0) ? '₹0' : formatCurrency(s.price_snapshot)}
+                                      <span style={{ fontWeight: '700', color: (s.is_membership_purchase || (!s.is_privilege && parseFloat(s.price_snapshot) !== 0)) ? '#B88B4A' : '#9E7437', fontSize: '12px' }}>
+                                        {s.is_privilege && !s.is_membership_purchase ? '₹0' : formatCurrency(s.price_snapshot)}
                                       </span>
                                     </div>
                                   ))}
@@ -1338,81 +1367,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             {formatCurrency(v.total_amount)}
                           </div>
                         </div>
-                        {v.balance > 0 && (
-                          <div style={{ fontSize: '12px', color: '#DC2626', fontWeight: '500', marginTop: '4px', lineHeight: '16px' }}>
-                            Bal: {formatCurrency(v.balance)}
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Payment Status */}
-                      <td style={{ padding: '14px 16px', verticalAlign: 'top' }}>
-                        <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span
-                            onClick={() => handleCheckPayment(v)}
-                            className={`badge ${statusBadgeClass}`}
-                            title={v.payment_status === 'Paid' && v.payment_method === 'UPI' ? "Click to view UPI Reference ID & Amount" : "Click to check & collect payment"}
-                            style={{
-                              cursor: 'pointer',
-                              transition: 'transform 0.1s ease',
-                              fontSize: '11px',
-                              lineHeight: '16px'
-                            }}
-                          >
-                            {v.payment_status}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleCheckPayment(v)}
-                            title={v.payment_status === 'Paid' && v.payment_method === 'UPI' ? "Check UPI Reference ID & Amount Paid" : "Check & Record Payment"}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              padding: 0,
-                              fontSize: '12px',
-                              color: '#B88B4A',
-                              textDecoration: 'underline',
-                              fontWeight: '700',
-                              cursor: 'pointer',
-                              lineHeight: 1
-                            }}
-                          >
-                            Check
-                          </button>
-                        </div>
-                        {v.payment_status === 'Pending' ? (() => {
-                          let methodLabel = v.payment_method || 'UPI';
-                          const usedCredits = parseFloat(v.membership_amount_used) || 0;
-                          let intendedLabel = `Prefers: ${methodLabel}`;
-                          if (usedCredits > 0 && (methodLabel === 'Membership' || !v.payment_method || v.balance === 0)) {
-                            intendedLabel = `Prefers: Member Credits (${formatCurrency(usedCredits)})`;
-                          } else if (usedCredits > 0 && v.balance > 0) {
-                            intendedLabel = `Prefers: Credits (${formatCurrency(usedCredits)}) + ${methodLabel} (${formatCurrency(v.balance)})`;
-                          }
-                          return (
-                            <div style={{ fontSize: '12px', color: '#92400E', fontWeight: '600', marginTop: '4px', lineHeight: '16px' }}>
-                              {intendedLabel}
-                            </div>
-                          );
-                        })() : (() => {
-                          let methodLabel = v.payment_method || 'UPI';
-                          if (methodLabel === 'Other') methodLabel = 'Desk Settlement';
-
-                          const usedCredits = parseFloat(v.membership_amount_used) || 0;
-                          let displayMethod = `Via ${methodLabel}`;
-
-                          if (usedCredits > 0 && (methodLabel === 'Membership' || !v.payment_method || v.balance === 0)) {
-                            displayMethod = `Via Member Credits (${formatCurrency(usedCredits)})`;
-                          } else if (usedCredits > 0 && methodLabel) {
-                            displayMethod = `Via ${methodLabel} + Credits (${formatCurrency(usedCredits)})`;
-                          }
-
-                          return (
-                            <div style={{ fontSize: '12px', color: '#166534', fontWeight: '600', marginTop: '4px', lineHeight: '16px' }}>
-                              {displayMethod}
-                            </div>
-                          );
-                        })()}
+                        <button
+                          type="button"
+                          onClick={() => handleCheckPayment(v)}
+                          title={v.payment_status === 'Paid' && v.payment_method === 'UPI' ? 'View payment details' : 'Open payment screen'}
+                          className={`badge ${statusBadgeClass}`}
+                          style={{ marginTop: '6px', padding: '3px 8px', border: 'none', cursor: 'pointer', fontSize: '10px', lineHeight: '14px' }}
+                        >
+                          {v.payment_status || 'Pending'}
+                        </button>
                       </td>
 
                       {/* Staff */}
@@ -1423,8 +1386,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
                           if (unassignedCount === 0 && v.staff_summary && v.staff_summary !== 'Unassigned') {
                             return (
-                              <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                <span style={{ fontWeight: '600', color: '#166534', lineHeight: '20px' }}>{v.staff_summary}</span>
+                              <div style={{ minHeight: '26px', display: 'flex', alignItems: 'flex-start', gap: '6px', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'grid', gap: 3, fontWeight: '600', color: '#166534', lineHeight: '18px' }}>
+                                  {(assignedStaffNames.length ? assignedStaffNames : [v.staff_summary]).map((staffName, index) => <div key={`${staffName}-${index}`}>{staffName}</div>)}
+                                </div>
                                 {!isAdmin && (
                                   <button
                                     onClick={() => handleOpenStaffModal(v)}
@@ -1449,10 +1414,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           if (unassignedCount > 0 && unassignedCount < totalServices) {
                             return (
                               <div>
-                                <div style={{ minHeight: '26px', display: 'flex', alignItems: 'center' }}>
-                                  <span style={{ fontWeight: '600', color: '#166534', fontSize: '12px', lineHeight: '18px' }}>
-                                    {v.staff_summary}
-                                  </span>
+                                <div style={{ minHeight: '26px', display: 'flex', alignItems: 'flex-start' }}>
+                                  <div style={{ display: 'grid', gap: 3, fontWeight: '600', color: '#166534', fontSize: '12px', lineHeight: '18px' }}>
+                                    {(assignedStaffNames.length ? assignedStaffNames : [v.staff_summary]).map((staffName, index) => <div key={`${staffName}-${index}`}>{staffName}</div>)}
+                                  </div>
                                 </div>
                                 <div style={{ marginTop: '4px' }}>
                                   <button
@@ -1605,7 +1570,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Clients Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'clients' && hasModuleAccess('clients') && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '32px' }}>
           <ClientsList
             onOpenClient={(id) => onOpenClient(id, 'dashboard')}
             branding={branding}
@@ -1615,24 +1580,23 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Services Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'services' && hasModuleAccess('services') && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
           <ServiceManagement branding={branding} />
         </div>
       )}
 
       {/* Staff Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'staff' && hasModuleAccess('team') && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
           <StaffManagement branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} />
         </div>
       )}
 
       {activeSection === 'team-master' && isAdmin && (
-        <div className="animate-fade-in team-master-screen" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
-          <div role="tablist" aria-label="Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, padding: '5px 2px 12px' }}>
+        <div className="animate-fade-in team-master-screen" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
+          <div role="tablist" aria-label="Other Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, padding: '0 2px 12px' }}>
             {[
               { id: 'services', label: 'Services', description: 'Service catalog', icon: Scissors },
-              { id: 'hours', label: 'Hours', description: 'Opening hours', icon: Clock3 },
               { id: 'membership', label: 'Membership', description: 'Plans & privileges', icon: Crown },
               { id: 'designation', label: 'Designation', description: 'Seniority levels', icon: UserCheck },
               { id: 'team', label: 'Team', description: 'Team members', icon: Users },
@@ -1663,13 +1627,13 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Membership Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'users' && isAdmin && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
           <BranchUserManagement activeLocation={activeLocation} branding={branding} />
         </div>
       )}
 
       {activeSection === 'membership' && hasModuleAccess('membership') && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
           <MembershipManagement
             onOpenClient={onOpenClient}
             activeLocation={activeLocation}
@@ -1681,7 +1645,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'reports' && hasModuleAccess('reports') && (
-        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '16px' }}>
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
           <ReportsView onOpenClient={onOpenClient} branding={branding} />
         </div>
       )}
@@ -2039,7 +2003,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       )}
 
       {/* MODAL 2B: Check & Record Payment (Cash or Card -> Mark as Paid) */}
-      {paymentModalVisit && (
+      {paymentModalVisit && createPortal((
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -2047,9 +2011,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          zIndex: 1200,
+          zIndex: 20000,
           padding: '20px',
-          overflowY: 'auto'
+          overflowY: 'auto',
+          boxSizing: 'border-box'
         }}>
           {isSelectingUpgradeMembership ? (
             <div className="card animate-fade-in" style={{
@@ -2156,7 +2121,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           const newTotal = paymentModalVisit.total_amount + plan.price;
                           setPaymentForm(prev => ({
                             ...prev,
-                            amount_paid: newTotal
+                            amount_paid: Math.max(0, newTotal - (Number(paymentModalVisit.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0))
                           }));
                         }}
                         style={{
@@ -2223,13 +2188,29 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             const baseBill = parseFloat(paymentModalVisit?.total_amount) || 0;
             const upgradeCost = pendingUpgradePlan ? (parseFloat(pendingUpgradePlan.price) || 0) : 0;
             const totalBill = baseBill + upgradeCost;
-            const remainingAfterCredit = Math.max(0, totalBill - creditUsed);
-            const totalSettled = creditUsed + manualAmount;
+            const previouslyPaid = Number(paymentModalVisit?.amount_paid) || 0;
+            const billRemainingBeforeCredit = Math.max(0, totalBill - previouslyPaid);
+            const remainingAfterCredit = Math.max(0, billRemainingBeforeCredit - creditUsed);
+            const balanceDueAfterSelection = Math.max(0, remainingAfterCredit - manualAmount);
+            const totalSettled = previouslyPaid + creditUsed + manualAmount;
             const isFullySettled = totalSettled >= totalBill;
-            const hasValidCredits = isExistingMember && availableCredits > 0;
-            const isCreditInsufficient = isExistingMember && (!hasValidCredits || availableCredits < totalBill);
+            const settlementStatusLabel = isFullySettled ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
+            const settlementStatusClass = settlementStatusLabel === 'Paid' ? 'badge-paid' : settlementStatusLabel === 'Partially Paid' ? 'badge-partial' : 'badge-pending';
+            const currentlyReservedCredits = ['Pending', 'Partially Paid'].includes(paymentModalVisit?.payment_status)
+              ? (Number(paymentModalVisit?.membership_amount_used) || 0)
+              : 0;
+            const availableForThisVisit = Math.max(0, availableCredits) + currentlyReservedCredits;
+            const hasValidCredits = isExistingMember && availableForThisVisit > 0;
+            const isCreditInsufficient = isExistingMember && (!hasValidCredits || availableForThisVisit < billRemainingBeforeCredit);
             const isUsingCredits = creditUsed > 0;
-            const balanceCreditsAfterVisit = Math.max(0, availableCredits - creditUsed);
+            const balanceCreditsAfterVisit = Math.max(0, availableForThisVisit - creditUsed);
+            const billServiceItems = Array.isArray(paymentModalVisit?.service_items)
+              ? paymentModalVisit.service_items
+              : (Array.isArray(paymentModalVisit?.services) ? paymentModalVisit.services.map(service => ({
+                  ...service,
+                  service_name: service.service_name || service.service_name_snapshot,
+                  price: service.price ?? service.price_snapshot
+                })) : []);
 
             let tierPerks = [];
             if (rawClientTier.toLowerCase().includes('lumiere')) {
@@ -2297,7 +2278,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   </div>
                   <button
                     type="button"
-                    onClick={() => setPaymentModalVisit(null)}
+                    onClick={() => {
+                      setPaymentModalVisit(null);
+                      if (requestedPaymentVisit) onPaymentFlowComplete?.();
+                    }}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
                   >
                     <X size={20} />
@@ -2330,13 +2314,28 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
-                      Current Status
+                      After confirmation
                     </div>
-                    <span className={`badge ${paymentModalVisit?.payment_status === 'Paid' ? 'badge-paid' : 'badge-pending'}`}>
-                      {paymentModalVisit?.payment_status || 'Pending'}
+                    <span className={`badge ${settlementStatusClass}`}>
+                      {settlementStatusLabel}
                     </span>
                   </div>
                 </div>
+
+                {billServiceItems.length > 0 && (
+                  <div style={{ marginBottom: '14px', padding: '12px 14px', border: '1px solid #E9DCCB', borderRadius: 'var(--radius-md)', background: '#FFFEFC' }}>
+                    <div style={{ marginBottom: 8, color: '#6B4C2A', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Appointment bill</div>
+                    {billServiceItems.map((service, index) => <div key={service.visit_service_id || `${service.service_id}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0', color: '#4B4037', fontSize: 12 }}><span>{service.service_name}</span><span>{formatCurrency(service.price)}</span></div>)}
+                    <div style={{ display: 'grid', gap: 5, marginTop: 7, paddingTop: 8, borderTop: '1px solid #EEE6DC', color: '#6F6257', fontSize: 12 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{formatCurrency(paymentModalVisit.subtotal || 0)}</span></div>
+                      {Number(paymentModalVisit.discount_amount) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Discount</span><span>-{formatCurrency(paymentModalVisit.discount_amount)}</span></div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tax</span><span>{formatCurrency(paymentModalVisit.tax_amount || 0)}</span></div>
+                      {Number(paymentModalVisit.amount_paid) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Already paid</span><span>{formatCurrency(paymentModalVisit.amount_paid)}</span></div>}
+                      {creditUsed > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Member credits applied</span><span>-{formatCurrency(creditUsed)}</span></div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#302721', fontWeight: 800 }}><span>Balance due after selected payments</span><span>{formatCurrency(balanceDueAfterSelection)}</span></div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Upgrade Added Banner OR Credits Insufficient Alert */}
                 {pendingUpgradePlan ? (
@@ -2386,7 +2385,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           setPendingUpgradePlan(null);
                           setPaymentForm(prev => ({
                             ...prev,
-                            amount_paid: baseBill
+                            amount_paid: Math.max(0, baseBill - (Number(paymentModalVisit?.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0))
                           }));
                         }}
                         style={{
@@ -2420,7 +2419,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       <AlertCircle size={18} color="#D97706" style={{ flexShrink: 0 }} />
                       <div>
                         <div style={{ fontSize: '12.5px', fontWeight: '800', color: '#92400E' }}>
-                          Credits Insufficient {!hasValidCredits ? '(No Active Credits)' : `(${formatCurrency(availableCredits)} available)`}
+                          Credits Insufficient {!hasValidCredits ? '(No Active Credits)' : `(${formatCurrency(availableForThisVisit)} available for this bill)`}
                         </div>
                         <div style={{ fontSize: '11px', color: '#B45309', marginTop: '1px' }}>
                           Client has insufficient credits to settle today's bill.
@@ -2535,7 +2534,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                                 {isUsingCredits
                                   ? `Deducting ${formatCurrency(creditUsed)} for today's visit`
-                                  : `Click to deduct service cost from ${formatCurrency(availableCredits)} available credits`}
+                                  : `Click to apply up to ${formatCurrency(availableForThisVisit)} available for this bill`}
                               </div>
                             </div>
                           </div>
@@ -2547,14 +2546,14 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                 setPaymentForm(prev => ({
                                   ...prev,
                                   membership_amount_used: 0,
-                                  amount_paid: totalBill,
+                                  amount_paid: billRemainingBeforeCredit,
                                   payment_method: prev.payment_method === 'Membership' ? 'UPI' : prev.payment_method
                                 }));
                                 setSettlementTab('manual');
                               } else {
                                 // Apply credits
-                                const maxCredit = Math.min(totalBill, availableCredits);
-                                const remainingManual = Math.max(0, totalBill - maxCredit);
+                                const maxCredit = Math.min(billRemainingBeforeCredit, availableForThisVisit);
+                                const remainingManual = Math.max(0, billRemainingBeforeCredit - maxCredit);
                                 setPaymentForm(prev => ({
                                   ...prev,
                                   membership_amount_used: maxCredit,
@@ -2603,8 +2602,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             fontSize: '11.5px'
                           }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4B5563' }}>
-                              <span>Available Membership Credits:</span>
-                              <span style={{ fontWeight: '600' }}>{formatCurrency(availableCredits)}</span>
+                              <span>Available for this bill (including credits already applied):</span>
+                              <span style={{ fontWeight: '600' }}>{formatCurrency(availableForThisVisit)}</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534', fontWeight: '700' }}>
                               <span>Visit / Service Cost Deducted:</span>
@@ -2781,7 +2780,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         setPaymentForm(prev => ({
                           ...prev,
                           membership_amount_used: 0,
-                          amount_paid: totalBill,
+                          amount_paid: billRemainingBeforeCredit,
                           payment_method: 'UPI'
                         }));
                         setSettlementTab('manual');
@@ -3007,7 +3006,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       type="button"
-                      onClick={() => setPaymentModalVisit(null)}
+                      onClick={() => {
+                        setPaymentModalVisit(null);
+                        if (requestedPaymentVisit) onPaymentFlowComplete?.();
+                      }}
                       className="btn-secondary"
                       style={{ padding: '8px 16px', fontSize: '13px' }}
                     >
@@ -3040,7 +3042,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             );
           })()}
         </div>
-      )}
+      ), document.body)}
 
       {/* MODAL 3: Edit Assigned Service Timing */}
       {editTimeModalVisit && (

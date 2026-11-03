@@ -329,6 +329,30 @@ const DEFAULT_LOCATION_BRANDING = {
   user_access_add_button: 'Add User',
   user_access_manager_empty: 'No Manager accounts yet.',
   user_access_visitor_empty: 'No Visitor accounts yet.',
+  visitor_welcome_heading: 'A JOURNEY, UNIQUELY YOURS',
+  visitor_welcome_subtitle: 'your personalised journey awaits',
+  visitor_welcome_heading_color: '#FFFFFF',
+  visitor_welcome_subtitle_color: '#DFC18A',
+  visitor_first_visit_title: 'IT’S MY FIRST VISIT',
+  visitor_first_visit_description: 'discover the unique experience',
+  visitor_first_visit_button: 'GET STARTED',
+  visitor_return_visit_title: 'I’VE BEEN HERE BEFORE',
+  visitor_return_visit_description: 'we are glad to have you back',
+  visitor_return_visit_button: 'CONTINUE MY JOURNEY',
+  visitor_background_image_url: '',
+  visitor_overlay_opacity: 62,
+  visitor_card_fill: '#FFFFFF',
+  visitor_card_border: '#F0E2CB',
+  visitor_heading_color: '#221F1C',
+  visitor_text_color: '#6B655F',
+  visitor_icon_fill: '#FAF0E4',
+  visitor_icon_color: '#A6733D',
+  visitor_first_button_fill: '#A0723E',
+  visitor_return_button_fill: '#242422',
+  visitor_button_text_color: '#FFFFFF',
+  visitor_card_radius: 18,
+  visitor_card_border_width: 1,
+  visitor_card_width: 700,
   heading_font_family: 'Inter, sans-serif',
   heading_font_size: 26,
   heading_font_style: 'normal',
@@ -549,6 +573,11 @@ function sanitizeLocationBranding(input, locationName = '') {
     const value = String(source[key] || '').trim();
     return value.startsWith('/uploads/') && value.length <= 1000 ? value : '';
   };
+  const number = (key) => {
+    if (source[key] === undefined || source[key] === null || source[key] === '') return DEFAULT_LOCATION_BRANDING[key];
+    const value = Number(source[key]);
+    return Number.isFinite(value) ? value : DEFAULT_LOCATION_BRANDING[key];
+  };
   return {
     brand_name: String(source.brand_name || '').trim().slice(0, 80) || locationName,
     dashboard_back_label: String(source.dashboard_back_label ?? DEFAULT_LOCATION_BRANDING.dashboard_back_label).trim().slice(0, 40),
@@ -564,6 +593,30 @@ function sanitizeLocationBranding(input, locationName = '') {
     user_access_add_button: String(source.user_access_add_button ?? DEFAULT_LOCATION_BRANDING.user_access_add_button).trim().slice(0, 40),
     user_access_manager_empty: String(source.user_access_manager_empty ?? DEFAULT_LOCATION_BRANDING.user_access_manager_empty).trim().slice(0, 80),
     user_access_visitor_empty: String(source.user_access_visitor_empty ?? DEFAULT_LOCATION_BRANDING.user_access_visitor_empty).trim().slice(0, 80),
+    visitor_welcome_heading: String(source.visitor_welcome_heading ?? DEFAULT_LOCATION_BRANDING.visitor_welcome_heading).trim().slice(0, 100),
+    visitor_welcome_subtitle: String(source.visitor_welcome_subtitle ?? DEFAULT_LOCATION_BRANDING.visitor_welcome_subtitle).trim().slice(0, 150),
+    visitor_welcome_heading_color: color('visitor_welcome_heading_color'),
+    visitor_welcome_subtitle_color: color('visitor_welcome_subtitle_color'),
+    visitor_first_visit_title: String(source.visitor_first_visit_title ?? DEFAULT_LOCATION_BRANDING.visitor_first_visit_title).trim().slice(0, 80),
+    visitor_first_visit_description: String(source.visitor_first_visit_description ?? DEFAULT_LOCATION_BRANDING.visitor_first_visit_description).trim().slice(0, 120),
+    visitor_first_visit_button: String(source.visitor_first_visit_button ?? DEFAULT_LOCATION_BRANDING.visitor_first_visit_button).trim().slice(0, 40),
+    visitor_return_visit_title: String(source.visitor_return_visit_title ?? DEFAULT_LOCATION_BRANDING.visitor_return_visit_title).trim().slice(0, 80),
+    visitor_return_visit_description: String(source.visitor_return_visit_description ?? DEFAULT_LOCATION_BRANDING.visitor_return_visit_description).trim().slice(0, 120),
+    visitor_return_visit_button: String(source.visitor_return_visit_button ?? DEFAULT_LOCATION_BRANDING.visitor_return_visit_button).trim().slice(0, 40),
+    visitor_background_image_url: image('visitor_background_image_url'),
+    visitor_overlay_opacity: Math.min(90, Math.max(0, number('visitor_overlay_opacity'))),
+    visitor_card_fill: color('visitor_card_fill'),
+    visitor_card_border: color('visitor_card_border'),
+    visitor_heading_color: color('visitor_heading_color'),
+    visitor_text_color: color('visitor_text_color'),
+    visitor_icon_fill: color('visitor_icon_fill'),
+    visitor_icon_color: color('visitor_icon_color'),
+    visitor_first_button_fill: color('visitor_first_button_fill'),
+    visitor_return_button_fill: color('visitor_return_button_fill'),
+    visitor_button_text_color: color('visitor_button_text_color'),
+    visitor_card_radius: Math.min(48, Math.max(0, number('visitor_card_radius'))),
+    visitor_card_border_width: Math.min(8, Math.max(0, number('visitor_card_border_width'))),
+    visitor_card_width: Math.min(1100, Math.max(320, number('visitor_card_width'))),
     heading_font_family: safeFont(source.heading_font_family),
     heading_font_size: Math.min(48, Math.max(14, Number(source.heading_font_size) || 26)),
     heading_font_style: source.heading_font_style === 'italic' ? 'italic' : 'normal',
@@ -3151,6 +3204,7 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
       WHERE (date(v.visit_date) IN (date(?), date(?))
          OR date(v.created_at, 'localtime') IN (date(?), date(?))
          OR date(v.created_at) IN (date(?), date(?)))
+         AND COALESCE(v.is_appointment, 0) = 0
          ${locFilterVisits}
       ORDER BY v.visit_id DESC
     `).all(todayLocal, todayUTC, todayLocal, todayUTC, todayLocal, todayUTC, ...locFilterParams);
@@ -3194,6 +3248,7 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
       WHERE (date(v.visit_date) IN (date(?), date(?))
          OR date(v.created_at, 'localtime') IN (date(?), date(?))
          OR date(v.created_at) IN (date(?), date(?)))
+         AND COALESCE(v.is_appointment, 0) = 0
          ${locFilterVisits}
     `).get(todayLocal, todayUTC, todayLocal, todayUTC, todayLocal, todayUTC, ...locFilterParams).count;
 
@@ -3206,6 +3261,7 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
       LEFT JOIN VISITS v ON v.visit_id = cm.purchase_visit_id
       WHERE c.location_id = ?
         AND cm.purchase_visit_id IS NOT NULL
+        AND (v.visit_id IS NULL OR COALESCE(v.is_appointment, 0) = 0)
         AND (
           date(cm.created_at, 'localtime') IN (date(?), date(?))
           OR date(v.visit_date) IN (date(?), date(?))
@@ -3399,7 +3455,9 @@ app.get('/api/clients/check-phone', authenticateToken, (req, res) => {
     }
 
     const client = db.prepare(`
-      SELECT client_id, name, surname, phone, primary_login_phone, location_id 
+      SELECT client_id, name, surname, phone, primary_login_phone, location_id,
+        membership_tier, membership_status, membership_balance, membership_cost,
+        membership_expires_at
       FROM CLIENTS 
       WHERE location_id = ? AND (phone = ? OR phone = ? OR primary_login_phone = ? OR mobile_numbers LIKE ?)
     `).get(locId, phone, rawPhone.replace(/\D/g, ''), phone, `%"${phone}"%`);
@@ -3719,7 +3777,7 @@ export function getFullClientRecord(clientId) {
     SELECT v.*, u.name as created_by_name
     FROM VISITS v
     LEFT JOIN USERS u ON v.created_by = u.user_id
-    WHERE v.client_id = ?
+    WHERE v.client_id = ? AND COALESCE(v.is_appointment, 0) = 0
     ORDER BY v.visit_date DESC, v.visit_id DESC
     LIMIT 1
   `).get(clientId);
@@ -3741,7 +3799,7 @@ export function getFullClientRecord(clientId) {
     FROM VISIT_SERVICES vs
     JOIN VISITS v ON vs.visit_id = v.visit_id
     LEFT JOIN STAFF s ON vs.staff_id = s.staff_id
-    WHERE v.client_id = ?
+    WHERE v.client_id = ? AND COALESCE(v.is_appointment, 0) = 0
     ORDER BY v.visit_date DESC, vs.visit_service_id DESC
   `).all(clientId);
 
@@ -3775,7 +3833,7 @@ export function getFullClientRecord(clientId) {
     SELECT v.*, u.name as created_by_name
     FROM VISITS v
     LEFT JOIN USERS u ON v.created_by = u.user_id
-    WHERE v.client_id = ?
+    WHERE v.client_id = ? AND COALESCE(v.is_appointment, 0) = 0
     ORDER BY v.visit_date DESC, v.visit_id DESC
   `).all(clientId);
 
@@ -3820,7 +3878,10 @@ export function getFullClientRecord(clientId) {
 
     const membershipCost = Number(configuredPlan?.price) || canonicalCost || Number(client.membership_cost) || 0;
     const creditAllocation = Number(configuredPlan?.credits) || membershipCost;
-    const totalCreditsUsed = fullVisits.reduce((sum, v) => sum + (parseFloat(v.membership_amount_used) || 0), 0);
+    // Appointment bookings reserve credits before the visit, so include active
+    // reservations in the balance while keeping them out of visit history.
+    const totalCreditsUsed = Number(db.prepare(`SELECT COALESCE(SUM(membership_amount_used), 0) AS total
+      FROM VISITS WHERE client_id = ? AND LOWER(COALESCE(payment_status, '')) != 'cancelled'`).get(clientId)?.total) || 0;
     const accurateBalance = creditAllocation > 0 ? Math.max(0, creditAllocation - totalCreditsUsed) : (client.membership_balance || 0);
     client.membership_cost = membershipCost;
     client.total_membership_credits_used = totalCreditsUsed;
@@ -6843,7 +6904,16 @@ app.post('/api/memberships/migrate', authenticateToken, authorizeRoles('master_a
 
 // ==================== VISIT & BILLING CREATION ====================
 const APPOINTMENT_WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const BRANCH_TIME_ZONE = 'Asia/Kolkata';
 const DEFAULT_BRANCH_HOURS = Object.fromEntries(APPOINTMENT_WEEKDAYS.map(day => [day, { open: true, start: '10:00', end: '20:00' }]));
+const getBranchDateTime = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BRANCH_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+};
+const appointmentWeekdayForDate = date => APPOINTMENT_WEEKDAYS[(new Date(`${date}T12:00:00.000Z`).getUTCDay() + 6) % 7];
 const getBranchOperatingHours = locationId => {
   const key = `branch:${locationId}:operating_hours`;
   const row = db.prepare('SELECT setting_value FROM APP_SETTINGS WHERE setting_key = ?').get(key);
@@ -6861,6 +6931,17 @@ const appointmentSlotMinutes = slot => {
   let hour = Number(match[1]) % 12;
   if (match[3].toUpperCase() === 'PM') hour += 12;
   return hour * 60 + Number(match[2]);
+};
+const normalizeAppointmentDuration = value => {
+  const minutes = Number(value ?? 30);
+  return Number.isInteger(minutes) && minutes >= 30 && minutes <= 480 && minutes % 30 === 0 ? minutes : null;
+};
+const appointmentServiceKey = service => {
+  const serviceId = Number(service?.service_id);
+  if (Number.isInteger(serviceId) && serviceId > 0 && serviceId !== 999999) return `id:${serviceId}`;
+  const normalizedName = String(service?.service_name || service?.service_name_snapshot || service?.name || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return normalizedName ? `name:${normalizedName}` : null;
 };
 
 app.get('/api/branch/operating-hours', authenticateToken, (req, res) => {
@@ -6894,31 +6975,320 @@ app.put('/api/branch/operating-hours', authenticateToken, authorizeRoles('admin'
   }
 });
 
+app.get('/api/appointments/client/:clientId', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), (req, res) => {
+  try {
+    const locationId = req.locationId;
+    const clientId = Number(req.params.clientId);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to view client appointments.' });
+    const client = db.prepare('SELECT client_id, location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
+    if (!client || Number(client.location_id) !== Number(locationId)) return res.status(404).json({ error: 'Client not found at this branch.' });
+    const today = getBranchDateTime().date;
+    const appointment = db.prepare(`
+      SELECT v.visit_id, v.client_id, v.visit_date, v.service_time,
+        COALESCE(v.appointment_duration_mins, 30) AS appointment_duration_mins,
+        v.payment_status,
+        (SELECT group_concat(vs.service_name_snapshot, ', ') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS services
+      FROM VISITS v
+      WHERE v.location_id = ? AND v.client_id = ? AND COALESCE(v.is_appointment, 0) = 1
+        AND LOWER(COALESCE(v.payment_status, '')) != 'cancelled'
+        AND date(v.visit_date) >= date(?)
+      ORDER BY date(v.visit_date), v.service_time, v.visit_id
+      LIMIT 1
+    `).get(locationId, clientId, today);
+    res.json({ appointment: appointment || null });
+  } catch (error) {
+    console.error('Client appointment lookup error:', error);
+    res.status(500).json({ error: 'Could not check this client’s appointment.' });
+  }
+});
+
+app.get('/api/appointments', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), (req, res) => {
+  try {
+    if (!req.locationId) return res.status(400).json({ error: 'Branch context is required to view appointments.' });
+    const appointments = db.prepare(`
+      SELECT v.visit_id, v.client_id, v.visit_date, v.service_time,
+        COALESCE(v.appointment_duration_mins, 30) AS appointment_duration_mins,
+        v.subtotal, v.discount_amount, v.tax_amount,
+        v.total_amount, v.amount_paid, v.balance, v.payment_status, v.payment_method,
+        v.membership_amount_used, v.membership_price, v.membership_tier, v.notes,
+        c.name AS client_name, c.surname AS client_surname, c.phone AS client_phone,
+        c.membership_tier AS client_membership_tier, c.membership_balance, c.membership_cost,
+        c.membership_expires_at, c.membership_benefit_status,
+        COALESCE(v.membership_tier, c.membership_tier) AS effective_membership_tier,
+        (SELECT group_concat(vs.service_name_snapshot, ', ') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS services,
+        (SELECT group_concat(COALESCE(vs.service_id, ''), '|') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS service_ids,
+        (SELECT group_concat(vs.service_name_snapshot, '|') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS service_names
+      FROM VISITS v
+      JOIN CLIENTS c ON c.client_id = v.client_id
+      WHERE v.location_id = ? AND COALESCE(v.is_appointment, 0) = 1
+        AND LOWER(COALESCE(v.payment_status, '')) != 'cancelled'
+      ORDER BY date(v.visit_date) ASC, v.service_time ASC, v.visit_id ASC
+    `).all(req.locationId);
+    res.json({ appointments: appointments.map(row => ({
+      ...row,
+      service_ids: String(row.service_ids || '').split('|').filter(Boolean).map(Number),
+      service_names: String(row.service_names || '').split('|').filter(Boolean),
+      service_items: db.prepare(`SELECT visit_service_id, service_id, service_name_snapshot AS service_name,
+        price_snapshot AS price, retail_price_snapshot AS retail_price, staff_id, is_privilege, privilege_id
+        FROM VISIT_SERVICES WHERE visit_id = ? ORDER BY visit_service_id`).all(row.visit_id)
+    })) });
+  } catch (error) {
+    console.error('Appointments list error:', error);
+    res.status(500).json({ error: 'Could not load appointments.' });
+  }
+});
+
+app.patch('/api/appointments/:id', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), (req, res) => {
+  try {
+    const locationId = req.locationId;
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to edit appointments.' });
+    const visitId = Number(req.params.id);
+    const appointment = db.prepare('SELECT * FROM VISITS WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1').get(visitId, locationId);
+    if (!appointment) return res.status(404).json({ error: 'Appointment not found.' });
+
+    const submittedServices = req.body.services;
+    let nextServices = null;
+    if (submittedServices !== undefined) {
+      if (!Array.isArray(submittedServices)) return res.status(400).json({ error: 'Services must be provided as a list.' });
+      const existingServices = db.prepare('SELECT * FROM VISIT_SERVICES WHERE visit_id = ? ORDER BY visit_service_id').all(visitId);
+      const existingById = new Map(existingServices.map(service => [Number(service.visit_service_id), service]));
+      const seenServiceIds = new Set();
+      nextServices = [];
+      for (const item of submittedServices) {
+        const serviceId = Number(item.service_id) || null;
+        if (serviceId && seenServiceIds.has(serviceId)) return res.status(400).json({ error: 'A service can only be added once to an appointment.' });
+        if (serviceId) seenServiceIds.add(serviceId);
+        const retained = existingById.get(Number(item.visit_service_id)) || null;
+        if (item.visit_service_id && !retained) return res.status(400).json({ error: 'One of the selected appointment services is invalid.' });
+        if (retained) {
+          nextServices.push({ ...retained });
+          continue;
+        }
+        if (!serviceId) return res.status(400).json({ error: 'Choose a valid service to add.' });
+        const catalogService = db.prepare(`
+          SELECT s.service_id, s.service_name, s.price, s.has_sessions
+          FROM SERVICES s JOIN SERVICE_CATEGORIES sc ON sc.category_id = s.category_id
+          WHERE s.service_id = ? AND s.active = 1 AND sc.active = 1 AND sc.location_id = ?
+        `).get(serviceId, locationId);
+        if (!catalogService) return res.status(400).json({ error: 'One of the selected services is no longer available at this branch.' });
+        nextServices.push({ ...catalogService, service_name_snapshot: catalogService.service_name, price_snapshot: Number(catalogService.price) || 0, retail_price_snapshot: Number(catalogService.price) || 0, is_new: true });
+      }
+      if (!nextServices.length && !(Number(appointment.membership_price) > 0)) return res.status(400).json({ error: 'Keep at least one service on the appointment.' });
+    }
+
+    const date = String(req.body.date || '').slice(0, 10);
+    const slot = String(req.body.slot || '').trim();
+    const duration = normalizeAppointmentDuration(req.body.duration);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || duration === null) return res.status(400).json({ error: 'Choose a valid date and appointment duration.' });
+    const currentBranchTime = getBranchDateTime();
+    const slotMinutes = appointmentSlotMinutes(slot);
+    if (date < currentBranchTime.date || slotMinutes === null || (date === currentBranchTime.date && slotMinutes <= currentBranchTime.minutes)) {
+      return res.status(400).json({ error: 'Choose a future appointment time.' });
+    }
+    const weekday = appointmentWeekdayForDate(date);
+    const hours = getBranchOperatingHours(locationId)[weekday];
+    const toMinutes = value => { const [hour, minute] = String(value || '').split(':').map(Number); return hour * 60 + minute; };
+    const opensAt = toMinutes(hours?.start);
+    const closesAt = toMinutes(hours?.end);
+    if (!hours?.open || slotMinutes < opensAt || slotMinutes + duration > closesAt || (slotMinutes - opensAt) % 30 !== 0) {
+      return res.status(400).json({ error: 'That time and duration do not fit branch opening hours.' });
+    }
+    const existing = db.prepare(`
+      SELECT visit_id, service_time, appointment_duration_mins FROM VISITS
+      WHERE location_id = ? AND date(visit_date) = date(?) AND COALESCE(is_appointment, 0) = 1
+        AND visit_id != ? AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
+    `).all(locationId, date, visitId);
+    const overlaps = existing.filter(row => {
+      const otherStart = appointmentSlotMinutes(row.service_time);
+      const otherDuration = normalizeAppointmentDuration(row.appointment_duration_mins) || 30;
+      return otherStart !== null && slotMinutes < otherStart + otherDuration && otherStart < slotMinutes + duration;
+    });
+    const currentServiceKeys = new Set((nextServices || db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(visitId)).map(appointmentServiceKey).filter(Boolean));
+    const sameServiceOverlap = overlaps.some(row => db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(row.visit_id).some(service => currentServiceKeys.has(appointmentServiceKey(service))));
+    if (sameServiceOverlap) return res.status(409).json({ error: 'This service is already booked during that time. Choose another slot or service.' });
+
+    const transaction = db.transaction(() => {
+      db.prepare('UPDATE VISITS SET visit_date = ?, service_time = ?, appointment_duration_mins = ? WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1')
+        .run(date, slot, duration, visitId, locationId);
+      db.prepare(`UPDATE TREATMENT_COURSE_SESSIONS SET session_date = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE visit_id = ? AND status = 'upcoming'`).run(date, visitId);
+      if (nextServices) {
+        const retainedIds = new Set(nextServices.filter(service => !service.is_new).map(service => Number(service.visit_service_id)));
+        const removed = db.prepare('SELECT * FROM VISIT_SERVICES WHERE visit_id = ?').all(visitId).filter(service => !retainedIds.has(Number(service.visit_service_id)));
+        for (const service of removed) {
+          const session = db.prepare('SELECT session_id FROM TREATMENT_COURSE_SESSIONS WHERE visit_service_id = ?').get(service.visit_service_id);
+          if (session) {
+            updateSessionStatus(db, session.session_id, 'cancelled');
+            db.prepare('DELETE FROM TREATMENT_COURSE_SESSIONS WHERE session_id = ?').run(session.session_id);
+          }
+          db.prepare('DELETE FROM VISIT_SERVICES WHERE visit_service_id = ? AND visit_id = ?').run(service.visit_service_id, visitId);
+        }
+        const insertService = db.prepare(`INSERT INTO VISIT_SERVICES (visit_id, service_id, service_name_snapshot, price_snapshot, retail_price_snapshot, staff_id, session_status)
+          VALUES (?, ?, ?, ?, ?, NULL, 'upcoming')`);
+        for (const service of nextServices.filter(item => item.is_new)) {
+          const inserted = insertService.run(visitId, service.service_id, service.service_name_snapshot, service.price_snapshot, service.retail_price_snapshot);
+          processVisitServiceSession(db, { visitId, visitServiceId: inserted.lastInsertRowid, clientId: appointment.client_id, serviceId: service.service_id, visitDate: date, status: 'upcoming' });
+        }
+        const servicesSubtotal = nextServices.reduce((sum, service) => sum + (Number(service.price_snapshot) || 0), 0);
+        const membershipPrice = Number(appointment.membership_price) || 0;
+        const discVal = Number(appointment.discount_value) || 0;
+        const discType = appointment.discount_type === 'percentage' ? 'percentage' : 'fixed';
+        let memberDiscountPercent = 0;
+        const memberTier = String(appointment.membership_tier || '').trim();
+        if (memberTier) {
+          const plan = db.prepare(`SELECT discount_percent FROM MEMBERSHIP_PLANS WHERE location_id = ? AND (
+            LOWER(tier) = LOWER(?) OR LOWER(name) = LOWER(?) OR LOWER(fullName) = LOWER(?) OR LOWER(id) = LOWER(?)
+          ) ORDER BY plan_id DESC LIMIT 1`).get(locationId, memberTier, memberTier, memberTier, memberTier);
+          memberDiscountPercent = Math.min(100, Math.max(0, Number(plan?.discount_percent) || 0));
+        }
+        const memberDiscount = Math.round(servicesSubtotal * memberDiscountPercent / 100);
+        const afterMember = Math.max(0, servicesSubtotal - memberDiscount);
+        const promoDiscount = discType === 'percentage' ? Math.round(afterMember * Math.min(Math.max(discVal, 0), 100) / 100) : Math.min(Math.max(discVal, 0), afterMember);
+        const discountAmount = memberDiscount + promoDiscount;
+        const subtotal = servicesSubtotal + membershipPrice;
+        const taxAmount = Math.round((Math.max(0, afterMember - promoDiscount) + membershipPrice) * 0.18);
+        const totalAmount = Math.max(0, afterMember - promoDiscount) + membershipPrice + taxAmount;
+        const amountPaid = Number(appointment.amount_paid) || 0;
+        const previousCredit = Number(appointment.membership_amount_used) || 0;
+        const clientMembership = db.prepare('SELECT membership_tier, membership_status, membership_balance FROM CLIENTS WHERE client_id = ?').get(appointment.client_id);
+        const clientTier = String(clientMembership?.membership_tier || '').trim().toLowerCase();
+        const isActiveMember = Boolean(clientMembership?.membership_status === 'active' && clientTier && !['none', 'non-member'].includes(clientTier));
+        const availableForThisVisit = isActiveMember
+          ? Math.max(0, Number(clientMembership.membership_balance) || 0) + previousCredit
+          : previousCredit;
+        const membershipCreditUsed = Math.min(Math.max(0, totalAmount - amountPaid), availableForThisVisit);
+        const balance = Math.max(0, totalAmount - amountPaid - membershipCreditUsed);
+        const paymentStatus = balance === 0
+          ? (appointment.payment_status === 'Paid' || amountPaid > 0 ? 'Paid' : 'Pending')
+          : (amountPaid > 0 || membershipCreditUsed > 0 ? 'Partially Paid' : 'Pending');
+        db.prepare(`UPDATE VISITS SET subtotal = ?, discount_amount = ?, tax_amount = ?, total_amount = ?,
+          membership_amount_used = ?, balance = ?, payment_status = ? WHERE visit_id = ?`)
+          .run(subtotal, discountAmount, taxAmount, totalAmount, membershipCreditUsed, balance, paymentStatus, visitId);
+        if (membershipCreditUsed !== previousCredit) {
+          db.prepare('UPDATE CLIENTS SET membership_balance = MAX(0, COALESCE(membership_balance, 0) + ?) WHERE client_id = ?')
+            .run(previousCredit - membershipCreditUsed, appointment.client_id);
+        }
+      }
+    });
+    transaction();
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Appointment update error:', error);
+    res.status(500).json({ error: 'Could not update appointment.' });
+  }
+});
+
+app.post('/api/appointments/:id/cancel', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), (req, res) => {
+  try {
+    const locationId = req.locationId;
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to cancel appointments.' });
+    const visitId = Number(req.params.id);
+    const appointment = db.prepare(`SELECT visit_id, client_id, membership_amount_used, payment_status
+      FROM VISITS WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1`).get(visitId, locationId);
+    if (!appointment || String(appointment.payment_status || '').toLowerCase() === 'cancelled') {
+      return res.status(404).json({ error: 'Active appointment not found.' });
+    }
+
+    const transaction = db.transaction(() => {
+      const creditToRestore = Math.max(0, Number(appointment.membership_amount_used) || 0);
+      if (creditToRestore > 0) {
+        db.prepare('UPDATE CLIENTS SET membership_balance = COALESCE(membership_balance, 0) + ? WHERE client_id = ?')
+          .run(creditToRestore, appointment.client_id);
+      }
+      db.prepare(`UPDATE VISITS SET payment_status = 'Cancelled', balance = 0, membership_amount_used = 0,
+        notes = CASE WHEN COALESCE(notes, '') = '' THEN '[APPOINTMENT CANCELLED]' ELSE notes || char(10) || '[APPOINTMENT CANCELLED]' END
+        WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1`)
+        .run(visitId, locationId);
+      const sessions = db.prepare('SELECT session_id FROM TREATMENT_COURSE_SESSIONS WHERE visit_id = ?').all(visitId);
+      for (const session of sessions) updateSessionStatus(db, session.session_id, 'cancelled');
+    });
+    transaction();
+    res.json({ success: true, slot_released: true, membership_credits_restored: Number(appointment.membership_amount_used) || 0 });
+  } catch (error) {
+    console.error('Appointment cancellation error:', error);
+    res.status(500).json({ error: 'Could not cancel appointment.' });
+  }
+});
+
+app.post('/api/appointments/:id/convert-to-visit', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), (req, res) => {
+  try {
+    if (!req.locationId) return res.status(400).json({ error: 'Branch context is required to convert appointments.' });
+    const visitId = Number(req.params.id);
+    const appointment = db.prepare('SELECT visit_id, client_id FROM VISITS WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1').get(visitId, req.locationId);
+    if (!appointment) return res.status(404).json({ error: 'Appointment not found or already converted.' });
+    const actual = getBranchDateTime();
+    const transaction = db.transaction(() => {
+      db.prepare('UPDATE VISITS SET is_appointment = 0, visit_date = ?, service_time = ? WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1')
+        .run(actual.date, formatAppointmentSlot(actual.minutes), visitId, req.locationId);
+      db.prepare(`UPDATE TREATMENT_COURSE_SESSIONS SET session_date = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE visit_id = ? AND status = 'upcoming'`).run(actual.date, visitId);
+      const totals = db.prepare(`SELECT COUNT(*) AS total_visits, COALESCE(SUM(amount_paid), 0) AS total_spend,
+        MIN(visit_date) AS first_visit_date, MAX(visit_date) AS last_visit_date
+        FROM VISITS WHERE client_id = ? AND COALESCE(is_appointment, 0) = 0
+          AND LOWER(COALESCE(payment_status, '')) != 'cancelled'`).get(appointment.client_id);
+      db.prepare(`UPDATE CLIENTS SET total_visits = ?, total_spend = ?, first_visit_date = ?,
+        last_visit_date = ?, updated_at = CURRENT_TIMESTAMP WHERE client_id = ?`)
+        .run(totals.total_visits, totals.total_spend, totals.first_visit_date || actual.date, totals.last_visit_date || actual.date, appointment.client_id);
+    });
+    transaction();
+    res.json({ success: true, visit_id: visitId, visit_date: actual.date, service_time: formatAppointmentSlot(actual.minutes) });
+  } catch (error) {
+    console.error('Appointment conversion error:', error);
+    res.status(500).json({ error: 'Could not convert appointment to a visit.' });
+  }
+});
+
 app.get('/api/appointments/slots', authenticateToken, (req, res) => {
   try {
     const locationId = req.locationId;
     const date = String(req.query.date || '').slice(0, 10);
+    const duration = normalizeAppointmentDuration(req.query.duration);
     if (!locationId) return res.status(400).json({ error: 'Branch context is required to view appointment slots.' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Choose a valid appointment date.' });
-    const weekday = APPOINTMENT_WEEKDAYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+    if (duration === null) return res.status(400).json({ error: 'Choose an appointment duration in 30-minute increments.' });
+    const currentBranchTime = getBranchDateTime();
+    const isPastDate = date < currentBranchTime.date;
+    const weekday = appointmentWeekdayForDate(date);
     const dayHours = getBranchOperatingHours(locationId)[weekday] || { open: false, start: '10:00', end: '20:00' };
     const toMinutes = value => { const [hour, minute] = String(value || '').split(':').map(Number); return hour * 60 + minute; };
     const slots = [];
-    if (dayHours.open) {
+    if (dayHours.open && !isPastDate) {
       const start = toMinutes(dayHours.start);
       const end = toMinutes(dayHours.end);
-      for (let minutes = start; minutes < end; minutes += 30) slots.push(formatAppointmentSlot(minutes));
+      for (let minutes = start; minutes < end; minutes += 30) {
+        if (minutes + duration <= end && (date !== currentBranchTime.date || minutes > currentBranchTime.minutes)) slots.push(formatAppointmentSlot(minutes));
+      }
     }
+    const excludeVisitId = Number(req.query.exclude_visit_id) || 0;
     const booked = db.prepare(`
-      SELECT v.service_time AS slot, v.visit_id, c.name, c.surname,
-        (SELECT group_concat(vs.service_name_snapshot, ', ') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS services
+      SELECT v.service_time AS slot, v.appointment_duration_mins, v.visit_id, c.name, c.surname,
+        (SELECT group_concat(vs.service_name_snapshot, ', ') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS services,
+        (SELECT group_concat(COALESCE(vs.service_id, ''), '|') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS service_ids,
+        (SELECT group_concat(vs.service_name_snapshot, '|') FROM VISIT_SERVICES vs WHERE vs.visit_id = v.visit_id) AS service_names
       FROM VISITS v JOIN CLIENTS c ON c.client_id = v.client_id
       WHERE v.location_id = ? AND date(v.visit_date) = date(?) AND COALESCE(v.is_appointment, 0) = 1
+        AND (? = 0 OR v.visit_id != ?)
         AND v.service_time IS NOT NULL AND trim(v.service_time) != ''
         AND LOWER(COALESCE(v.payment_status, '')) != 'cancelled'
       ORDER BY v.service_time, v.visit_id
-    `).all(locationId, date);
-    res.json({ date, weekday, hours: dayHours, is_open: Boolean(dayHours.open), slots: slots.map(slot => ({ slot, booked: booked.filter(row => String(row.slot).toLowerCase() === slot.toLowerCase()).map(row => ({ visit_id: row.visit_id, client_name: `${row.name || ''} ${row.surname || ''}`.trim(), services: row.services || '' })) })) });
+    `).all(locationId, date, excludeVisitId, excludeVisitId);
+    res.json({ date, weekday, hours: dayHours, duration, is_open: Boolean(dayHours.open && !isPastDate), slots: slots.map(slot => {
+      const slotStart = appointmentSlotMinutes(slot);
+      const slotEnd = slotStart + duration;
+      const conflicts = booked.filter(row => {
+        const bookedStart = appointmentSlotMinutes(row.slot);
+        const bookedDuration = normalizeAppointmentDuration(row.appointment_duration_mins) || 30;
+        return bookedStart !== null && slotStart < bookedStart + bookedDuration && bookedStart < slotEnd;
+      });
+      return { slot, booked: conflicts.map(row => ({
+        visit_id: row.visit_id,
+        slot: row.slot,
+        client_name: `${row.name || ''} ${row.surname || ''}`.trim(),
+        services: row.services || '',
+        service_ids: String(row.service_ids || '').split('|').filter(Boolean).map(Number),
+        service_names: String(row.service_names || '').split('|').filter(Boolean)
+      })) };
+    }) });
   } catch (error) {
     console.error('Appointment slots error:', error);
     res.status(500).json({ error: 'Could not load appointment availability.' });
@@ -6942,21 +7312,28 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       notes
     } = req.body;
 
-    if ((!services || services.length === 0) && !req.body.membership_tier && !req.body.membership_price) {
+    if ((!services || services.length === 0) && !req.body.membership_tier && !req.body.membership_price && !req.body.is_appointment) {
       throw new Error('At least one service or membership plan must be selected');
     }
 
     const now = new Date();
     const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const todayDate = visit_date || localDate;
+    let appointmentDuration = 30;
     if (req.body.is_appointment) {
       const date = String(todayDate).slice(0, 10);
       const slot = String(service_time || '').trim();
+      appointmentDuration = normalizeAppointmentDuration(req.body.appointment_duration_mins);
+      if (appointmentDuration === null) throw new Error('Choose an appointment duration in 30-minute increments.');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !slot) throw new Error('Choose an appointment date and an open time slot.');
-      if (date < localDate) throw new Error('Appointment date cannot be in the past.');
-      const weekday = APPOINTMENT_WEEKDAYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+      const currentBranchTime = getBranchDateTime();
+      if (date < currentBranchTime.date) throw new Error('Appointment date cannot be in the past.');
+      const weekday = appointmentWeekdayForDate(date);
       const hours = getBranchOperatingHours(req.locationId)[weekday];
       const slotMinutes = appointmentSlotMinutes(slot);
+      if (date === currentBranchTime.date && slotMinutes !== null && slotMinutes <= currentBranchTime.minutes) {
+        throw new Error('That appointment time has passed. Select a later open slot.');
+      }
       const [openHour, openMinute] = String(hours?.start || '').split(':').map(Number);
       const [closeHour, closeMinute] = String(hours?.end || '').split(':').map(Number);
       const opensAt = openHour * 60 + openMinute;
@@ -6964,8 +7341,19 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       if (!hours?.open || slotMinutes === null || slotMinutes < opensAt || slotMinutes >= closesAt || (slotMinutes - opensAt) % 30 !== 0) {
         throw new Error('That appointment time is outside this branch’s opening hours. Select an open slot.');
       }
-      const existingBooking = db.prepare(`SELECT visit_id FROM VISITS WHERE location_id = ? AND date(visit_date) = date(?) AND LOWER(trim(service_time)) = LOWER(?) AND COALESCE(is_appointment, 0) = 1 AND LOWER(COALESCE(payment_status, '')) != 'cancelled' LIMIT 1`).get(req.locationId, date, slot);
-      if (existingBooking) throw new Error('That appointment slot was just booked. Please select another open slot.');
+      if (slotMinutes + appointmentDuration > closesAt) throw new Error('The selected appointment duration extends past branch closing time. Choose an earlier slot.');
+      const existingBookings = db.prepare(`SELECT visit_id, service_time, appointment_duration_mins FROM VISITS WHERE location_id = ? AND date(visit_date) = date(?) AND COALESCE(is_appointment, 0) = 1 AND LOWER(COALESCE(payment_status, '')) != 'cancelled'`).all(req.locationId, date);
+      const overlapsBooking = existingBookings.filter(existing => {
+        const existingStart = appointmentSlotMinutes(existing.service_time);
+        const existingDuration = normalizeAppointmentDuration(existing.appointment_duration_mins) || 30;
+        return existingStart !== null && slotMinutes < existingStart + existingDuration && existingStart < slotMinutes + appointmentDuration;
+      });
+      const selectedServiceKeys = new Set((Array.isArray(services) ? services : []).map(appointmentServiceKey).filter(Boolean));
+      const sameServiceConflict = overlapsBooking.some(existing => {
+        const bookedServices = db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(existing.visit_id);
+        return bookedServices.some(service => selectedServiceKeys.has(appointmentServiceKey(service)));
+      });
+      if (sameServiceConflict) throw new Error('This service is already booked during that time. Choose another slot or service.');
     }
     let finalClientId = client_id;
 
@@ -7026,8 +7414,8 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         JSON.stringify(emailList),
         cleanPrimaryPhone,
         cleanPrimaryEmail,
-        todayDate,
-        todayDate,
+        req.body.is_appointment ? null : todayDate,
+        req.body.is_appointment ? null : todayDate,
         targetLocId
       );
 
@@ -7309,9 +7697,9 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         client_id, location_id, visit_date, subtotal, discount_type, discount_value,
         discount_amount, total_amount, amount_paid, balance,
         payment_method, payment_status, upi_ref, created_by, notes, created_at, service_time,
-        tax_amount, membership_price, membership_tier, is_appointment,
+        tax_amount, membership_price, membership_tier, is_appointment, appointment_duration_mins,
         membership_amount_used, membership_benefit_used, benefit_used_date, benefit_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       finalClientId,
       clientLocationId,
@@ -7334,6 +7722,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       membershipPrice,
       membershipTier,
       req.body.is_appointment ? 1 : 0,
+      appointmentDuration,
       validCreditUsed,
       req.body.membership_benefit_used || null,
       req.body.benefit_used_date || todayDate,
@@ -7396,21 +7785,24 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       }
     }
 
-    // 5. Update client aggregate stats
-    const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(finalClientId);
-    const newTotalVisits = (client.total_visits || 0) + 1;
-    const newTotalSpend = (client.total_spend || 0) + totalAmount;
-    const firstVisit = client.first_visit_date || todayDate;
+    // Appointment bookings are not visits until reception converts them.
+    // Keep their client record and reserved credit, but defer visit aggregates.
+    if (!req.body.is_appointment) {
+      const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(finalClientId);
+      const newTotalVisits = (client.total_visits || 0) + 1;
+      const newTotalSpend = (client.total_spend || 0) + totalAmount;
+      const firstVisit = client.first_visit_date || todayDate;
 
-    db.prepare(`
-      UPDATE CLIENTS
-      SET total_visits = ?,
-          total_spend = ?,
-          last_visit_date = ?,
-          first_visit_date = ?,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE client_id = ?
-    `).run(newTotalVisits, newTotalSpend, todayDate, firstVisit, finalClientId);
+      db.prepare(`
+        UPDATE CLIENTS
+        SET total_visits = ?,
+            total_spend = ?,
+            last_visit_date = ?,
+            first_visit_date = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE client_id = ?
+      `).run(newTotalVisits, newTotalSpend, todayDate, firstVisit, finalClientId);
+    }
 
     // If visit is Paid (including zero-payable complimentary visits), commit privilege redemptions
     if (paymentStatus === 'Paid') {
@@ -7886,7 +8278,9 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
       }
 
       // Recalculate client total spend and membership balance = tier cost - total credits used
-      const clientVisits = db.prepare("SELECT SUM(amount_paid) as total_spent, SUM(CASE WHEN payment_status = 'Paid' THEN membership_amount_used ELSE 0 END) as total_credits_used FROM VISITS WHERE client_id = ?").get(existingVisit.client_id);
+      const clientVisits = db.prepare(`SELECT
+        (SELECT COALESCE(SUM(amount_paid), 0) FROM VISITS WHERE client_id = ? AND COALESCE(is_appointment, 0) = 0) AS total_spent,
+        (SELECT COALESCE(SUM(membership_amount_used), 0) FROM VISITS WHERE client_id = ? AND LOWER(COALESCE(payment_status, '')) != 'cancelled') AS total_credits_used`).get(existingVisit.client_id, existingVisit.client_id);
       const currentClient = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(existingVisit.client_id);
       const rawTier = (newMembershipTier && newPaymentStatus === 'Paid')
         ? newMembershipTier

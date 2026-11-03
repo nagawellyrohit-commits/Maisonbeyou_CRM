@@ -484,7 +484,7 @@ export default function ReportsView({ onOpenClient, branding }) {
   });
 
   return (
-    <div className="animate-fade-in reports-container" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div className="animate-fade-in reports-container" style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
 
       {/* 1. Header & Executive Controls */}
       <div style={{

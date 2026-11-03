@@ -428,19 +428,6 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
                     boxShadow: '0 2px 8px rgba(184, 139, 74, 0.08)'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <div style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '9px',
-                        background: '#1C1917',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#D4AF37'
-                      }}>
-                        <Crown size={18} />
-                      </div>
-
                       <div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                           <span style={{
@@ -456,7 +443,6 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
                             alignItems: 'center',
                             gap: '4px'
                           }}>
-                            <Sparkles size={11} color="#D4AF37" />
                             {client.membership_tier}
                           </span>
 
@@ -524,7 +510,7 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
                         }}
                       >
                         <CalendarPlus size={15} />
-                        ⚡ Increase Validity
+                        Increase Validity
                       </button>
                     </div>
                   </div>

@@ -142,7 +142,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
 
   const sectionLabels = {
     visits: 'Dashboard', clients: 'Clients', services: 'Services', staff: 'Team',
-    membership: 'Membership', reports: 'Reports', users: 'User Access',
+    membership: 'Membership', reports: 'Reports', users: 'User Access', visitor_home: 'Visitor Welcome',
     branch_details: 'Branch Details', login: 'Login',
     studio_management: 'Studio Management', all_branches: 'All Branches', locations: 'All Branches', login: 'Login Screen'
   };
@@ -209,6 +209,54 @@ export default function BrandingCustomizer({ location, initialBranding, section 
                     <input value={draft[key] ?? DEFAULT_LOCATION_BRANDING[key]} maxLength={maxLength} onChange={event => update(key, event.target.value)} style={inputStyle} />
                   </label>
                 ))}
+              </section>}
+
+              {scope === 'branch' && view === 'visitor_home' && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Visitor welcome screen</div>
+                {uploadControl('visitor_background_image_url', 'Visitor welcome background image')}
+                <label style={rangeLabelStyle}>Background shade <strong>{Number(draft.visitor_overlay_opacity) || 0}%</strong></label>
+                <input type="range" min="0" max="90" step="1" value={draft.visitor_overlay_opacity} onChange={event => update('visitor_overlay_opacity', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
+                {[
+                  ['visitor_welcome_heading', 'Welcome heading', 100],
+                  ['visitor_welcome_subtitle', 'Welcome subtitle', 150],
+                  ['visitor_first_visit_title', 'First visit card title', 80],
+                  ['visitor_first_visit_description', 'First visit description', 120],
+                  ['visitor_first_visit_button', 'First visit button', 40],
+                  ['visitor_return_visit_title', 'Returning visit card title', 80],
+                  ['visitor_return_visit_description', 'Returning visit description', 120],
+                  ['visitor_return_visit_button', 'Returning visit button', 40]
+                ].map(([key, label, maxLength]) => (
+                  <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, fontWeight: 700, color: '#57534E' }}>
+                    {label}
+                    <input value={draft[key] ?? DEFAULT_LOCATION_BRANDING[key]} maxLength={maxLength} onChange={event => update(key, event.target.value)} style={inputStyle} />
+                  </label>
+                ))}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[
+                    ['visitor_welcome_heading_color', 'Welcome heading'],
+                    ['visitor_welcome_subtitle_color', 'Welcome subtitle'],
+                    ['visitor_card_fill', 'Card fill'],
+                    ['visitor_card_border', 'Card border'],
+                    ['visitor_heading_color', 'Card heading'],
+                    ['visitor_text_color', 'Card description'],
+                    ['visitor_icon_fill', 'Icon tile fill'],
+                    ['visitor_icon_color', 'Icon color'],
+                    ['visitor_first_button_fill', 'First visit button'],
+                    ['visitor_return_button_fill', 'Returning button'],
+                    ['visitor_button_text_color', 'Button text']
+                  ].map(([key, label]) => (
+                    <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: 8, border: '1px solid #E7DED2', borderRadius: 8, color: '#57534E', fontSize: 10.5, fontWeight: 700, background: '#FFFFFF' }}>
+                      <input aria-label={label} type="color" value={draft[key] || DEFAULT_LOCATION_BRANDING[key]} onChange={event => update(key, event.target.value)} style={{ width: 25, height: 25, padding: 0, border: 0, background: 'none', cursor: 'pointer' }} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <label style={rangeLabelStyle}>Card width <strong>{Number(draft.visitor_card_width) || 700}px</strong></label>
+                <input type="range" min="320" max="1100" step="10" value={draft.visitor_card_width} onChange={event => update('visitor_card_width', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
+                <label style={rangeLabelStyle}>Card border thickness <strong>{Number(draft.visitor_card_border_width) || 0}px</strong></label>
+                <input type="range" min="0" max="8" step="1" value={draft.visitor_card_border_width} onChange={event => update('visitor_card_border_width', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
+                <label style={rangeLabelStyle}>Card corner roundness <strong>{Number(draft.visitor_card_radius) || 18}px</strong></label>
+                <input type="range" min="0" max="48" step="1" value={draft.visitor_card_radius} onChange={event => update('visitor_card_radius', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
               </section>}
 
               <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>

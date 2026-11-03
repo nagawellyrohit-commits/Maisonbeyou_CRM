@@ -30,7 +30,7 @@ function TeamHierarchyFlowChart({ locationName, branchUsers, departments, hierar
     return <div key={position.hierarchy_id} style={{ ...nodeStyle, minWidth: 0, width: '100%', padding: '8px 9px', boxSizing: 'border-box', boxShadow: 'none' }}><div style={{ color: '#8C6228', fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase' }}>{level}</div><div style={{ marginTop: 3, color: '#292524', fontSize: 11.5, fontWeight: 700 }}>{position.role_name}</div><div style={{ marginTop: 5, paddingTop: 5, borderTop: '1px solid #F0E7D9', color: members.length ? '#57534E' : '#A8A29E', fontSize: 10.5, overflowWrap: 'anywhere' }}>{names}</div></div>;
   };
   const emptyPositionCard = level => <div key={`empty-${level}`} style={{ ...nodeStyle, minWidth: 0, width: '100%', padding: '8px 9px', boxSizing: 'border-box', boxShadow: 'none', borderStyle: 'dashed', textAlign: 'center' }}><strong style={{ display: 'block', color: '#57534E', fontSize: 11 }}>{level}</strong><span style={{ display: 'block', marginTop: 3, color: '#A8A29E', fontSize: 10 }}>Not assigned yet</span></div>;
-  const departmentCard = department => <div key={department.department_id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 7, minWidth: 0, padding: 12, border: '1px solid #EADBBE', borderRadius: 13, background: '#FFFCF7' }}>
+  const departmentCard = department => <div key={department.department_id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, minWidth: 0, padding: 12, border: '1px solid #EADBBE', borderRadius: 13, background: '#FFFCF7' }}>
     <strong style={{ color: '#72501F', fontSize: 12.5, textAlign: 'center' }}>{department.department_name}</strong>
     {levels.map((level, index) => {
       const positions = hierarchy.filter(position => Number(position.department_id) === Number(department.department_id) && normalize(position.designation_name) === normalize(level) && !/manager/i.test(`${position.role_name} ${position.designation_name}`));
@@ -38,7 +38,7 @@ function TeamHierarchyFlowChart({ locationName, branchUsers, departments, hierar
     })}
   </div>;
   return <section aria-label="Branch reporting flow chart" style={{ padding: 18, border: '1px solid #EADBBE', borderRadius: 14, background: '#FFFDF9', overflowX: 'auto' }}>
-    <div style={{ marginBottom: 14 }}><h2 style={{ margin: 0, color: '#292524', fontSize: 16 }}>Branch team reporting flow</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 12 }}>Branch Admin → Manager → Department → Head of Department → Senior → Junior → Associate</p>{locationName && <span style={{ color: '#9F7335', fontSize: 11, fontWeight: 700 }}>{locationName}</span>}</div>
+    <div style={{ marginBottom: 14 }}><h2 style={{ margin: 0, color: '#292524', fontSize: 16 }}>Branch team reporting flow</h2><p style={{ margin: '15px 0 14px', color: '#78716C', fontSize: 12 }}>Branch Admin → Manager → Department → Head of Department → Senior → Junior → Associate</p>{locationName && <span style={{ display: 'block', marginTop: 14, color: '#9F7335', fontSize: 11, fontWeight: 700 }}>{locationName}</span>}</div>
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 8, width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '6px 0' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>{admins.length ? admins.map(admin => <div key={admin.user_id} style={{ ...nodeStyle, flex: '1 1 180px', textAlign: 'center', borderColor: '#C9A86C' }}><div style={{ color: '#8C6228', fontSize: 10, fontWeight: 800, textTransform: 'uppercase' }}>Branch Admin</div><strong style={{ display: 'block', marginTop: 4, fontSize: 12.5 }}>{admin.name}</strong></div>) : <div style={nodeStyle}>No Branch Admin account is registered for this branch.</div>}</div>
       <div aria-hidden="true" style={{ height: 14, width: 1, alignSelf: 'center', background: '#D6C19B' }} />
@@ -628,7 +628,7 @@ export default function StaffManagement({ branding, currentUser, activeLocation,
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '28px', paddingTop: 24 }}>
+    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '28px', paddingTop: initialMasterView ? 40 : 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, paddingLeft: '20px' }}>
@@ -676,8 +676,8 @@ export default function StaffManagement({ branding, currentUser, activeLocation,
             </div>; return group.type === 'role' && masterOptionType === 'designation' ? [optionCard, departmentsMasterPanel] : [optionCard]; })}
           </div>
           {masterOptionType === 'role' && <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, marginTop: 16 }}>
-            <div style={{ padding: 14, background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
-              <div style={{ marginBottom: 10 }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Team Reporting Hierarchy</strong><p style={{ margin: '4px 0 0', fontSize: 11.5, color: '#8A8175' }}>Create department positions now; assign team members and supervisors now or later.</p></div>
+            <div style={{ padding: '24px 14px 14px', background: '#FFFFFF', border: '1px solid #EADBBE', borderRadius: 11 }}>
+              <div style={{ marginBottom: 20 }}><strong style={{ fontSize: 13.5, color: '#292524' }}>Team Reporting Hierarchy</strong><p style={{ margin: '14px 0 0', fontSize: 11.5, color: '#8A8175' }}>Create department positions now; assign team members and supervisors now or later.</p></div>
               {unassignedTeamMembers.length > 0 && <div style={{ marginBottom: 10, padding: '8px 10px', border: '1px solid #F0D8A8', borderRadius: 8, background: '#FFFAEB', color: '#785B25', fontSize: 11.5 }}><strong>Assign these team members to a department first:</strong> {unassignedTeamMembers.map(person => person.name).join(', ')}. Edit them under Team; they will then appear in the matching Reports to list.</div>}
               <form className="team-hierarchy-position-form" onSubmit={addHierarchyPosition} style={{ display: 'grid', gap: 10, alignItems: 'start' }}>
                 <label style={fieldLabel}>Department<select required value={hierarchyDraft.department_id} onChange={event => setHierarchyDraft(current => ({ ...current, department_id: event.target.value, assigned_staff_id: '', reports_to_hierarchy_id: '', reports_to_staff_id: '', reports_to_user_id: '', reports_to_user_ids: [] }))} style={{ ...fieldInput, padding: '9px 8px', fontSize: 12 }}><option value="">Select department</option>{teamDepartments.map(item => <option key={item.department_id} value={item.department_id}>{item.department_name}</option>)}</select></label>

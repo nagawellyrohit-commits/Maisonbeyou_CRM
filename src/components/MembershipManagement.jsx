@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import { canAccessModule } from '../utils/permissions';
+import { showConfirm } from '../utils/messageBox';
 
 function ComplimentaryServiceSelector({ services, value = [], membershipPrice, onChange }) {
   const [serviceToAdd, setServiceToAdd] = useState('');
@@ -730,7 +731,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
   const handleMigrationSubmit = async () => {
     if (!migrationFromPlanId || !migrationToPlanId || !selectedMigrationClients.length) return;
     const destination = plans.find(plan => String(plan.plan_id) === String(migrationToPlanId) || plan.id === migrationToPlanId);
-    if (!window.confirm(`Migrate ${selectedMigrationClients.length} selected client(s) to ${destination?.tier || 'the selected plan'} using ${migrationMode === 'carry' ? 'their current remaining credits and benefits' : 'your customized credits and benefits'}? WhatsApp/email notices will be attempted for available client contacts.`)) return;
+    if (!await showConfirm(`Migrate ${selectedMigrationClients.length} selected client(s) to ${destination?.tier || 'the selected plan'} using ${migrationMode === 'carry' ? 'their current remaining credits and benefits' : 'your customized credits and benefits'}? WhatsApp/email notices will be attempted for available client contacts.`, { title: 'Migrate memberships', confirmLabel: 'Migrate clients' })) return;
     setMigrationBusy(true);
     setMigrationMessage('');
     try {

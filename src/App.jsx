@@ -3,6 +3,8 @@ import Navbar from './components/Navbar';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import NewVisitWizard from './components/NewVisitWizard';
+import AppointmentsView from './components/AppointmentsView';
+import BrandingCustomizer from './components/BrandingCustomizer';
 import ClientProfile from './components/ClientProfile';
 import ClientsList from './components/ClientsList';
 import ServiceManagement from './components/ServiceManagement';
@@ -11,6 +13,7 @@ import MembershipManagement from './components/MembershipManagement';
 import ReportsView from './components/ReportsView';
 import ReceiptModal from './components/ReceiptModal';
 import ErrorBoundary from './components/ErrorBoundary';
+import MessageBoxHost from './components/MessageBoxHost';
 import StudioManagement from './components/StudioManagement';
 import LocationSelection from './components/LocationSelection';
 import { canAccessModule } from './utils/permissions';
@@ -44,6 +47,9 @@ export default function App() {
     return landingTabFor(user);
   });
   const [wizardResetKey, setWizardResetKey] = useState(0);
+  const [showAppointmentBooking, setShowAppointmentBooking] = useState(false);
+  const [requestedPaymentVisit, setRequestedPaymentVisit] = useState(null);
+  const [requestedDashboardSection, setRequestedDashboardSection] = useState(null);
   
   // Navigation contextual state
   const [selectedClientId, setSelectedClientId] = useState(null);
@@ -256,29 +262,32 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <Login
-        masterPortalBranding={activeMasterPortalBranding}
-        onLoginSuccess={(user, location) => {
-          setCurrentUser(user);
-          setActiveVisitClient(null);
-          setPreSelectedVisitClient(null);
-          setInitialVisitType(null);
-          if (user?.role === 'master_admin') {
-            // Master admin must never be redirected directly to a branch dashboard
-            setSelectedLocation(null);
-            setStoredLocation(null);
-            setMasterAdminView('types');
-          } else {
-            const locToSet = location || user?.location || null;
-            if (locToSet) {
-              setSelectedLocation(locToSet);
-              setStoredLocation(locToSet);
+      <>
+        <MessageBoxHost />
+        <Login
+          masterPortalBranding={activeMasterPortalBranding}
+          onLoginSuccess={(user, location) => {
+            setCurrentUser(user);
+            setActiveVisitClient(null);
+            setPreSelectedVisitClient(null);
+            setInitialVisitType(null);
+            if (user?.role === 'master_admin') {
+              // Master admin must never be redirected directly to a branch dashboard
+              setSelectedLocation(null);
+              setStoredLocation(null);
+              setMasterAdminView('types');
+            } else {
+              const locToSet = location || user?.location || null;
+              if (locToSet) {
+                setSelectedLocation(locToSet);
+                setStoredLocation(locToSet);
+              }
+              setActiveTab(landingTabFor(user));
+              if (landingTabFor(user) === 'new-visit') setWizardResetKey(k => k + 1);
             }
-            setActiveTab(landingTabFor(user));
-            if (landingTabFor(user) === 'new-visit') setWizardResetKey(k => k + 1);
-          }
-        }}
-      />
+          }}
+        />
+      </>
     );
   }
 
@@ -286,31 +295,37 @@ export default function App() {
   if ((currentUser?.role === 'master_admin' || currentUser?.original_role === 'master_admin') && !selectedLocation) {
     if (masterAdminView === 'locations') {
       return (
-        <LocationSelection
-          type={selectedLocationType}
+        <>
+          <MessageBoxHost />
+          <LocationSelection
+            type={selectedLocationType}
+            currentUser={currentUser}
+            onSelectLocation={handleSelectLocation}
+            onBack={() => setMasterAdminView('types')}
+            onLogout={handleLogout}
+            branding={activeMasterPortalBranding}
+            onPreviewBranding={setMasterPortalBrandingPreview}
+            onSaveBranding={saveMasterPortalBranding}
+          />
+        </>
+      );
+    }
+
+    return (
+      <>
+        <MessageBoxHost />
+        <StudioManagement
           currentUser={currentUser}
-          onSelectLocation={handleSelectLocation}
-          onBack={() => setMasterAdminView('types')}
+          onSelectType={(type) => {
+            setSelectedLocationType(type);
+            setMasterAdminView('locations');
+          }}
           onLogout={handleLogout}
           branding={activeMasterPortalBranding}
           onPreviewBranding={setMasterPortalBrandingPreview}
           onSaveBranding={saveMasterPortalBranding}
         />
-      );
-    }
-
-    return (
-      <StudioManagement
-        currentUser={currentUser}
-        onSelectType={(type) => {
-          setSelectedLocationType(type);
-          setMasterAdminView('locations');
-        }}
-        onLogout={handleLogout}
-        branding={activeMasterPortalBranding}
-        onPreviewBranding={setMasterPortalBrandingPreview}
-        onSaveBranding={saveMasterPortalBranding}
-      />
+      </>
     );
   }
 
@@ -319,6 +334,11 @@ export default function App() {
       <Navbar
         activeTab={activeTab}
         activeLocation={selectedLocation}
+        onNavigateDashboardSection={(section) => {
+          setRequestedDashboardSection(section);
+          setShowAppointmentBooking(false);
+          setActiveTab('dashboard');
+        }}
         branding={activeBranding}
         onSwitchLocation={handleSwitchLocation}
         setActiveTab={(tab) => {
@@ -334,6 +354,7 @@ export default function App() {
             setInitialVisitType(null);
             setActiveVisitClient(null);
           }
+          if (tab === 'appointments') setShowAppointmentBooking(false);
           setActiveTab(tab);
         }}
         currentUser={currentUser}
@@ -372,6 +393,11 @@ export default function App() {
             onPreviewBranding={setBrandingPreview}
             onSaveBranding={saveBranchBranding}
             activeLocation={selectedLocation}
+            requestedPaymentVisit={requestedPaymentVisit}
+            onPaymentFlowComplete={() => {
+              setRequestedPaymentVisit(null);
+              setActiveTab('appointments');
+            }}
             onSwitchLocation={handleSwitchLocation}
             onBackToMasterDashboard={handleReturnToMasterDashboard}
             onOpenClient={handleOpenClient}
@@ -381,18 +407,38 @@ export default function App() {
               setCartInfo({ count: 0, openCart: null, visible: false });
               setActiveTab('dashboard');
             }}
-            onNavigateTab={(tab) => setActiveTab(tab)}
+            onNavigateTab={(tab) => { if (tab === 'appointments') setShowAppointmentBooking(false); setActiveTab(tab); }}
+            requestedSection={requestedDashboardSection}
+            onRequestedSectionHandled={() => setRequestedDashboardSection(null)}
           />
         )}
 
-        {(canAccessModule(currentUser, 'visitor_intake') || canAccessModule(currentUser, 'visits')) && ['new-visit', 'appointments'].includes(activeTab) && (
+        {activeTab === 'appointments' && !showAppointmentBooking && (
+          <AppointmentsView
+            activeLocation={selectedLocation}
+            onBack={() => setActiveTab('dashboard')}
+            onOpenPayment={(visit) => {
+              setRequestedPaymentVisit(visit);
+              setActiveTab('dashboard');
+            }}
+            onBookAppointment={() => {
+              setWizardResetKey(key => key + 1);
+              setShowAppointmentBooking(true);
+            }}
+          />
+        )}
+
+        {(canAccessModule(currentUser, 'visitor_intake') || canAccessModule(currentUser, 'visits')) && (activeTab === 'new-visit' || (activeTab === 'appointments' && showAppointmentBooking)) && (
           <NewVisitWizard
             key={`${wizardResetKey}_${activeTab}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
-            appointmentMode={activeTab === 'appointments'}
+            appointmentMode={activeTab === 'appointments' && showAppointmentBooking}
             preSelectedClient={preSelectedVisitClient}
             initialType={initialVisitType}
             currentUser={currentUser}
             selectedLocation={selectedLocation}
+            branding={activeBranding}
+            onPreviewBranding={setBrandingPreview}
+            onSaveBranding={saveBranchBranding}
             onClientChange={(client) => setActiveVisitClient(client)}
             onCartChange={setCartInfo}
             onCancel={() => {
@@ -400,7 +446,10 @@ export default function App() {
               setPreSelectedVisitClient(null);
               setInitialVisitType(null);
               setCartInfo({ count: 0, openCart: null, visible: false });
-              if (currentUser?.role === 'visitor') {
+              if (activeTab === 'appointments') {
+                setShowAppointmentBooking(false);
+                setWizardResetKey(key => key + 1);
+              } else if (currentUser?.role === 'visitor') {
                 setWizardResetKey(k => k + 1);
               } else {
                 setActiveTab('dashboard');
@@ -411,7 +460,10 @@ export default function App() {
               setPreSelectedVisitClient(null);
               setInitialVisitType(null);
               setCartInfo({ count: 0, openCart: null, visible: false });
-              if (currentUser?.role === 'visitor') {
+              if (activeTab === 'appointments') {
+                setShowAppointmentBooking(false);
+                setWizardResetKey(key => key + 1);
+              } else if (currentUser?.role === 'visitor') {
                 if (visitId) {
                   setReceiptVisitId(visitId);
                 }
@@ -457,6 +509,16 @@ export default function App() {
       </main>
       </ErrorBoundary>
 
+      {activeTab === 'appointments' && !showAppointmentBooking && isAdmin && selectedLocation?.location_id && (
+        <BrandingCustomizer
+          location={selectedLocation}
+          initialBranding={activeBranding}
+          section="visits"
+          onPreview={setBrandingPreview}
+          onSaved={saveBranchBranding}
+        />
+      )}
+
       {/* Global Receipt / Invoice Modal */}
       {receiptVisitId && (
         <ReceiptModal
@@ -464,6 +526,7 @@ export default function App() {
           onClose={() => setReceiptVisitId(null)}
         />
       )}
+      <MessageBoxHost />
     </div>
   );
 }

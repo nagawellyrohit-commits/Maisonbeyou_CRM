@@ -2605,3 +2605,103 @@ textarea {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Visitor Desk first-visit cards: match the compact card reference without changing shared cards. */
+.concierge-client-type-wrapper {
+  max-width: min(100%, var(--visitor-card-width, 700px));
+}
+
+.concierge-client-type-grid {
+  max-width: 700px;
+  gap: 20px;
+}
+
+.concierge-client-type-grid .concierge-luxury-card {
+  height: 228px;
+  padding: 34px 22px 38px;
+  border: 1px solid #F0E2CB;
+  border-radius: 18px;
+  box-shadow: 0 8px 20px rgba(69, 54, 30, 0.08);
+}
+
+.concierge-client-type-grid .concierge-icon-medallion {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  margin-bottom: 20px;
+}
+
+.concierge-client-type-grid .concierge-card-title {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  margin-bottom: 2px;
+  line-height: 1.2;
+}
+
+.concierge-client-type-grid .concierge-card-desc {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.concierge-client-type-grid .concierge-action-btn {
+  width: 172px;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 5px 12px;
+  border-radius: 9px;
+  font-size: 8px;
+}
+
+.concierge-client-type-grid .concierge-luxury-card:hover,
+.concierge-client-type-grid .concierge-luxury-card:active {
+  transform: translateY(-2px) !important;
+  border-color: #EADBBE !important;
+  box-shadow: 0 12px 26px rgba(69, 54, 30, 0.12) !important;
+}
+
+.concierge-client-type-grid .concierge-luxury-card:hover .concierge-card-title,
+.concierge-client-type-grid .concierge-luxury-card:active .concierge-card-title {
+  color: var(--visitor-heading-color) !important;
+}
+
+.concierge-client-type-grid .concierge-luxury-card:hover .concierge-icon-medallion,
+.concierge-client-type-grid .concierge-luxury-card:active .concierge-icon-medallion {
+  transform: none !important;
+  background: var(--visitor-icon-fill) !important;
+  color: var(--visitor-icon-color) !important;
+}
+
+.concierge-client-type-grid .concierge-action-btn-gold:hover,
+.concierge-client-type-grid .concierge-action-btn-gold:active {
+  background: var(--visitor-first-button-fill) !important;
+  color: var(--visitor-button-text-color) !important;
+}
+
+.concierge-client-type-grid .concierge-action-btn-dark:hover,
+.concierge-client-type-grid .concierge-action-btn-dark:active {
+  background: var(--visitor-return-button-fill) !important;
+  color: var(--visitor-button-text-color) !important;
+}
+
+@media (max-width: 600px) {
+  .concierge-client-type-wrapper {
+    max-width: 296px;
+  }
+
+  .concierge-client-type-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .concierge-client-type-grid .concierge-luxury-card {
+    height: auto;
+    min-height: 210px;
+    padding: 24px 18px;
+  }
+}
+
+@media (max-width: 399px) {
+  .concierge-client-type-wrapper {
+    max-width: 258px;
+  }
+}

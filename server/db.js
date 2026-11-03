@@ -399,6 +399,7 @@ export function initDatabase() {
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN upi_ref TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN service_time TEXT;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN is_appointment INTEGER NOT NULL DEFAULT 0;`); } catch(e) {}
+  try { db.exec(`ALTER TABLE VISITS ADD COLUMN appointment_duration_mins INTEGER NOT NULL DEFAULT 30;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN tax_amount REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_price REAL DEFAULT 0.0;`); } catch(e) {}
   try { db.exec(`ALTER TABLE VISITS ADD COLUMN membership_tier TEXT;`); } catch(e) {}
@@ -831,6 +832,7 @@ export function initDatabase() {
         CREATE TABLE VISITS_new (
           visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
           client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+          location_id INTEGER REFERENCES LOCATIONS(location_id),
           visit_date TEXT NOT NULL,
           subtotal REAL NOT NULL,
           discount_type TEXT NOT NULL DEFAULT 'fixed' CHECK(discount_type IN ('fixed', 'percentage')),
@@ -846,6 +848,8 @@ export function initDatabase() {
           notes TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           service_time TEXT,
+          is_appointment INTEGER NOT NULL DEFAULT 0,
+          appointment_duration_mins INTEGER NOT NULL DEFAULT 30,
           tax_amount REAL DEFAULT 0.0,
           membership_price REAL DEFAULT 0.0,
           membership_tier TEXT,
@@ -855,16 +859,18 @@ export function initDatabase() {
           benefit_status TEXT DEFAULT 'Available'
         );
         INSERT INTO VISITS_new (
-          visit_id, client_id, visit_date, subtotal, discount_type, discount_value,
+          visit_id, client_id, location_id, visit_date, subtotal, discount_type, discount_value,
           discount_amount, total_amount, amount_paid, balance, payment_method,
-          payment_status, upi_ref, created_by, notes, created_at, service_time,
+          payment_status, upi_ref, created_by, notes, created_at, service_time, is_appointment,
+          appointment_duration_mins,
           tax_amount, membership_price, membership_tier, membership_amount_used,
           membership_benefit_used, benefit_used_date, benefit_status
         )
         SELECT 
-          visit_id, client_id, visit_date, subtotal, discount_type, discount_value,
+          visit_id, client_id, location_id, visit_date, subtotal, discount_type, discount_value,
           discount_amount, total_amount, amount_paid, balance, payment_method,
-          payment_status, upi_ref, created_by, notes, created_at, service_time,
+          payment_status, upi_ref, created_by, notes, created_at, service_time, is_appointment,
+          appointment_duration_mins,
           tax_amount, membership_price, membership_tier, membership_amount_used,
           membership_benefit_used, benefit_used_date, benefit_status
         FROM VISITS;

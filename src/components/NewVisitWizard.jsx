@@ -17,7 +17,9 @@ import LuxuryDatePicker from './LuxuryDatePicker';
 import ServiceTermsModal from './ServiceTermsModal';
 import LoginPreferenceSelector from './LoginPreferenceSelector';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
+import BrandingCustomizer from './BrandingCustomizer';
 import { renderCategoryIcon } from '../utils/categoryIcons';
+import { showConfirm } from '../utils/messageBox';
 
 const normalizeMembershipServiceName = (value) => String(value || '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
@@ -155,10 +157,39 @@ export const getTodayDateStr = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-export default function NewVisitWizard({ preSelectedClient, initialType, appointmentMode = false, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation }) {
+const getBranchDateTime = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(date).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, minutes: Number(parts.hour) * 60 + Number(parts.minute) };
+};
+
+const appointmentSlotToMinutes = slot => {
+  const match = String(slot || '').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return null;
+  let hour = Number(match[1]) % 12;
+  if (match[3].toUpperCase() === 'PM') hour += 12;
+  return hour * 60 + Number(match[2]);
+};
+
+const isAppointmentSlotPast = (date, slot, current = getBranchDateTime()) => {
+  const slotMinutes = appointmentSlotToMinutes(slot);
+  return date < current.date || (date === current.date && slotMinutes !== null && slotMinutes <= current.minutes);
+};
+
+const formatAppointmentDuration = minutes => {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
+};
+
+export default function NewVisitWizard({ preSelectedClient, initialType, appointmentMode = false, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation, branding, onPreviewBranding, onSaveBranding }) {
   // Wizard Steps:
-  // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'billing-payment' -> 'confirmation'
+  // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'appointment-slot' (appointments) -> 'billing-payment' -> 'confirmation'
   const [step, setStep] = useState(() => {
+    if (appointmentMode && !preSelectedClient) return 'appointment-client';
     if (preSelectedClient) {
       const isMember = Boolean(
         preSelectedClient.membership_tier &&
@@ -177,6 +208,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
   // Client State
   const [clientType, setClientType] = useState(() => {
+    if (appointmentMode && !preSelectedClient) return 'new';
     if (preSelectedClient) return 'regular';
     if (initialType === 'new') return 'new';
     if (initialType === 'regular') return 'regular';
@@ -305,14 +337,17 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   const [clientCity, setClientCity] = useState(preSelectedClient?.city || '');
   const [clientState, setClientState] = useState(preSelectedClient?.state || '');
   const [visitDate, setVisitDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return getBranchDateTime().date;
   });
   const [appointmentSlots, setAppointmentSlots] = useState([]);
   const [appointmentSlotsLoading, setAppointmentSlotsLoading] = useState(false);
   const [appointmentDayOpen, setAppointmentDayOpen] = useState(true);
   const [appointmentDayHours, setAppointmentDayHours] = useState(null);
   const [selectedAppointmentSlot, setSelectedAppointmentSlot] = useState('');
+  const [slotConflictDialog, setSlotConflictDialog] = useState(null);
+  const [appointmentDurationMinutes, setAppointmentDurationMinutes] = useState(30);
+  const [showAppointmentDurationControl, setShowAppointmentDurationControl] = useState(false);
+  const [appointmentClockTick, setAppointmentClockTick] = useState(0);
   const [phoneCheckMessage, setPhoneCheckMessage] = useState(null); // { exists: boolean, client: object }
   const [registeredClientModal, setRegisteredClientModal] = useState(null); // { client, reg_no }
   const [isRegisteringDirectly, setIsRegisteringDirectly] = useState(false);
@@ -321,16 +356,35 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   const [copiedRegNo, setCopiedRegNo] = useState(false);
 
   useEffect(() => {
+    if (appointmentMode && !preSelectedClient) {
+      setClientType('new');
+      setStep('appointment-client');
+    }
+  }, [appointmentMode, preSelectedClient]);
+
+  useEffect(() => {
     if (!appointmentMode) return;
     let cancelled = false;
     setAppointmentSlotsLoading(true);
     setSelectedAppointmentSlot('');
-    apiRequest(`/appointments/slots?date=${encodeURIComponent(visitDate)}`)
+    apiRequest(`/appointments/slots?date=${encodeURIComponent(visitDate)}&duration=${appointmentDurationMinutes}`)
       .then(result => { if (!cancelled) { setAppointmentSlots(result.slots || []); setAppointmentDayOpen(Boolean(result.is_open)); setAppointmentDayHours(result.hours || null); } })
       .catch(error => { if (!cancelled) { setAppointmentSlots([]); setAppointmentDayOpen(false); setAppointmentDayHours(null); setSubmitError(error.message || 'Could not load appointment slots.'); } })
       .finally(() => { if (!cancelled) setAppointmentSlotsLoading(false); });
     return () => { cancelled = true; };
-  }, [appointmentMode, visitDate, selectedLocation?.location_id]);
+  }, [appointmentMode, visitDate, selectedLocation?.location_id, appointmentDurationMinutes]);
+
+  useEffect(() => {
+    if (!appointmentMode) return;
+    const timer = setInterval(() => setAppointmentClockTick(value => value + 1), 15000);
+    return () => clearInterval(timer);
+  }, [appointmentMode]);
+
+  useEffect(() => {
+    if (appointmentMode && selectedAppointmentSlot && isAppointmentSlotPast(visitDate, selectedAppointmentSlot)) {
+      setSelectedAppointmentSlot('');
+    }
+  }, [appointmentMode, visitDate, selectedAppointmentSlot, appointmentClockTick]);
 
   // Regular Client Selection
   const [selectedRegularClient, setSelectedRegularClient] = useState(preSelectedClient || null);
@@ -1919,7 +1973,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       setIsSubmitting(true);
       setSubmitError('');
 
-      if (selectedServices.length === 0 && !activeMembership) {
+      if (!appointmentMode && selectedServices.length === 0 && !activeMembership) {
         throw new Error('Please select at least one service or membership plan');
       }
 
@@ -1945,6 +1999,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
         submitted_at: new Date().toISOString(),
         service_time: appointmentMode ? selectedAppointmentSlot : new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true }),
         is_appointment: appointmentMode,
+        appointment_duration_mins: appointmentMode ? appointmentDurationMinutes : 30,
         services: selectedServices.length > 0 ? selectedServices.map(s => ({
           service_id: s.service_id,
           service_name: s.service_name,
@@ -1954,14 +2009,14 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
           is_privilege: s.is_privilege ? 1 : 0,
           privilege_id: s.privilege_id || null,
           membership_benefit_service: s.membership_benefit_service ? 1 : 0
-        })) : [{
+        })) : activeMembership ? [{
           service_id: 999999,
           service_name: `Membership: ${activeMembership?.plan?.name || 'Privilege Membership'}`,
           price: activeMembership?.price || 0,
           staff_id: null,
           is_privilege: 0,
           privilege_id: null
-        }],
+        }] : [],
         discount_type: discountType,
         discount_value: parseFloat(discountValue) || 0,
         payment_method: (() => {
@@ -2041,8 +2096,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       }
       // Dispatch global event so Admin, Reception and Manager dashboards immediately update in real-time
       window.dispatchEvent(new CustomEvent('visit_created', { detail: { visit: res?.visit } }));
+      return res;
     } catch (err) {
       setSubmitError(err.message);
+      return null;
     } finally {
       setIsSubmitting(false);
     }
@@ -2312,7 +2369,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       };
     }
 
-    if (clientType === 'new' && clientName.trim() && step !== 'client-type' && step !== 'client-info' && step !== 'client-search') {
+    if (clientType === 'new' && clientName.trim() && step !== 'client-type' && step !== 'client-info' && step !== 'client-search' && step !== 'appointment-client') {
       const tier = activeMembership?.plan?.name || null;
       const isMember = Boolean(tier && tier !== 'Non-Member');
       return {
@@ -2335,11 +2392,11 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   };
 
   // Log Out Client Session Handler -> Returns to Dashboard
-  const handleLogoutClient = () => {
+  const handleLogoutClient = async () => {
     const confirmMsg = currentUser?.role === 'visitor'
       ? 'Clear active client session and start over? Any unsaved services will be cleared.'
       : 'Log out active client session and return to Dashboard? Any unsaved services will be cleared.';
-    if (window.confirm(confirmMsg)) {
+    if (await showConfirm(confirmMsg, { title: 'End client session', confirmLabel: 'Continue' })) {
       setSelectedRegularClient(null);
       setClientType('');
       setClientName('');
@@ -2591,13 +2648,89 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   // ==========================================
   // STEP 1: CLIENT TYPE
   // ==========================================
+  if (step === 'appointment-client' && appointmentMode) {
+    const continueToAppointmentSlots = async event => {
+      event.preventDefault();
+      setSubmitError('');
+      const digits = clientPhone.replace(/\D/g, '').slice(-10);
+      const fullName = clientName.trim();
+      if (!fullName) return setSubmitError('Enter the client’s name.');
+      if (digits.length !== 10) return setSubmitError('Enter a valid 10-digit phone number.');
+
+      setIsSubmitting(true);
+      try {
+        const phoneResult = await apiRequest(`/clients/check-phone?phone=${encodeURIComponent(digits)}`);
+        if (phoneResult.exists && phoneResult.client) {
+          setSelectedRegularClient(phoneResult.client);
+          setClientType('regular');
+          setClientName(phoneResult.client.name || fullName);
+          setClientSurname(phoneResult.client.surname || '');
+          setPrimaryLoginPhone(phoneResult.client.primary_login_phone || phoneResult.client.phone || digits);
+        } else {
+          const [firstName, ...surnameParts] = fullName.split(/\s+/);
+          setClientName(firstName);
+          setClientSurname(surnameParts.join(' '));
+          setClientPhone(digits);
+          setPrimaryLoginPhone(digits);
+          setClientMobiles([digits]);
+          setClientType('new');
+          setSelectedRegularClient(null);
+        }
+        setStep('appointment-slot');
+      } catch (error) {
+        setSubmitError(error.message || 'Could not verify the client phone number.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    const serviceOptions = categories.flatMap(category => (category.services || []).map(service => ({
+      ...service,
+      category_name: category.category_name || category.name || 'Services'
+    })));
+    const selectedServiceId = selectedServices[0]?.service_id ? String(selectedServices[0].service_id) : '';
+
+    return (
+      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 760, margin: '32px auto', padding: '0 16px', boxSizing: 'border-box' }}>
+        <button type="button" onClick={onCancel} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 18, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />Back to appointments</button>
+        <form onSubmit={continueToAppointmentSlots} style={{ padding: '26px clamp(18px, 4vw, 32px)', border: '1px solid #E8D7C0', borderRadius: 16, background: '#FFFFFF', boxShadow: '0 12px 32px rgba(77, 54, 29, .06)' }}>
+          <h1 style={{ margin: '0 0 6px', color: '#302721', fontSize: 25 }}>Book an appointment</h1>
+          <p style={{ margin: '0 0 22px', color: '#81766B', fontSize: 13 }}>Enter the client’s details. You can add a service now or leave it blank.</p>
+          {submitError && <div role="alert" style={{ marginBottom: 16, padding: '10px 12px', border: '1px solid #FECACA', borderRadius: 9, background: '#FEF2F2', color: '#9B1C1C', fontSize: 13 }}>{submitError}</div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 14 }}>
+            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Client name
+              <input autoFocus value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Enter full name" style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Phone number
+              <input type="tel" inputMode="numeric" value={clientPhone} onChange={event => setClientPhone(event.target.value.replace(/[^\d+\s()-]/g, ''))} placeholder="10-digit phone number" style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
+            </label>
+            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700, gridColumn: '1 / -1' }}>Service <span style={{ color: '#81766B', fontWeight: 400 }}>(optional)</span>
+              <select value={selectedServiceId} onChange={event => {
+                const service = serviceOptions.find(item => String(item.service_id) === event.target.value);
+                setSelectedServices(service ? [{ temp_id: `appointment-${service.service_id}`, service_id: service.service_id, service_name: service.service_name, price: Number(service.price) || 0, list_price: Number(service.list_price ?? service.price) || 0 }] : []);
+              }} style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF', fontSize: 14 }}>
+                <option value="">No service selected</option>
+                {categories.map(category => <optgroup key={category.category_id} label={category.category_name || category.name || 'Services'}>
+                  {(category.services || []).map(service => <option key={service.service_id} value={service.service_id}>{service.service_name} · {formatCurrency(Number(service.price) || 0)}</option>)}
+                </optgroup>)}
+              </select>
+            </label>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
+            <button type="submit" disabled={isSubmitting} style={{ padding: '11px 22px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: '#A9793C', fontSize: 13, fontWeight: 750, cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? .7 : 1 }}>{isSubmitting ? 'CHECKING…' : 'CONTINUE TO DATE & TIME'}</button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   if (step === 'client-type') {
     return (
       <div
         className="concierge-hero-screen animate-fade-in"
         style={{
           position: 'relative',
-          background: 'url(/visitor-bg.png) center center / cover no-repeat'
+          background: `url(${branding?.visitor_background_image_url || '/visitor-bg.png'}) center center / cover no-repeat`
         }}
       >
         {/* Clearly visible black transparent shade overlay */}
@@ -2608,29 +2741,29 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
             inset: 0,
             width: '100%',
             height: '100%',
-            background: 'rgba(0, 0, 0, 0.62)',
+            background: `rgba(0, 0, 0, ${Math.min(90, Math.max(0, Number(branding?.visitor_overlay_opacity ?? 62))) / 100})`,
             pointerEvents: 'none',
             zIndex: 1
           }}
         />
 
-        <div className="concierge-view-wrapper" style={{ position: 'relative', zIndex: 2 }}>
+        <div className="concierge-view-wrapper concierge-client-type-wrapper" style={{ position: 'relative', zIndex: 2, '--visitor-card-width': `${Number(branding?.visitor_card_width ?? 700)}px` }}>
           {/* Header */}
           <div className="concierge-header">
-            <h1 className="concierge-title">
-              A JOURNEY, UNIQUELY YOURS
+            <h1 className="concierge-title" style={{ color: branding?.visitor_welcome_heading_color || '#FFFFFF' }}>
+              {branding?.visitor_welcome_heading ?? 'A JOURNEY, UNIQUELY YOURS'}
             </h1>
 
             <div className="concierge-subtitle-wrap">
               <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, transparent, #C59A58)' }} />
-              <span className="concierge-subtitle">
-                your personalised journey awaits
+              <span className="concierge-subtitle" style={{ color: branding?.visitor_welcome_subtitle_color || '#DFC18A' }}>
+                {branding?.visitor_welcome_subtitle ?? 'your personalised journey awaits'}
               </span>
               <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, #C59A58, transparent)' }} />
             </div>
           </div>
 
-          <div className="concierge-cards-grid">
+          <div className="concierge-cards-grid concierge-client-type-grid" style={{ maxWidth: Number(branding?.visitor_card_width ?? 700) }}>
             {/* IT'S MY FIRST VISIT */}
             <div
               onClick={() => {
@@ -2668,25 +2801,26 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                 setStep('client-info');
               }}
               className="concierge-luxury-card"
+              style={{ background: branding?.visitor_card_fill || '#FFFFFF', borderColor: branding?.visitor_card_border || '#F0E2CB', borderRadius: Number(branding?.visitor_card_radius ?? 18), borderWidth: `${Number(branding?.visitor_card_border_width ?? 1)}px`, '--visitor-heading-color': branding?.visitor_heading_color || '#221F1C', '--visitor-icon-fill': branding?.visitor_icon_fill || '#FAF0E4', '--visitor-icon-color': branding?.visitor_icon_color || '#A6733D', '--visitor-first-button-fill': branding?.visitor_first_button_fill || '#A0723E', '--visitor-button-text-color': branding?.visitor_button_text_color || '#FFFFFF' }}
             >
               {/* Icon Medallion */}
-              <div className="concierge-icon-medallion">
+              <div className="concierge-icon-medallion" style={{ background: branding?.visitor_icon_fill || '#FAF0E4', color: branding?.visitor_icon_color || '#A6733D' }}>
                 <UserPlus size={28} strokeWidth={1.8} />
               </div>
 
               {/* Card Title */}
-              <h2 className="concierge-card-title">
-                IT’S MY FIRST VISIT
+              <h2 className="concierge-card-title" style={{ color: branding?.visitor_heading_color || '#221F1C' }}>
+                {branding?.visitor_first_visit_title ?? 'IT’S MY FIRST VISIT'}
               </h2>
 
               {/* Card Subtitle */}
-              <p className="concierge-card-desc">
-                discover the unique experience
+              <p className="concierge-card-desc" style={{ color: branding?.visitor_text_color || '#6B655F' }}>
+                {branding?.visitor_first_visit_description ?? 'discover the unique experience'}
               </p>
 
               {/* Luxury Action Button */}
-              <div className="concierge-action-btn concierge-action-btn-gold">
-                <span>GET STARTED</span>
+              <div className="concierge-action-btn concierge-action-btn-gold" style={{ background: branding?.visitor_first_button_fill || '#A0723E', color: branding?.visitor_button_text_color || '#FFFFFF' }}>
+                <span>{branding?.visitor_first_visit_button ?? 'GET STARTED'}</span>
               </div>
             </div>
 
@@ -2720,31 +2854,32 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                 setStep('client-search');
               }}
               className="concierge-luxury-card"
+              style={{ background: branding?.visitor_card_fill || '#FFFFFF', borderColor: branding?.visitor_card_border || '#F0E2CB', borderRadius: Number(branding?.visitor_card_radius ?? 18), borderWidth: `${Number(branding?.visitor_card_border_width ?? 1)}px`, '--visitor-heading-color': branding?.visitor_heading_color || '#221F1C', '--visitor-icon-fill': branding?.visitor_icon_fill || '#FAF0E4', '--visitor-icon-color': branding?.visitor_icon_color || '#A6733D', '--visitor-return-button-fill': branding?.visitor_return_button_fill || '#242422', '--visitor-button-text-color': branding?.visitor_button_text_color || '#FFFFFF' }}
             >
               {/* Icon Medallion */}
-              <div className="concierge-icon-medallion">
+              <div className="concierge-icon-medallion" style={{ background: branding?.visitor_icon_fill || '#FAF0E4', color: branding?.visitor_icon_color || '#A6733D' }}>
                 <UserCheck size={28} strokeWidth={1.8} />
               </div>
 
               {/* Card Title */}
-              <h2 className="concierge-card-title">
-                I’VE BEEN HERE BEFORE
+              <h2 className="concierge-card-title" style={{ color: branding?.visitor_heading_color || '#221F1C' }}>
+                {branding?.visitor_return_visit_title ?? 'I’VE BEEN HERE BEFORE'}
               </h2>
 
               {/* Card Subtitle */}
-              <p className="concierge-card-desc">
-                we are glad to have you back
+              <p className="concierge-card-desc" style={{ color: branding?.visitor_text_color || '#6B655F' }}>
+                {branding?.visitor_return_visit_description ?? 'we are glad to have you back'}
               </p>
 
               {/* Luxury Action Button */}
-              <div className="concierge-action-btn concierge-action-btn-dark">
-                <span>CONTINUE MY JOURNEY</span>
+              <div className="concierge-action-btn concierge-action-btn-dark" style={{ background: branding?.visitor_return_button_fill || '#242422', color: branding?.visitor_button_text_color || '#FFFFFF' }}>
+                <span>{branding?.visitor_return_visit_button ?? 'CONTINUE MY JOURNEY'}</span>
               </div>
             </div>
           </div>
 
           {currentUser?.role !== 'visitor' && onCancel && (
-            <div style={{ textAlign: 'center', marginTop: 'clamp(20px, 3vh, 32px)' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'clamp(20px, 3vh, 32px)' }}>
               <button
                 onClick={onCancel}
                 style={{
@@ -2776,6 +2911,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
             </div>
           )}
         </div>
+        {['admin', 'master_admin'].includes(currentUser?.role) && selectedLocation?.location_id && <BrandingCustomizer location={selectedLocation} initialBranding={branding} section="visitor_home" onPreview={onPreviewBranding} onSaved={onSaveBranding} />}
       </div>
     );
   }
@@ -6737,27 +6873,28 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                   <div
                     style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       justifyContent: 'space-between',
-                      padding: '2px 0'
+                      gap: 12,
+                      padding: '12px 13px',
+                      border: '1px solid #E4C995',
+                      borderRadius: 10,
+                      background: '#FBF7EF'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{
-                        fontSize: '14px',
-                        fontWeight: '700',
-                        color: '#1C1917',
-                        background: '#FDE8E8',
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        letterSpacing: '0.02em'
-                      }}>
-                        1. {activeMembership.plan.name.toUpperCase()}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
+                      <Crown size={17} color="#A9793C" style={{ flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}>
+                          <span style={{ fontSize: 14, fontWeight: 750, color: '#332A23' }}>1. {activeMembership.plan.name.toUpperCase()}</span>
+                          <span style={{ padding: '2px 7px', borderRadius: 999, color: '#8C6228', background: '#F1E6D3', fontSize: 9, fontWeight: 800, letterSpacing: '.06em' }}>MEMBERSHIP</span>
+                        </div>
+                        <div style={{ marginTop: 4, color: '#81766B', fontSize: 11 }}>New membership purchase · activates after the bill is settled</div>
+                      </div>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: '700', color: '#1C1917' }}>
+                      <span style={{ fontSize: '15px', fontWeight: '750', color: '#1C1917', whiteSpace: 'nowrap' }}>
                         {formatCartCurrency(membershipAmount)}
                       </span>
                       <button
@@ -7035,23 +7172,6 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                 </div>
               </div>
 
-              {appointmentMode && (
-                <section aria-label="Appointment date and time" style={{ margin: '24px 0 8px', padding: '16px', border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
-                    <div><h3 style={{ margin: 0, color: '#292524', fontSize: 16 }}>Choose an appointment slot</h3><p style={{ margin: '4px 0 0', fontSize: 12, color: '#78716C' }}>{appointmentDayHours?.open ? `Branch hours: ${appointmentDayHours.start}–${appointmentDayHours.end}. Green slots are open; grey slots are booked.` : 'This branch is closed on the selected day.'}</p></div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, color: '#57534E' }}>Appointment date<input type="date" min={getTodayDateStr()} value={visitDate} onChange={event => setVisitDate(event.target.value)} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }} /></label>
-                  </div>
-                  {appointmentSlotsLoading ? <div style={{ padding: '16px 8px', color: '#78716C', fontSize: 13 }}>Checking branch availability…</div> : !appointmentDayOpen ? <div style={{ padding: 12, color: '#78716C', background: '#F5F5F4', borderRadius: 8, fontSize: 12 }}>No appointments can be booked for this branch on this day.</div> : appointmentSlots.length === 0 ? <div style={{ padding: 12, color: '#78716C', background: '#FAF8F5', borderRadius: 8, fontSize: 12 }}>No appointment slots are available for this date.</div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
-                    {appointmentSlots.map(item => {
-                      const isBooked = item.booked?.length > 0;
-                      const isSelected = selectedAppointmentSlot === item.slot;
-                      const bookedClient = item.booked?.[0]?.client_name;
-                      return <button key={item.slot} type="button" disabled={isBooked} onClick={() => setSelectedAppointmentSlot(item.slot)} title={isBooked ? `Booked${bookedClient ? ` by ${bookedClient}` : ''}` : `Book ${item.slot}`} style={{ minHeight: 56, padding: '8px 9px', borderRadius: 9, border: isSelected ? '2px solid #B88B4A' : isBooked ? '1px solid #E7E5E4' : '1px solid #A7D7B5', background: isSelected ? '#B88B4A' : isBooked ? '#F5F5F4' : '#F0FDF4', color: isSelected ? '#FFFFFF' : isBooked ? '#A8A29E' : '#166534', cursor: isBooked ? 'not-allowed' : 'pointer', textAlign: 'center' }}><strong style={{ display: 'block', fontSize: 12 }}>{item.slot}</strong><span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700 }}>{isBooked ? (bookedClient || 'Booked') : isSelected ? 'Selected' : 'Open'}</span></button>;
-                    })}
-                  </div>}
-                </section>
-              )}
-
               {/* Bottom Action Row (Matching Image 2) */}
               <div style={{
                 display: 'flex',
@@ -7115,6 +7235,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                 <button
                   type="button"
                   onClick={async () => {
+                    if (appointmentMode) {
+                      setStep('appointment-slot');
+                      return;
+                    }
                     setStep('confirmation');
                     if (!completedVisitResult && !isSubmitting) {
                       try {
@@ -7124,7 +7248,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                       }
                     }
                   }}
-                  disabled={(selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))}
+                  disabled={selectedServices.length === 0 && !activeMembership}
                   style={{
                     borderRadius: '9999px',
                     background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)',
@@ -7135,13 +7259,13 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                     border: 'none',
-                    cursor: ((selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))) ? 'not-allowed' : 'pointer',
+                    cursor: (selectedServices.length === 0 && !activeMembership) ? 'not-allowed' : 'pointer',
                     boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)',
-                    opacity: ((selectedServices.length === 0 && !activeMembership) || (appointmentMode && (!selectedAppointmentSlot || appointmentSlotsLoading))) ? 0.5 : 1,
+                    opacity: (selectedServices.length === 0 && !activeMembership) ? 0.5 : 1,
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  {appointmentMode ? 'BOOK APPOINTMENT' : 'PROCEED TO CHECKOUT'}
+                  {appointmentMode ? 'CONTINUE TO SLOT BOOKING' : 'PROCEED TO CHECKOUT'}
                 </button>
               </div>
             </div>
@@ -7150,6 +7274,106 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
           {/* Clinical Treatment Consent & Terms Modal */}
           {renderServiceTermsModal()}
         </div>
+      </div>
+    );
+  }
+
+  if (step === 'appointment-slot' && appointmentMode) {
+    const isSelectedSlotPast = selectedAppointmentSlot && isAppointmentSlotPast(visitDate, selectedAppointmentSlot);
+    const appointmentClientName = clientType === 'new'
+      ? `${clientName || ''} ${clientSurname || ''}`.trim()
+      : `${selectedRegularClient?.name || ''} ${selectedRegularClient?.surname || ''}`.trim();
+    const clientMembershipTier = String(selectedRegularClient?.membership_tier || '').trim();
+    const hasClientMembership = Boolean(clientMembershipTier && !['none', 'non-member', 'null'].includes(clientMembershipTier.toLowerCase()));
+    const membershipExpired = Boolean(selectedRegularClient?.membership_expires_at && String(selectedRegularClient.membership_expires_at).slice(0, 10) < getBranchDateTime().date);
+    const membershipIsActive = hasClientMembership && String(selectedRegularClient?.membership_status || '').toLowerCase() === 'active' && !membershipExpired;
+    const normalizedServiceName = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const hasSameServiceBooking = item => (item.booked || []).some(booking => {
+      const bookedIds = new Set((booking.service_ids || []).map(Number).filter(Boolean));
+      const bookedNames = new Set((booking.service_names || []).map(normalizedServiceName).filter(Boolean));
+      return selectedServices.some(service => {
+        const serviceId = Number(service.service_id);
+        if (serviceId && bookedIds.has(serviceId)) return true;
+        return bookedNames.has(normalizedServiceName(service.service_name));
+      });
+    });
+    const confirmBookingFromSlotScreen = async () => {
+      if (!selectedAppointmentSlot || isAppointmentSlotPast(visitDate, selectedAppointmentSlot) || isSubmitting || completedVisitResult) return;
+      const result = await handleFinalSubmit();
+      if (result && onComplete) onComplete(result?.visit?.visit_id || result?.visit_id);
+    };
+    return (
+      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 1000, margin: '0 auto 30px', padding: '0 12px 30px', boxSizing: 'border-box' }}>
+        <button type="button" onClick={() => setStep(appointmentMode ? 'appointment-client' : 'selected-services')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 20, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />{appointmentMode ? 'Back to client details' : 'Back to cart'}</button>
+        <h1 style={{ margin: '0 0 7px', color: '#302721', fontSize: 25 }}>Choose an appointment slot</h1>
+        <p style={{ margin: '0 0 20px', color: '#81766B', fontSize: 13 }}>Select the date, duration, and start time after reviewing the client’s bill.</p>
+        {submitError && <div role="alert" style={{ marginBottom: 16, padding: '11px 14px', border: '1px solid #FECACA', borderRadius: 9, background: '#FEF2F2', color: '#9B1C1C', fontSize: 13 }}>{submitError}</div>}
+
+        <section aria-label="Appointment bill summary" style={{ marginBottom: 18, padding: '17px 20px', border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFFFF' }}>
+          <div style={{ marginBottom: 12, color: '#9E7437', fontSize: 13, fontWeight: 750 }}>Booking summary</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingBottom: 9, borderBottom: '1px solid #EEE6DC', color: '#4B4037', fontSize: 13 }}>
+              <span><strong>Client:</strong> {appointmentClientName || 'Client'}</span>
+              <span style={{ padding: '4px 9px', borderRadius: 999, background: membershipIsActive ? '#ECFDF3' : '#F5F0E8', color: membershipIsActive ? '#167342' : '#76685B', fontSize: 11, fontWeight: 700 }}>
+                {clientType === 'regular'
+                  ? (membershipIsActive ? `${clientMembershipTier} · Active membership` : (hasClientMembership ? `${clientMembershipTier} · ${membershipExpired ? 'Expired' : (selectedRegularClient?.membership_status || 'Inactive')}` : 'Existing client · no active membership'))
+                  : 'New client'}
+              </span>
+            </div>
+            {activeMembership?.plan && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>Membership purchase · {activeMembership.plan.name}</span><strong>{formatCurrency(membershipAmount)}</strong></div>}
+            {selectedServices.map(service => <div key={service.temp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>{service.service_name}</span><strong>{formatCurrency(service.is_privilege ? 0 : service.price)}</strong></div>)}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 13, paddingTop: 12, borderTop: '1px solid #EEE6DC', color: '#302721', fontSize: 15, fontWeight: 800 }}><span>NET PAYABLE</span><span>{formatCurrency(netPayable)}</span></div>
+        </section>
+
+        <section aria-label="Appointment date and time" style={{ padding: 20, border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginBottom: 16 }}>
+            <div><h2 style={{ margin: 0, color: '#292524', fontSize: 17 }}>Available slots</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 12 }}>{appointmentDayHours?.open ? `Branch hours: ${appointmentDayHours.start}–${appointmentDayHours.end}. Green slots are open; amber slots have another service booked; grey slots have passed.` : 'This branch is closed on the selected day.'}</p></div>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#57534E', fontSize: 12, fontWeight: 700 }}>Appointment date<input type="date" min={getBranchDateTime().date} value={visitDate} onChange={event => { setVisitDate(event.target.value); setSelectedAppointmentSlot(''); }} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }} /></label>
+              <button type="button" aria-expanded={showAppointmentDurationControl} onClick={() => setShowAppointmentDurationControl(value => !value)} style={{ padding: '8px 11px', border: '1px solid #D8BD91', borderRadius: 8, color: '#8C6228', background: showAppointmentDurationControl ? '#FAF6EE' : '#FFFFFF', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{showAppointmentDurationControl ? 'Done' : `Customize duration · ${formatAppointmentDuration(appointmentDurationMinutes)}`}</button>
+              {showAppointmentDurationControl && <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#57534E', fontSize: 12, fontWeight: 700 }}>Duration
+                <select aria-label="Appointment duration" value={appointmentDurationMinutes} onChange={event => { setAppointmentDurationMinutes(Number(event.target.value)); setSelectedAppointmentSlot(''); }} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF', color: '#292524' }}>
+                  {Array.from({ length: 16 }, (_, index) => (index + 1) * 30).map(minutes => <option key={minutes} value={minutes}>{formatAppointmentDuration(minutes)}</option>)}
+                </select>
+              </label>}
+            </div>
+          </div>
+          {appointmentSlotsLoading ? <div style={{ padding: '20px 8px', color: '#78716C', fontSize: 13 }}>Checking branch availability…</div> : !appointmentDayOpen ? <div style={{ padding: 14, color: '#78716C', background: '#F5F5F4', borderRadius: 8, fontSize: 13 }}>No appointments can be booked for this branch on this day.</div> : appointmentSlots.length === 0 ? <div style={{ padding: 14, color: '#78716C', background: '#FAF8F5', borderRadius: 8, fontSize: 13 }}>No appointment slots are available for this date.</div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
+            {appointmentSlots.map(item => {
+              const isBooked = item.booked?.length > 0;
+              const isPast = isAppointmentSlotPast(visitDate, item.slot);
+              const sameServiceBooked = isBooked && hasSameServiceBooking(item);
+              const isUnavailable = isPast;
+              const isSelected = selectedAppointmentSlot === item.slot && !isPast;
+              return <button key={item.slot} type="button" disabled={isUnavailable} onClick={() => {
+                if (isBooked) setSlotConflictDialog({ slot: item.slot, bookings: item.booked, sameService: sameServiceBooked });
+                else setSelectedAppointmentSlot(item.slot);
+              }} title={isBooked ? (sameServiceBooked ? 'This service is already booked at this time' : 'Another service is booked at this time; view details') : isPast ? 'This time has passed' : `Select ${item.slot}`} style={{ minHeight: 56, padding: '8px 9px', borderRadius: 9, border: isSelected ? '2px solid #B88B4A' : sameServiceBooked ? '1px solid #F0A39C' : isBooked ? '1px solid #E7C58F' : isUnavailable ? '1px solid #E7E5E4' : '1px solid #A7D7B5', background: isSelected ? '#B88B4A' : sameServiceBooked ? '#FFF1F0' : isBooked ? '#FFF8EA' : isUnavailable ? '#F5F5F4' : '#F0FDF4', color: isSelected ? '#FFFFFF' : sameServiceBooked ? '#A33D35' : isBooked ? '#815B1B' : isUnavailable ? '#A8A29E' : '#166534', cursor: isUnavailable ? 'not-allowed' : 'pointer', textAlign: 'center' }}><strong style={{ display: 'block', fontSize: 12 }}>{item.slot}</strong><span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700 }}>{sameServiceBooked ? 'Same service booked' : isBooked ? 'Another service booked' : isPast ? 'Passed' : isSelected ? 'Selected' : 'Open'}</span></button>;
+            })}
+          </div>}
+          {selectedAppointmentSlot && <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 16, padding: '12px 14px', border: '1px solid #CFE6D5', borderRadius: 10, background: '#F2FBF4', color: '#315D3B', fontSize: 13 }}>
+            <div><strong>Selected appointment</strong><div style={{ marginTop: 4 }}>Client: {appointmentClientName || 'Client'}</div><div style={{ marginTop: 4 }}>{new Date(`${visitDate}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · {selectedAppointmentSlot} · {formatAppointmentDuration(appointmentDurationMinutes)}</div><div style={{ marginTop: 4 }}>Services: {[...(activeMembership?.plan ? [`Membership — ${activeMembership.plan.name}`] : []), ...selectedServices.map(service => service.service_name)].join(', ') || 'None selected'}</div></div>
+            <strong>{formatCurrency(netPayable)}</strong>
+          </div>}
+        </section>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+          <button type="button" disabled={!selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting || Boolean(completedVisitResult)} onClick={confirmBookingFromSlotScreen} style={{ padding: '12px 28px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)', fontSize: 13, fontWeight: 750, letterSpacing: '.04em', cursor: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? 'not-allowed' : 'pointer', opacity: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? .55 : 1, boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)' }}>{isSubmitting ? 'CONFIRMING…' : 'CONFIRM & RETURN TO APPOINTMENTS'}</button>
+        </div>
+        {slotConflictDialog && <div role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSlotConflictDialog(null); }} style={{ position: 'fixed', inset: 0, zIndex: 1700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(35, 28, 22, .5)' }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="appointment-slot-conflict-title" style={{ width: 'min(480px, 100%)', padding: 22, border: `1px solid ${slotConflictDialog.sameService ? '#F0B8B3' : '#E7C58F'}`, borderRadius: 15, background: '#FFFFFF', boxShadow: '0 22px 65px rgba(0,0,0,.25)' }}>
+            <h2 id="appointment-slot-conflict-title" style={{ margin: '0 0 8px', color: '#302721', fontSize: 18 }}>{slotConflictDialog.sameService ? 'This service is already booked' : 'Another service is booked at this time'}</h2>
+            <p style={{ margin: '0 0 14px', color: '#70645A', fontSize: 13, lineHeight: 1.5 }}>{slotConflictDialog.sameService ? `${slotConflictDialog.slot} already has the same service booked. Select another time or remove the overlapping service.` : `${slotConflictDialog.slot} has another appointment. You can continue with this time because your selected service is different.`}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
+              {slotConflictDialog.bookings.map(booking => <div key={booking.visit_id} style={{ padding: '10px 12px', borderRadius: 9, background: '#FAF7F2', color: '#4B4037', fontSize: 12 }}><strong>{booking.client_name || 'Client'}</strong><div style={{ marginTop: 3, color: '#81766B' }}>{booking.services || 'Service not specified'} · {booking.slot || slotConflictDialog.slot}</div></div>)}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
+              <button type="button" onClick={() => setSlotConflictDialog(null)} style={{ padding: '9px 14px', border: '1px solid #E3D2BE', borderRadius: 8, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{slotConflictDialog.sameService ? 'Choose another slot' : 'Cancel'}</button>
+              {!slotConflictDialog.sameService && <button type="button" onClick={() => { setSelectedAppointmentSlot(slotConflictDialog.slot); setSlotConflictDialog(null); }} style={{ padding: '9px 14px', border: 'none', borderRadius: 8, background: '#A9793C', color: '#FFFFFF', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Continue with this slot</button>}
+            </div>
+          </div>
+        </div>}
       </div>
     );
   }

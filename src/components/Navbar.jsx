@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, CalendarDays, Check, Building2, ArrowLeft } from 'lucide-react';
+import { Sparkles, User, LogOut, LayoutDashboard, Users, Scissors, Award, BarChart3, ChevronDown, Menu, Phone, Mail, ShieldCheck, Calendar, CalendarDays, Check, Building2, ArrowLeft, Palette } from 'lucide-react';
 import { getStoredToken, getStoredUser, setStoredToken, setStoredUser, getStoredLocation, setStoredLocation, formatCurrency, formatDate, apiRequest } from '../utils/api';
 import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
-export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, branding }) {
+export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, onNavigateDashboardSection, branding }) {
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [showDashboardConfirm, setShowDashboardConfirm] = useState(false);
   const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
@@ -14,6 +14,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   const [selectedBenefit, setSelectedBenefit] = useState(null);
   const [cartPrivilegeIds, setCartPrivilegeIds] = useState([]);
   const [livePrivileges, setLivePrivileges] = useState(null);
+  const [activeClientAppointment, setActiveClientAppointment] = useState(null);
   const switchMenuRef = useRef(null);
   const clientMenuRef = useRef(null);
   const membershipPrivilegeRequestRef = useRef(0);
@@ -65,6 +66,25 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
       setLivePrivileges(null);
     }
   }, [activeVisitClient?.client_id, activeVisitClient?.membershipTier, activeVisitClient?.membership_tier]);
+
+  useEffect(() => {
+    const clientId = activeVisitClient?.client_id;
+    if (!clientId || currentUser?.role !== 'visitor') {
+      setActiveClientAppointment(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setActiveClientAppointment(null);
+    apiRequest(`/appointments/client/${clientId}`)
+      .then(result => { if (!cancelled) setActiveClientAppointment(result.appointment || null); })
+      .catch(error => {
+        if (!cancelled) {
+          setActiveClientAppointment(null);
+          console.error('Could not load client appointment status:', error);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [activeVisitClient?.client_id, currentUser?.role]);
 
   useEffect(() => {
     const handleVisitUpdate = () => {
@@ -1094,6 +1114,24 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     );
                   })()}
 
+                  {activeClientAppointment && (
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginBottom: 14, padding: '10px 12px', border: '1px solid #E4C995', borderRadius: 9, background: '#FBF7EF', color: '#5D4525' }}>
+                      <CalendarDays size={16} color="#A9793C" style={{ flexShrink: 0, marginTop: 1 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                          <strong style={{ fontSize: 12 }}>Appointment booked</strong>
+                          <span style={{ padding: '2px 6px', borderRadius: 999, background: '#F1E6D3', color: '#8C6228', fontSize: 9, fontWeight: 800, letterSpacing: '.05em' }}>APPOINTMENT</span>
+                        </div>
+                        <div style={{ marginTop: 3, color: '#81766B', fontSize: 11 }}>
+                          {new Date(`${String(activeClientAppointment.visit_date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          {activeClientAppointment.service_time ? ` · ${activeClientAppointment.service_time}` : ''}
+                          {activeClientAppointment.appointment_duration_mins ? ` · ${activeClientAppointment.appointment_duration_mins} min` : ''}
+                        </div>
+                        {activeClientAppointment.services && <div style={{ marginTop: 3, color: '#5D5147', fontSize: 11, lineHeight: 1.4 }}>{activeClientAppointment.services}</div>}
+                      </div>
+                    </div>
+                  )}
+
                   {/* DIVIDER */}
                   <div style={{ height: '1px', background: 'var(--border-color)', marginBottom: '14px' }} />
 
@@ -1213,7 +1251,18 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
           ) : (
             /* Visitor Desk or Dashboard User Profile pill (Image 3) */
             <div ref={switchMenuRef} style={{ position: 'relative' }}>
-              <div 
+              {isMasterAdmin || ['new-visit', 'appointments'].includes(activeTab) ? (
+                <button
+                  type="button"
+                  onClick={() => setShowSwitchMenu(value => !value)}
+                  aria-label="Open account menu"
+                  aria-expanded={showSwitchMenu}
+                  title="Menu"
+                  style={{ width: 40, height: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #D8BD91', borderRadius: 8, color: '#A8793D', background: showSwitchMenu ? '#FAF6EE' : '#FFFFFF', cursor: 'pointer' }}
+                >
+                  <Menu size={20} strokeWidth={1.8} />
+                </button>
+              ) : <div
                 onClick={() => setShowSwitchMenu(!showSwitchMenu)}
                 className="navbar-user-pill"
                 style={{
@@ -1238,7 +1287,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   </div>
                 </div>
                 <ChevronDown size={14} color="var(--text-muted)" className="navbar-user-chevron" />
-              </div>
+              </div>}
 
               {/* Quick Switch Role Dropdown */}
               {showSwitchMenu && (
@@ -1255,14 +1304,38 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                   padding: '10px',
                   zIndex: 100
                 }}>
-                  <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-light)', padding: '6px 8px' }}>
+                  {activeTab === 'appointments' ? <div style={{ padding: '6px 8px 10px', borderBottom: '1px solid var(--border-color)', marginBottom: 6 }}>
+                    <div style={{ color: '#4B4038', fontSize: 12, fontWeight: 750 }}>{activeLocation?.name || 'Branch'}</div>
+                    {activeLocation?.code && <span style={{ display: 'inline-block', marginTop: 7, padding: '3px 8px', border: '1px solid #DAC493', borderRadius: 999, color: '#9F7335', fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}>{activeLocation.code}</span>}
+                  </div> : <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-light)', padding: '6px 8px' }}>
                     {isVisitor
                       ? `Active Kiosk (${activeLocation ? (activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name) : 'Visitor Desk'})`
                       : (activeLocation ? `Active Desk (${activeLocation.name?.includes('—') ? activeLocation.name.split('—')[1].trim() : activeLocation.name})` : 'Switch Active Role')
                     }
-                  </div>
+                  </div>}
+
+                  {activeTab === 'appointments' && <div style={{ display: 'flex', flexDirection: 'column', gap: 2, margin: '4px 0 8px' }}>
+                    {[
+                      { id: 'appointments', label: 'Appointments', icon: CalendarDays, show: canAccessModule(currentUser, 'visits') || canAccessModule(currentUser, 'visitor_intake') },
+                      { id: 'visits', label: 'Dashboard', icon: LayoutDashboard, show: canAccessModule(currentUser, 'dashboard') || canAccessModule(currentUser, 'visits') },
+                      { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) },
+                      { id: 'team-master', label: 'Master', icon: ShieldCheck, show: isAdmin && canAccessModule(currentUser, 'team') },
+                      { id: 'clients', label: 'Clients', icon: Users, show: canAccessModule(currentUser, 'clients') },
+                      { id: 'reports', label: 'Reports', icon: BarChart3, show: canAccessModule(currentUser, 'reports') }
+                    ].filter(item => item.show).map(item => {
+                      const Icon = item.icon;
+                      const active = item.id === 'appointments';
+                      return <button key={item.id} type="button" onClick={() => {
+                        setShowSwitchMenu(false);
+                        if (item.id === 'appointments') setActiveTab('appointments');
+                        else onNavigateDashboardSection?.(item.id);
+                      }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', border: 0, borderRadius: 8, textAlign: 'left', color: active ? '#A8793D' : '#4B4038', background: active ? '#F6F0E8' : 'transparent', fontSize: 13, fontWeight: active ? 700 : 600, cursor: 'pointer' }}>
+                        <Icon size={15} color={active ? '#A8793D' : '#8F7D6A'} />{item.label}
+                      </button>;
+                    })}
+                  </div>}
                   
-                  {isMasterAdmin && (
+                  {isMasterAdmin && activeTab !== 'appointments' && (
                     <button
                       onClick={() => handleQuickSwitchRole('master_admin')}
                       style={{
@@ -1282,16 +1355,36 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     </button>
                   )}
 
-                  <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+                  {activeTab !== 'appointments' && !isVisitor && <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />}
 
-                  {isVisitor && (
-                    <button
-                      type="button"
-                      onClick={() => { setActiveTab('appointments'); setShowSwitchMenu(false); }}
-                      style={{ width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: activeTab === 'appointments' ? '#9F7335' : 'var(--text-main)', background: activeTab === 'appointments' ? 'var(--primary-subtle)' : 'transparent', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', cursor: 'pointer', border: 0 }}
-                    >
-                      <CalendarDays size={15} /> Appointments
-                    </button>
+                  {isAdmin && activeLocation?.location_id && (
+                    <>
+                      {activeTab === 'appointments' && <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSwitchMenu(false);
+                          window.dispatchEvent(new Event('open_branding_customizer'));
+                        }}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px',
+                          borderRadius: 'var(--radius-sm)',
+                          fontSize: '13px',
+                          color: '#9F7335',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Palette size={15} />
+                        Customize
+                      </button>
+                      <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+                    </>
                   )}
 
                   <button

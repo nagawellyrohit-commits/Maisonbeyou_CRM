@@ -34,7 +34,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard, branding 
   }, [query, statusFilter]);
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -178,7 +178,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard, branding 
       </div>
 
       {/* Clients Table Card */}
-      <div className="card client-directory-table-card" style={{ overflow: 'hidden' }}>
+      <div className="card client-directory-table-card" style={{ overflow: 'hidden', marginTop: '16px' }}>
         {loading ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
             Loading clients...
