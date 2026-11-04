@@ -185,6 +185,9 @@ const formatAppointmentDuration = minutes => {
   return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
 };
 
+const formatAppointmentMinuteTime = minutes => new Date(Date.UTC(2000, 0, 1, Math.floor(minutes / 60), minutes % 60))
+  .toLocaleTimeString('en-IN', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true });
+
 export default function NewVisitWizard({ preSelectedClient, initialType, appointmentMode = false, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation, branding, onPreviewBranding, onSaveBranding }) {
   // Wizard Steps:
   // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'appointment-slot' (appointments) -> 'billing-payment' -> 'confirmation'
@@ -341,6 +344,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   });
   const [appointmentSlots, setAppointmentSlots] = useState([]);
   const [appointmentSlotsLoading, setAppointmentSlotsLoading] = useState(false);
+  const [appointmentSlotsError, setAppointmentSlotsError] = useState('');
   const [appointmentDayOpen, setAppointmentDayOpen] = useState(true);
   const [appointmentDayHours, setAppointmentDayHours] = useState(null);
   const [selectedAppointmentSlot, setSelectedAppointmentSlot] = useState('');
@@ -366,10 +370,17 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
     if (!appointmentMode) return;
     let cancelled = false;
     setAppointmentSlotsLoading(true);
+    setAppointmentSlotsError('');
     setSelectedAppointmentSlot('');
     apiRequest(`/appointments/slots?date=${encodeURIComponent(visitDate)}&duration=${appointmentDurationMinutes}`)
-      .then(result => { if (!cancelled) { setAppointmentSlots(result.slots || []); setAppointmentDayOpen(Boolean(result.is_open)); setAppointmentDayHours(result.hours || null); } })
-      .catch(error => { if (!cancelled) { setAppointmentSlots([]); setAppointmentDayOpen(false); setAppointmentDayHours(null); setSubmitError(error.message || 'Could not load appointment slots.'); } })
+      .then(result => {
+        if (cancelled) return;
+        if (typeof result.is_open !== 'boolean' || !result.hours || !Array.isArray(result.slots)) throw new Error('The availability response is incomplete. Restart the server and try again.');
+        setAppointmentSlots(result.slots);
+        setAppointmentDayOpen(result.is_open);
+        setAppointmentDayHours(result.hours);
+      })
+      .catch(error => { if (!cancelled) { setAppointmentSlots([]); setAppointmentDayOpen(false); setAppointmentDayHours(null); setAppointmentSlotsError(error.message || 'Could not load appointment slots.'); } })
       .finally(() => { if (!cancelled) setAppointmentSlotsLoading(false); });
     return () => { cancelled = true; };
   }, [appointmentMode, visitDate, selectedLocation?.location_id, appointmentDurationMinutes]);
@@ -453,6 +464,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   // Catalog State
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [appointmentServiceCategoryId, setAppointmentServiceCategoryId] = useState(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [featuredService, setFeaturedService] = useState(null);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
@@ -1457,15 +1469,16 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   );
 
   // Expiry check:
+  const membershipStatus = String(clientData?.membership_status || '').trim().toLowerCase();
   const isTierExpired = Boolean(
-    clientData?.membership_status === 'expired' ||
+    membershipStatus === 'expired' ||
     (clientData?.membership_expires_at && new Date(clientData.membership_expires_at).setHours(23, 59, 59, 999) < Date.now())
   );
 
   const hasValidMembership = Boolean(
     isExistingTier &&
     !isTierExpired &&
-    clientData?.membership_status !== 'inactive'
+    membershipStatus !== 'inactive'
   );
 
   const rawClientBal = clientData?.membership_balance !== undefined && clientData?.membership_balance !== null
@@ -2648,6 +2661,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   // ==========================================
   // STEP 1: CLIENT TYPE
   // ==========================================
+  const renderAppointmentCustomizer = () => ['admin', 'master_admin'].includes(currentUser?.role) && selectedLocation?.location_id
+    ? <BrandingCustomizer location={selectedLocation} initialBranding={branding} section="appointments" onPreview={onPreviewBranding} onSaved={onSaveBranding} />
+    : null;
+
   if (step === 'appointment-client' && appointmentMode) {
     const continueToAppointmentSlots = async event => {
       event.preventDefault();
@@ -2676,7 +2693,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
           setClientType('new');
           setSelectedRegularClient(null);
         }
-        setStep('appointment-slot');
+        setStep('appointment-summary');
       } catch (error) {
         setSubmitError(error.message || 'Could not verify the client phone number.');
       } finally {
@@ -2684,42 +2701,110 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       }
     };
 
-    const serviceOptions = categories.flatMap(category => (category.services || []).map(service => ({
-      ...service,
-      category_name: category.category_name || category.name || 'Services'
-    })));
-    const selectedServiceId = selectedServices[0]?.service_id ? String(selectedServices[0].service_id) : '';
+    const serviceOptions = categories.flatMap(category => (category.services || []).map(service => ({ ...service, category_id: category.category_id })));
 
     return (
-      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 760, margin: '32px auto', padding: '0 16px', boxSizing: 'border-box' }}>
-        <button type="button" onClick={onCancel} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 18, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />Back to appointments</button>
-        <form onSubmit={continueToAppointmentSlots} style={{ padding: '26px clamp(18px, 4vw, 32px)', border: '1px solid #E8D7C0', borderRadius: 16, background: '#FFFFFF', boxShadow: '0 12px 32px rgba(77, 54, 29, .06)' }}>
-          <h1 style={{ margin: '0 0 6px', color: '#302721', fontSize: 25 }}>Book an appointment</h1>
-          <p style={{ margin: '0 0 22px', color: '#81766B', fontSize: 13 }}>Enter the client’s details. You can add a service now or leave it blank.</p>
+      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 1000, margin: '0 auto 30px', padding: '34px 18px 54px', boxSizing: 'border-box', background: 'linear-gradient(180deg, #F7F2E9 0%, #F2EADF 100%)', borderRadius: 20 }}>
+        <button type="button" onClick={onCancel} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, margin: '0 0 24px 10px', padding: '10px 17px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />Back to appointments</button>
+        <form onSubmit={continueToAppointmentSlots} style={{ padding: '38px clamp(24px, 5vw, 52px)', border: '1px solid #E8D7C0', borderRadius: 22, background: '#FFFFFF', boxShadow: '0 18px 45px rgba(77, 54, 29, .09)' }}>
+          <h1 style={{ margin: '0 0 32px', color: '#302721', fontSize: 30, letterSpacing: '.015em' }}>Book an appointment</h1>
           {submitError && <div role="alert" style={{ marginBottom: 16, padding: '10px 12px', border: '1px solid #FECACA', borderRadius: 9, background: '#FEF2F2', color: '#9B1C1C', fontSize: 13 }}>{submitError}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 14 }}>
-            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Client name
-              <input autoFocus value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Enter full name" style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', columnGap: 18, rowGap: 24 }}>
+            <label style={{ display: 'grid', gap: 10, color: '#57534E', fontSize: 13, fontWeight: 700 }}><span>Client name <span style={{ color: '#B42318' }}>*</span></span>
+              <input required autoFocus value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Enter full name" style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
             </label>
-            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Phone number
-              <input type="tel" inputMode="numeric" value={clientPhone} onChange={event => setClientPhone(event.target.value.replace(/[^\d+\s()-]/g, ''))} placeholder="10-digit phone number" style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
+            <label style={{ display: 'grid', gap: 10, color: '#57534E', fontSize: 13, fontWeight: 700 }}><span>Phone number <span style={{ color: '#B42318' }}>*</span></span>
+              <input required type="tel" inputMode="numeric" value={clientPhone} onChange={event => setClientPhone(event.target.value.replace(/[^\d+\s()-]/g, ''))} placeholder="10-digit phone number" style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
             </label>
-            <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 13, fontWeight: 700, gridColumn: '1 / -1' }}>Service <span style={{ color: '#81766B', fontWeight: 400 }}>(optional)</span>
-              <select value={selectedServiceId} onChange={event => {
-                const service = serviceOptions.find(item => String(item.service_id) === event.target.value);
-                setSelectedServices(service ? [{ temp_id: `appointment-${service.service_id}`, service_id: service.service_id, service_name: service.service_name, price: Number(service.price) || 0, list_price: Number(service.list_price ?? service.price) || 0 }] : []);
-              }} style={{ width: '100%', boxSizing: 'border-box', padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF', fontSize: 14 }}>
-                <option value="">No service selected</option>
-                {categories.map(category => <optgroup key={category.category_id} label={category.category_name || category.name || 'Services'}>
-                  {(category.services || []).map(service => <option key={service.service_id} value={service.service_id}>{service.service_name} · {formatCurrency(Number(service.price) || 0)}</option>)}
-                </optgroup>)}
-              </select>
-            </label>
+            <fieldset style={{ display: 'grid', gap: 16, gridColumn: '1 / -1', margin: '2px 0 0', padding: 0, border: 0 }}>
+              <legend style={{ marginBottom: 2, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Services <span style={{ color: '#81766B', fontWeight: 400 }}>(optional)</span></legend>
+              <div style={{ display: 'grid', gap: 16, padding: '20px 18px', border: '1px solid #E8D7C0', borderRadius: 15, background: '#FFFEFC', boxShadow: '0 5px 16px rgba(77, 54, 29, .035)' }}>
+                {appointmentServiceCategoryId == null ? <>
+                  <div style={{ color: '#81766B', fontSize: 13, lineHeight: 1.55 }}>Choose a category to browse its services. You can leave this section empty.</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${categories.length <= 3 ? Math.max(1, categories.length) : categories.length <= 4 ? 2 : Math.min(4, Math.ceil(categories.length / 2))}, minmax(0, 1fr))`, gap: 12 }}>
+                    {categories.map(category => <button key={category.category_id} type="button" onClick={() => setAppointmentServiceCategoryId(category.category_id)} style={{ minHeight: 76, padding: '16px 15px', textAlign: 'left', border: '1px solid #E9DCCB', borderRadius: 11, color: '#4B4037', background: '#FFFFFF', fontWeight: 700, lineHeight: 1.45, cursor: 'pointer' }}>{category.category_name || category.name || 'Services'}<span style={{ display: 'block', marginTop: 6, color: '#918477', fontSize: 12, fontWeight: 400 }}>{(category.services || []).filter(service => service.active !== 0).length} services</span></button>)}
+                  </div>
+                </> : (() => {
+                  const category = categories.find(item => String(item.category_id) === String(appointmentServiceCategoryId));
+                  const categoryServices = (category?.services || []).filter(service => service.active !== 0);
+                  return <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                      <div><div style={{ color: '#302721', fontSize: 16, fontWeight: 700 }}>{category?.category_name || category?.name || 'Services'}</div><div style={{ marginTop: 4, color: '#81766B', fontSize: 12 }}>Select one or more services.</div></div>
+                      <button type="button" onClick={() => setAppointmentServiceCategoryId(null)} style={{ padding: '8px 12px', border: '1px solid #E9DCCB', borderRadius: 9, background: '#FFFFFF', color: '#6B4C2A', fontSize: 12, fontWeight: 650, cursor: 'pointer' }}>← Categories</button>
+                    </div>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {categoryServices.map(service => {
+                        const selected = selectedServices.some(item => String(item.service_id) === String(service.service_id));
+                        const duration = Number(service.duration_mins || service.duration_minutes || service.duration) || 30;
+                        return <label key={service.service_id} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, padding: '12px 14px', border: `1px solid ${selected ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, color: '#4B4037', background: selected ? '#FBF6EF' : '#FFFFFF', cursor: 'pointer' }}>
+                          <input type="checkbox" checked={selected} onChange={() => {
+                            const next = selected
+                              ? selectedServices.filter(item => String(item.service_id) !== String(service.service_id))
+                              : [...selectedServices, { temp_id: `appointment-${service.service_id}`, service_id: service.service_id, service_name: service.service_name, price: Number(service.price) || 0, list_price: Number(service.list_price ?? service.price) || 0 }];
+                            setSelectedServices(next);
+                            setAppointmentDurationMinutes(next.reduce((sum, item) => {
+                              const selectedService = serviceOptions.find(option => String(option.service_id) === String(item.service_id));
+                              return sum + (Number(selectedService?.duration_mins || selectedService?.duration_minutes || selectedService?.duration) || 30);
+                            }, 0) || 30);
+                            setSelectedAppointmentSlot('');
+                          }} style={{ width: 16, height: 16, accentColor: '#A9793C', flex: '0 0 auto' }} />
+                          <span style={{ flex: 1, lineHeight: 1.45 }}>{service.service_name}<span style={{ display: 'block', marginTop: 3, color: '#918477', fontSize: 11 }}>{formatAppointmentDuration(duration)}</span></span>
+                          <span style={{ color: '#6B4C2A', fontSize: 13, fontWeight: 650, whiteSpace: 'nowrap' }}>{formatCurrency(Number(service.price) || 0)}</span>
+                        </label>;
+                      })}
+                    </div>
+                    <button type="button" onClick={() => setAppointmentServiceCategoryId(null)} style={{ justifySelf: 'start', padding: '10px 15px', border: '1px solid #D8BD91', borderRadius: 999, background: '#FFFFFF', color: '#8C6228', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>+ ADD MORE SERVICES</button>
+                  </>;
+                })()}
+              </div>
+              {selectedServices.length > 0 && <div style={{ display: 'grid', gap: 11, marginTop: 4, padding: '14px 2px 4px', borderTop: '1px solid #EEE6DC', color: '#81766B', fontSize: 13 }}>{selectedServices.map(service => <div key={service.temp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><span>{service.service_name}</span><strong>{formatCurrency(Number(service.price) || 0)}</strong></div>)}<strong style={{ marginTop: 3, color: '#57534E' }}>Total: {formatCurrency(selectedServices.reduce((sum, service) => sum + (Number(service.price) || 0), 0))}</strong></div>}
+            </fieldset>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 22 }}>
-            <button type="submit" disabled={isSubmitting} style={{ padding: '11px 22px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: '#A9793C', fontSize: 13, fontWeight: 750, cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? .7 : 1 }}>{isSubmitting ? 'CHECKING…' : 'CONTINUE TO DATE & TIME'}</button>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 38, paddingTop: 20, borderTop: '1px solid #F0E8DE' }}>
+            <button type="submit" disabled={isSubmitting} style={{ padding: '14px 28px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)', fontSize: 13, fontWeight: 750, letterSpacing: '.045em', cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? .7 : 1, boxShadow: '0 7px 18px rgba(181, 132, 82, .25)' }}>{isSubmitting ? 'CHECKING…' : 'CONTINUE TO BOOKING SUMMARY'}</button>
           </div>
         </form>
+        {renderAppointmentCustomizer()}
+      </div>
+    );
+  }
+
+  if (step === 'appointment-summary' && appointmentMode) {
+    const appointmentClientName = clientType === 'new'
+      ? `${clientName || ''} ${clientSurname || ''}`.trim()
+      : `${selectedRegularClient?.name || ''} ${selectedRegularClient?.surname || ''}`.trim();
+    const clientMembershipTier = String(selectedRegularClient?.membership_tier || '').trim();
+    const hasClientMembership = Boolean(clientMembershipTier && !['none', 'non-member', 'null'].includes(clientMembershipTier.toLowerCase()));
+    const membershipExpired = Boolean(selectedRegularClient?.membership_expires_at && String(selectedRegularClient.membership_expires_at).slice(0, 10) < getBranchDateTime().date);
+    const membershipIsActive = hasClientMembership && String(selectedRegularClient?.membership_status || '').toLowerCase() === 'active' && !membershipExpired;
+    return (
+      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 1000, margin: '0 auto 30px', padding: '34px 18px 54px', boxSizing: 'border-box', background: branding?.appointment_background_color || 'linear-gradient(180deg, #F7F2E9 0%, #F2EADF 100%)', color: branding?.appointment_text_color || '#4B4037', borderRadius: 20, fontFamily: branding?.supporting_font_family || 'inherit' }}>
+        <button type="button" onClick={() => setStep('appointment-client')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 20, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />Back to client and services</button>
+        <h1 style={{ margin: '0 0 12px', color: branding?.appointment_heading_color || '#302721', fontSize: 30, letterSpacing: '.015em', fontFamily: branding?.heading_font_family || 'inherit' }}>{branding?.appointment_summary_heading || 'Review booking summary'}</h1>
+        <p style={{ margin: '0 0 20px', color: '#81766B', fontSize: 13 }}>Review the services, membership discount, and total before choosing a slot.</p>
+        <section aria-label="Appointment bill summary" style={{ marginBottom: 28, padding: '26px 28px', border: `${Number(branding?.appointment_card_border_width ?? 1)}px solid ${branding?.appointment_border_color || '#E8D7C0'}`, borderRadius: Number(branding?.appointment_card_radius ?? 22), background: branding?.appointment_card_color || '#FFFFFF', boxShadow: '0 12px 32px rgba(77, 54, 29, .075)' }}>
+          <div style={{ marginBottom: 12, color: '#9E7437', fontSize: 13, fontWeight: 750 }}>Booking summary</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingBottom: 9, borderBottom: '1px solid #EEE6DC', color: '#4B4037', fontSize: 13 }}>
+              <span><strong>Client:</strong> {appointmentClientName || 'Client'}</span>
+              <span style={{ padding: '4px 9px', borderRadius: 999, background: membershipIsActive ? '#ECFDF3' : '#F5F0E8', color: membershipIsActive ? '#167342' : '#76685B', fontSize: 11, fontWeight: 700 }}>
+                {clientType === 'regular' ? (membershipIsActive ? `${clientMembershipTier} · Active membership` : (hasClientMembership ? `${clientMembershipTier} · ${membershipExpired ? 'Expired' : (selectedRegularClient?.membership_status || 'Inactive')}` : 'Existing client · no active membership')) : 'New client'}
+              </span>
+            </div>
+            {activeMembership?.plan && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>Membership purchase · {activeMembership.plan.name}</span><strong>{formatCurrency(membershipAmount)}</strong></div>}
+            {selectedServices.map(service => <div key={service.temp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>{service.service_name}</span><strong>{formatCurrency(service.is_privilege ? 0 : service.price)}</strong></div>)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingTop: 8, borderTop: '1px solid #EEE6DC', color: '#57534E', fontSize: 13 }}><span>Subtotal</span><span>{formatCurrency(subtotal)}</span></div>
+            {membershipDiscountAmount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#167342', fontSize: 13 }}><span>{membershipDiscountLabel || 'Membership discount'}</span><span>−{formatCurrency(membershipDiscountAmount)}</span></div>}
+            {promoDiscountAmount > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#167342', fontSize: 13 }}><span>Additional discount</span><span>−{formatCurrency(promoDiscountAmount)}</span></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#57534E', fontSize: 13 }}><span>Taxable amount</span><span>{formatCurrency(taxableAmount)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#57534E', fontSize: 13 }}><span>CGST (9%)</span><span>{formatCurrency(cgstAmount)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#57534E', fontSize: 13 }}><span>SGST (9%)</span><span>{formatCurrency(scstAmount)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#81766B', fontSize: 12 }}><span>Round off</span><span>{roundOff >= 0 ? '+' : '−'}{formatCurrency(Math.abs(roundOff))}</span></div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 13, paddingTop: 12, borderTop: '1px solid #EEE6DC', color: '#302721', fontSize: 15, fontWeight: 800 }}><span>NET PAYABLE</span><span>{formatCurrency(netPayable)}</span></div>
+        </section>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" onClick={() => setStep('appointment-slot')} style={{ padding: '12px 25px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: branding?.appointment_primary_color || '#A9793C', fontSize: 13, fontWeight: 750, letterSpacing: '.04em', cursor: 'pointer', boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)' }}>{branding?.appointment_continue_label || 'CONTINUE TO BOOK SLOTS'}</button></div>
+        {renderAppointmentCustomizer()}
       </div>
     );
   }
@@ -3812,6 +3897,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
             </div>
           </div>
         )}
+        {['admin', 'master_admin'].includes(currentUser?.role) && selectedLocation?.location_id && <BrandingCustomizer location={selectedLocation} initialBranding={branding} section="visitor_home" onPreview={onPreviewBranding} onSaved={onSaveBranding} />}
       </div>
     );
   }
@@ -7280,55 +7366,30 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
   if (step === 'appointment-slot' && appointmentMode) {
     const isSelectedSlotPast = selectedAppointmentSlot && isAppointmentSlotPast(visitDate, selectedAppointmentSlot);
+    const appointmentWeekdayLabel = new Date(`${visitDate}T12:00:00`).toLocaleDateString('en-IN', { weekday: 'long' });
+    const appointmentAvailabilityReason = appointmentSlotsError || (visitDate < getBranchDateTime().date
+      ? 'This date has already passed in the branch’s local time.'
+      : appointmentDayHours && !appointmentDayHours.open
+        ? `${appointmentWeekdayLabel} is marked closed in ${selectedLocation?.name || 'this branch'}’s operating hours. Update Branch Details → Operating hours to allow bookings.`
+        : 'Branch availability could not be confirmed. Refresh the page or check this branch’s operating hours.');
     const appointmentClientName = clientType === 'new'
       ? `${clientName || ''} ${clientSurname || ''}`.trim()
       : `${selectedRegularClient?.name || ''} ${selectedRegularClient?.surname || ''}`.trim();
-    const clientMembershipTier = String(selectedRegularClient?.membership_tier || '').trim();
-    const hasClientMembership = Boolean(clientMembershipTier && !['none', 'non-member', 'null'].includes(clientMembershipTier.toLowerCase()));
-    const membershipExpired = Boolean(selectedRegularClient?.membership_expires_at && String(selectedRegularClient.membership_expires_at).slice(0, 10) < getBranchDateTime().date);
-    const membershipIsActive = hasClientMembership && String(selectedRegularClient?.membership_status || '').toLowerCase() === 'active' && !membershipExpired;
-    const normalizedServiceName = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-    const hasSameServiceBooking = item => (item.booked || []).some(booking => {
-      const bookedIds = new Set((booking.service_ids || []).map(Number).filter(Boolean));
-      const bookedNames = new Set((booking.service_names || []).map(normalizedServiceName).filter(Boolean));
-      return selectedServices.some(service => {
-        const serviceId = Number(service.service_id);
-        if (serviceId && bookedIds.has(serviceId)) return true;
-        return bookedNames.has(normalizedServiceName(service.service_name));
-      });
-    });
     const confirmBookingFromSlotScreen = async () => {
       if (!selectedAppointmentSlot || isAppointmentSlotPast(visitDate, selectedAppointmentSlot) || isSubmitting || completedVisitResult) return;
       const result = await handleFinalSubmit();
       if (result && onComplete) onComplete(result?.visit?.visit_id || result?.visit_id);
     };
     return (
-      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 1000, margin: '0 auto 30px', padding: '0 12px 30px', boxSizing: 'border-box' }}>
-        <button type="button" onClick={() => setStep(appointmentMode ? 'appointment-client' : 'selected-services')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 20, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />{appointmentMode ? 'Back to client details' : 'Back to cart'}</button>
-        <h1 style={{ margin: '0 0 7px', color: '#302721', fontSize: 25 }}>Choose an appointment slot</h1>
-        <p style={{ margin: '0 0 20px', color: '#81766B', fontSize: 13 }}>Select the date, duration, and start time after reviewing the client’s bill.</p>
+      <div className="animate-fade-in" style={{ width: '100%', maxWidth: 1000, margin: '0 auto 30px', padding: '34px 18px 54px', boxSizing: 'border-box', background: branding?.appointment_background_color || 'linear-gradient(180deg, #F7F2E9 0%, #F2EADF 100%)', color: branding?.appointment_text_color || '#4B4037', borderRadius: 20, fontFamily: branding?.supporting_font_family || 'inherit' }}>
+        <button type="button" onClick={() => setStep(appointmentMode ? 'appointment-summary' : 'selected-services')} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, marginBottom: 20, padding: '8px 15px', border: '1px solid #E3D2BE', borderRadius: 999, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><ArrowLeft size={15} />{appointmentMode ? 'Back to booking summary' : 'Back to cart'}</button>
+        <h1 style={{ margin: '0 0 12px', color: branding?.appointment_heading_color || '#302721', fontSize: 30, letterSpacing: '.015em', fontFamily: branding?.heading_font_family || 'inherit' }}>{branding?.appointment_page_heading || 'Book an appointment slot'}</h1>
+        <p style={{ margin: '0 0 28px', color: branding?.appointment_text_color || '#81766B', fontSize: 14 }}>{branding?.appointment_page_subtitle || 'Select the date, duration, and start time. Review your total on the previous step.'}</p>
         {submitError && <div role="alert" style={{ marginBottom: 16, padding: '11px 14px', border: '1px solid #FECACA', borderRadius: 9, background: '#FEF2F2', color: '#9B1C1C', fontSize: 13 }}>{submitError}</div>}
 
-        <section aria-label="Appointment bill summary" style={{ marginBottom: 18, padding: '17px 20px', border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFFFF' }}>
-          <div style={{ marginBottom: 12, color: '#9E7437', fontSize: 13, fontWeight: 750 }}>Booking summary</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingBottom: 9, borderBottom: '1px solid #EEE6DC', color: '#4B4037', fontSize: 13 }}>
-              <span><strong>Client:</strong> {appointmentClientName || 'Client'}</span>
-              <span style={{ padding: '4px 9px', borderRadius: 999, background: membershipIsActive ? '#ECFDF3' : '#F5F0E8', color: membershipIsActive ? '#167342' : '#76685B', fontSize: 11, fontWeight: 700 }}>
-                {clientType === 'regular'
-                  ? (membershipIsActive ? `${clientMembershipTier} · Active membership` : (hasClientMembership ? `${clientMembershipTier} · ${membershipExpired ? 'Expired' : (selectedRegularClient?.membership_status || 'Inactive')}` : 'Existing client · no active membership'))
-                  : 'New client'}
-              </span>
-            </div>
-            {activeMembership?.plan && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>Membership purchase · {activeMembership.plan.name}</span><strong>{formatCurrency(membershipAmount)}</strong></div>}
-            {selectedServices.map(service => <div key={service.temp_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: '#4B4037', fontSize: 13 }}><span>{service.service_name}</span><strong>{formatCurrency(service.is_privilege ? 0 : service.price)}</strong></div>)}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginTop: 13, paddingTop: 12, borderTop: '1px solid #EEE6DC', color: '#302721', fontSize: 15, fontWeight: 800 }}><span>NET PAYABLE</span><span>{formatCurrency(netPayable)}</span></div>
-        </section>
-
-        <section aria-label="Appointment date and time" style={{ padding: 20, border: '1px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
+        <section aria-label="Appointment date and time" style={{ padding: 28, border: `${Number(branding?.appointment_card_border_width ?? 1)}px solid ${branding?.appointment_border_color || '#DEC8A9'}`, borderRadius: Number(branding?.appointment_card_radius ?? 22), background: branding?.appointment_card_color || '#FFFEFC', boxShadow: '0 12px 32px rgba(77, 54, 29, .08)' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginBottom: 16 }}>
-            <div><h2 style={{ margin: 0, color: '#292524', fontSize: 17 }}>Available slots</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 12 }}>{appointmentDayHours?.open ? `Branch hours: ${appointmentDayHours.start}–${appointmentDayHours.end}. Green slots are open; amber slots have another service booked; grey slots have passed.` : 'This branch is closed on the selected day.'}</p></div>
+            <div><h2 style={{ margin: 0, color: '#292524', fontSize: 17 }}>Available slots</h2><p style={{ margin: '5px 0 0', color: '#78716C', fontSize: 12 }}>{appointmentDayHours?.open ? `Branch hours: ${appointmentDayHours.start}–${appointmentDayHours.end}. Green means no booking starts at that time; grey means a booking starts then or the time has passed. Occupied future start times remain selectable.` : appointmentSlotsLoading ? 'Checking this branch’s opening hours…' : appointmentAvailabilityReason}</p></div>
             <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#57534E', fontSize: 12, fontWeight: 700 }}>Appointment date<input type="date" min={getBranchDateTime().date} value={visitDate} onChange={event => { setVisitDate(event.target.value); setSelectedAppointmentSlot(''); }} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF' }} /></label>
               <button type="button" aria-expanded={showAppointmentDurationControl} onClick={() => setShowAppointmentDurationControl(value => !value)} style={{ padding: '8px 11px', border: '1px solid #D8BD91', borderRadius: 8, color: '#8C6228', background: showAppointmentDurationControl ? '#FAF6EE' : '#FFFFFF', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{showAppointmentDurationControl ? 'Done' : `Customize duration · ${formatAppointmentDuration(appointmentDurationMinutes)}`}</button>
@@ -7339,17 +7400,20 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
               </label>}
             </div>
           </div>
-          {appointmentSlotsLoading ? <div style={{ padding: '20px 8px', color: '#78716C', fontSize: 13 }}>Checking branch availability…</div> : !appointmentDayOpen ? <div style={{ padding: 14, color: '#78716C', background: '#F5F5F4', borderRadius: 8, fontSize: 13 }}>No appointments can be booked for this branch on this day.</div> : appointmentSlots.length === 0 ? <div style={{ padding: 14, color: '#78716C', background: '#FAF8F5', borderRadius: 8, fontSize: 13 }}>No appointment slots are available for this date.</div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
+          {appointmentSlotsLoading ? <div style={{ padding: '20px 8px', color: '#78716C', fontSize: 13 }}>Checking branch availability…</div> : !appointmentDayOpen ? <div style={{ padding: 14, color: '#78716C', background: '#F5F5F4', borderRadius: 8, fontSize: 13 }}>{appointmentAvailabilityReason}</div> : appointmentSlots.length === 0 ? <div style={{ padding: 14, color: '#78716C', background: '#FAF8F5', borderRadius: 8, fontSize: 13 }}>No appointment slots are available for this date. The branch is open, but no start time fits the selected service duration or all valid times have passed/been booked.</div> : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(112px, 1fr))', gap: 8 }}>
             {appointmentSlots.map(item => {
               const isBooked = item.booked?.length > 0;
               const isPast = isAppointmentSlotPast(visitDate, item.slot);
-              const sameServiceBooked = isBooked && hasSameServiceBooking(item);
+              const slotMinutes = appointmentSlotToMinutes(item.slot);
+              const bookedUntil = isBooked ? Math.max(...item.booked.map(booking => (appointmentSlotToMinutes(booking.slot) ?? slotMinutes) + (Number(booking.duration_mins) || 30))) : null;
+              const startsAtThisTime = isBooked && item.booked.some(booking => appointmentSlotToMinutes(booking.slot) === slotMinutes);
+              const bookedLabel = isBooked ? `${startsAtThisTime ? 'Booked' : 'Busy'} · until ${formatAppointmentMinuteTime(bookedUntil)}` : '';
               const isUnavailable = isPast;
               const isSelected = selectedAppointmentSlot === item.slot && !isPast;
               return <button key={item.slot} type="button" disabled={isUnavailable} onClick={() => {
-                if (isBooked) setSlotConflictDialog({ slot: item.slot, bookings: item.booked, sameService: sameServiceBooked });
+                if (isBooked) setSlotConflictDialog({ slot: item.slot, bookings: item.booked });
                 else setSelectedAppointmentSlot(item.slot);
-              }} title={isBooked ? (sameServiceBooked ? 'This service is already booked at this time' : 'Another service is booked at this time; view details') : isPast ? 'This time has passed' : `Select ${item.slot}`} style={{ minHeight: 56, padding: '8px 9px', borderRadius: 9, border: isSelected ? '2px solid #B88B4A' : sameServiceBooked ? '1px solid #F0A39C' : isBooked ? '1px solid #E7C58F' : isUnavailable ? '1px solid #E7E5E4' : '1px solid #A7D7B5', background: isSelected ? '#B88B4A' : sameServiceBooked ? '#FFF1F0' : isBooked ? '#FFF8EA' : isUnavailable ? '#F5F5F4' : '#F0FDF4', color: isSelected ? '#FFFFFF' : sameServiceBooked ? '#A33D35' : isBooked ? '#815B1B' : isUnavailable ? '#A8A29E' : '#166534', cursor: isUnavailable ? 'not-allowed' : 'pointer', textAlign: 'center' }}><strong style={{ display: 'block', fontSize: 12 }}>{item.slot}</strong><span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700 }}>{sameServiceBooked ? 'Same service booked' : isBooked ? 'Another service booked' : isPast ? 'Passed' : isSelected ? 'Selected' : 'Open'}</span></button>;
+              }} title={isBooked ? `${startsAtThisTime ? `An appointment starts at ${item.slot}` : 'An appointment overlaps this time'} and keeps the slot busy until ${formatAppointmentMinuteTime(bookedUntil)}; click to review and continue if the overlap is intended` : isPast ? 'This time has passed' : `Select ${item.slot}`} style={{ minHeight: 56, padding: '8px 9px', borderRadius: 9, border: isSelected ? '2px solid #B88B4A' : isBooked || isUnavailable ? '1px solid #D6D3D1' : '1px solid #A7D7B5', background: isSelected ? '#B88B4A' : isBooked || isUnavailable ? '#F1F2F3' : '#F0FDF4', color: isSelected ? '#FFFFFF' : isBooked || isUnavailable ? '#737373' : '#166534', cursor: isUnavailable ? 'not-allowed' : 'pointer', textAlign: 'center' }}><strong style={{ display: 'block', fontSize: 12 }}>{item.slot}</strong><span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 700 }}>{isBooked ? bookedLabel : isPast ? 'Passed' : isSelected ? 'Selected' : 'Open'}</span></button>;
             })}
           </div>}
           {selectedAppointmentSlot && <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginTop: 16, padding: '12px 14px', border: '1px solid #CFE6D5', borderRadius: 10, background: '#F2FBF4', color: '#315D3B', fontSize: 13 }}>
@@ -7359,21 +7423,22 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
         </section>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-          <button type="button" disabled={!selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting || Boolean(completedVisitResult)} onClick={confirmBookingFromSlotScreen} style={{ padding: '12px 28px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)', fontSize: 13, fontWeight: 750, letterSpacing: '.04em', cursor: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? 'not-allowed' : 'pointer', opacity: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? .55 : 1, boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)' }}>{isSubmitting ? 'CONFIRMING…' : 'CONFIRM & RETURN TO APPOINTMENTS'}</button>
+          <button type="button" disabled={!selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting || Boolean(completedVisitResult)} onClick={confirmBookingFromSlotScreen} style={{ padding: '12px 28px', border: 'none', borderRadius: 999, color: '#FFFFFF', background: branding?.appointment_primary_color || '#A9793C', fontSize: 13, fontWeight: 750, letterSpacing: '.04em', cursor: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? 'not-allowed' : 'pointer', opacity: !selectedAppointmentSlot || appointmentSlotsLoading || isSelectedSlotPast || isSubmitting ? .55 : 1, boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)' }}>{isSubmitting ? 'CONFIRMING…' : (branding?.appointment_confirm_label || 'CONFIRM & RETURN TO APPOINTMENTS')}</button>
         </div>
         {slotConflictDialog && <div role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setSlotConflictDialog(null); }} style={{ position: 'fixed', inset: 0, zIndex: 1700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(35, 28, 22, .5)' }}>
-          <div role="dialog" aria-modal="true" aria-labelledby="appointment-slot-conflict-title" style={{ width: 'min(480px, 100%)', padding: 22, border: `1px solid ${slotConflictDialog.sameService ? '#F0B8B3' : '#E7C58F'}`, borderRadius: 15, background: '#FFFFFF', boxShadow: '0 22px 65px rgba(0,0,0,.25)' }}>
-            <h2 id="appointment-slot-conflict-title" style={{ margin: '0 0 8px', color: '#302721', fontSize: 18 }}>{slotConflictDialog.sameService ? 'This service is already booked' : 'Another service is booked at this time'}</h2>
-            <p style={{ margin: '0 0 14px', color: '#70645A', fontSize: 13, lineHeight: 1.5 }}>{slotConflictDialog.sameService ? `${slotConflictDialog.slot} already has the same service booked. Select another time or remove the overlapping service.` : `${slotConflictDialog.slot} has another appointment. You can continue with this time because your selected service is different.`}</p>
+          <div role="dialog" aria-modal="true" aria-labelledby="appointment-slot-conflict-title" style={{ width: 'min(480px, 100%)', padding: 22, border: '1px solid #D6D3D1', borderRadius: 15, background: '#FFFFFF', boxShadow: '0 22px 65px rgba(0,0,0,.25)' }}>
+            <h2 id="appointment-slot-conflict-title" style={{ margin: '0 0 8px', color: '#302721', fontSize: 18 }}>This time already has a booking</h2>
+            <p style={{ margin: '0 0 14px', color: '#70645A', fontSize: 13, lineHeight: 1.5 }}>{`${slotConflictDialog.slot} is occupied. The slot is shown in grey but remains bookable; continue if this overlap is intended.`}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}>
-              {slotConflictDialog.bookings.map(booking => <div key={booking.visit_id} style={{ padding: '10px 12px', borderRadius: 9, background: '#FAF7F2', color: '#4B4037', fontSize: 12 }}><strong>{booking.client_name || 'Client'}</strong><div style={{ marginTop: 3, color: '#81766B' }}>{booking.services || 'Service not specified'} · {booking.slot || slotConflictDialog.slot}</div></div>)}
+              {slotConflictDialog.bookings.map(booking => <div key={booking.visit_id} style={{ padding: '10px 12px', borderRadius: 9, background: '#FAF7F2', color: '#4B4037', fontSize: 12 }}><strong>{booking.client_name || 'Client'}</strong><div style={{ marginTop: 3, color: '#81766B' }}>{booking.services || 'Service not specified'} · {booking.slot || slotConflictDialog.slot}{booking.duration_mins ? ` · ${formatAppointmentDuration(booking.duration_mins)}` : ''}</div></div>)}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9 }}>
-              <button type="button" onClick={() => setSlotConflictDialog(null)} style={{ padding: '9px 14px', border: '1px solid #E3D2BE', borderRadius: 8, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{slotConflictDialog.sameService ? 'Choose another slot' : 'Cancel'}</button>
-              {!slotConflictDialog.sameService && <button type="button" onClick={() => { setSelectedAppointmentSlot(slotConflictDialog.slot); setSlotConflictDialog(null); }} style={{ padding: '9px 14px', border: 'none', borderRadius: 8, background: '#A9793C', color: '#FFFFFF', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Continue with this slot</button>}
+              <button type="button" onClick={() => setSlotConflictDialog(null)} style={{ padding: '9px 14px', border: '1px solid #E3D2BE', borderRadius: 8, background: '#FFFFFF', color: '#6B4C2A', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Choose another slot</button>
+              <button type="button" onClick={() => { setSelectedAppointmentSlot(slotConflictDialog.slot); setSlotConflictDialog(null); }} style={{ padding: '9px 14px', border: 'none', borderRadius: 8, background: '#A9793C', color: '#FFFFFF', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Continue with this slot</button>
             </div>
           </div>
         </div>}
+        {renderAppointmentCustomizer()}
       </div>
     );
   }

@@ -2254,25 +2254,25 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
             return (
               <div className="card animate-fade-in" style={{
-                maxWidth: '490px',
+                maxWidth: '560px',
                 width: '100%',
-                maxHeight: '88vh',
+                maxHeight: '90vh',
                 overflowY: 'auto',
                 background: '#FFFFFF',
-                borderRadius: 'var(--radius-xl)',
-                padding: '18px 22px',
-                boxShadow: '0 20px 50px rgba(0,0,0,0.2)',
+                borderRadius: '20px',
+                padding: '24px 28px',
+                boxShadow: '0 24px 70px rgba(38, 29, 20, 0.22)',
                 boxSizing: 'border-box'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '20px' }}>
                   <div>
-                    <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800' }}>
+                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.16em', color: '#A97735', fontWeight: '800', marginBottom: '6px' }}>
                       Reception Payment Desk
                     </div>
-                    <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', marginTop: '2px', marginBottom: '2px' }}>
+                    <h3 style={{ fontSize: '21px', lineHeight: 1.25, fontWeight: '750', color: '#29231E', margin: '0 0 6px' }}>
                       Payment Settlement • {paymentModalVisit?.client_name || 'Client'}
                     </h3>
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+                    <p style={{ fontSize: '13px', lineHeight: 1.5, color: '#82766B', margin: 0, maxWidth: '430px' }}>
                       Verify membership credits and collect any balance, then click <strong>Approve & Confirm</strong> to mark as Paid.
                     </p>
                   </div>
@@ -2282,7 +2282,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       setPaymentModalVisit(null);
                       if (requestedPaymentVisit) onPaymentFlowComplete?.();
                     }}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                    style={{ flexShrink: 0, width: '34px', height: '34px', display: 'grid', placeItems: 'center', background: '#F8F5F0', border: '1px solid #EEE5DA', borderRadius: '50%', cursor: 'pointer', color: '#75685C' }}
                   >
                     <X size={20} />
                   </button>
@@ -2291,19 +2291,19 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 {/* Bill Amount Summary Banner */}
                 <div style={{
                   background: '#FAF6EE',
-                  border: '1.5px solid #DAC493',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '10px 14px',
-                  marginBottom: '12px',
+                  border: '1px solid #E8D6B9',
+                  borderRadius: '14px',
+                  padding: '15px 18px',
+                  marginBottom: '16px',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center'
                 }}>
                   <div>
-                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
+                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '.08em', color: '#8A7B69', fontWeight: '750' }}>
                       Total Bill
                     </div>
-                    <div style={{ fontSize: '22px', fontWeight: '800', color: '#1C1917', marginTop: '1px' }}>
+                    <div style={{ fontSize: '27px', lineHeight: 1.2, fontWeight: '750', color: '#29231E', marginTop: '4px' }}>
                       {formatCurrency(totalBill)}
                     </div>
                     {pendingUpgradePlan && (
@@ -2313,7 +2313,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     )}
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700' }}>
+                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '.07em', color: '#8A7B69', fontWeight: '750', marginBottom: '5px' }}>
                       After confirmation
                     </div>
                     <span className={`badge ${settlementStatusClass}`}>
@@ -2323,10 +2323,10 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
 
                 {billServiceItems.length > 0 && (
-                  <div style={{ marginBottom: '14px', padding: '12px 14px', border: '1px solid #E9DCCB', borderRadius: 'var(--radius-md)', background: '#FFFEFC' }}>
-                    <div style={{ marginBottom: 8, color: '#6B4C2A', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Appointment bill</div>
-                    {billServiceItems.map((service, index) => <div key={service.visit_service_id || `${service.service_id}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '5px 0', color: '#4B4037', fontSize: 12 }}><span>{service.service_name}</span><span>{formatCurrency(service.price)}</span></div>)}
-                    <div style={{ display: 'grid', gap: 5, marginTop: 7, paddingTop: 8, borderTop: '1px solid #EEE6DC', color: '#6F6257', fontSize: 12 }}>
+                  <div style={{ marginBottom: '20px', padding: '15px 18px', border: '1px solid #EEE5DA', borderRadius: '14px', background: '#FFFEFC' }}>
+                    <div style={{ marginBottom: 10, color: '#8B6334', fontSize: 10, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>Appointment bill</div>
+                    {billServiceItems.map((service, index) => <div key={service.visit_service_id || `${service.service_id}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '7px 0', color: '#51463D', fontSize: 13 }}><span>{service.service_name}</span><span style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{formatCurrency(service.price)}</span></div>)}
+                    <div style={{ display: 'grid', gap: 8, marginTop: 9, paddingTop: 12, borderTop: '1px solid #F0E9E0', color: '#7A6E63', fontSize: 12.5 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{formatCurrency(paymentModalVisit.subtotal || 0)}</span></div>
                       {Number(paymentModalVisit.discount_amount) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Discount</span><span>-{formatCurrency(paymentModalVisit.discount_amount)}</span></div>}
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tax</span><span>{formatCurrency(paymentModalVisit.tax_amount || 0)}</span></div>
@@ -2830,11 +2830,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     )}
 
                     {/* Payment Method Selector (UPI, Cash, Card) */}
-                    <div style={{ marginBottom: '14px' }}>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#1C1917', marginBottom: '6px' }}>
+                    <div style={{ marginBottom: '18px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#51463D', marginBottom: '8px' }}>
                         Select Manual Payment Method:
                       </label>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
                         {[
                           { id: 'UPI', label: '📱 UPI' },
                           { id: 'Cash', label: '💵 Cash' },
@@ -2845,11 +2845,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             type="button"
                             onClick={() => setPaymentForm(prev => ({ ...prev, payment_method: m.id }))}
                             style={{
-                              padding: '10px 4px',
-                              borderRadius: 'var(--radius-md)',
-                              border: paymentForm.payment_method === m.id ? '2px solid #B88B4A' : '1px solid var(--border-color)',
-                              background: paymentForm.payment_method === m.id ? '#FAF6EE' : '#FFFFFF',
-                              color: paymentForm.payment_method === m.id ? '#B88B4A' : 'var(--text-main)',
+                              padding: '12px 8px',
+                              borderRadius: '11px',
+                              border: paymentForm.payment_method === m.id ? '1.5px solid #B88B4A' : '1px solid #E9E1D8',
+                              background: paymentForm.payment_method === m.id ? '#FBF6EE' : '#FFFFFF',
+                              color: paymentForm.payment_method === m.id ? '#96682F' : '#51463D',
                               fontWeight: '700',
                               fontSize: '13px',
                               cursor: 'pointer',
@@ -2868,15 +2868,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     </div>
 
                     {/* Amount Paid Input */}
-                    <div style={{ marginBottom: '14px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                        <label style={{ fontSize: '12px', fontWeight: '700', color: '#1C1917' }}>
+                    <div style={{ marginBottom: '18px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                        <label style={{ fontSize: '12px', fontWeight: '700', color: '#51463D' }}>
                           Amount Collected Manually (₹)
                         </label>
                         <button
                           type="button"
                           onClick={() => setPaymentForm(prev => ({ ...prev, amount_paid: remainingAfterCredit }))}
-                          style={{ fontSize: '11px', color: '#B88B4A', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'underline' }}
+                          style={{ fontSize: '11px', color: '#96682F', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '700', textDecoration: 'none', whiteSpace: 'nowrap' }}
                         >
                           Mark Full Remaining ({formatCurrency(remainingAfterCredit)})
                         </button>
@@ -2889,12 +2889,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.max(0, parseFloat(e.target.value) || 0) }))}
                         style={{
                           width: '100%',
-                          padding: '10px 14px',
-                          borderRadius: 'var(--radius-md)',
-                          border: '1.5px solid var(--border-color)',
+                          padding: '12px 15px',
+                          borderRadius: '11px',
+                          border: '1px solid #E4DACE',
                           fontSize: '16px',
                           fontWeight: '700',
-                          outline: 'none'
+                          outline: 'none',
+                          boxSizing: 'border-box',
+                          color: '#29231E',
+                          background: '#FFFEFC'
                         }}
                       />
                     </div>
@@ -2946,17 +2949,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 )}
                 {/* Settlement Summary Footer Banner */}
                 <div style={{
-                  marginTop: '10px',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  background: '#F9FAFB',
-                  border: '1px solid #E5E7EB',
+                  marginTop: '16px',
+                  padding: '12px 15px',
+                  borderRadius: '12px',
+                  background: isFullySettled ? '#F2F8F3' : '#FAF7F2',
+                  border: isFullySettled ? '1px solid #D8E8DA' : '1px solid #EEE5DA',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
                   flexWrap: 'wrap',
                   gap: '6px',
-                  fontSize: '11.5px'
+                  fontSize: '12px'
                 }}>
                   <div>
                     <span style={{ color: '#4B5563' }}>Settlement: </span>
@@ -2979,7 +2982,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
 
                 {/* Modal Actions */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', marginTop: '18px', paddingTop: '15px', borderTop: '1px solid #F0E9E0' }}>
                   <div>
                     {!pendingUpgradePlan && (
                       <button
@@ -3003,7 +3006,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       </button>
                     )}
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '10px', flexShrink: 0 }}>
                     <button
                       type="button"
                       onClick={() => {
@@ -3011,7 +3014,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         if (requestedPaymentVisit) onPaymentFlowComplete?.();
                       }}
                       className="btn-secondary"
-                      style={{ padding: '8px 16px', fontSize: '13px' }}
+                      style={{ padding: '10px 17px', fontSize: '13px', borderRadius: '10px' }}
                     >
                       Cancel
                     </button>
@@ -3021,12 +3024,15 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       disabled={isSavingPayment}
                       className="btn-primary"
                       style={{
-                        padding: '8px 20px',
-                        fontSize: '13.5px',
+                        padding: '11px 18px',
+                        fontSize: '13px',
                         fontWeight: '700',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '6px'
+                        gap: '7px',
+                        whiteSpace: 'nowrap',
+                        borderRadius: '10px',
+                        boxShadow: '0 5px 14px rgba(157, 111, 51, 0.22)'
                       }}
                     >
                       <CheckCircle2 size={15} />

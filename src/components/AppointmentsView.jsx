@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarDays, Clock3, Pencil, UserRound, Phone, CheckCircle2, Plus, RefreshCw, ArrowLeft, X, Ban } from 'lucide-react';
+import { CalendarDays, Clock3, Pencil, UserRound, Phone, CheckCircle2, Plus, RefreshCw, ArrowLeft, X, Ban, ChevronLeft, ChevronRight, List, CalendarRange } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { showConfirm } from '../utils/messageBox';
 
@@ -56,6 +56,12 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
   const [saving, setSaving] = useState(false);
   const [workingId, setWorkingId] = useState(null);
   const [, setClockTick] = useState(0);
+  const [viewMode, setViewMode] = useState('calendar');
+  const [showListOptions, setShowListOptions] = useState(false);
+  const [selectedListGroup, setSelectedListGroup] = useState('upcoming');
+  const [hoveredScheduleCardId, setHoveredScheduleCardId] = useState(null);
+  const [pinnedScheduleCardId, setPinnedScheduleCardId] = useState(null);
+  const [scheduleDate, setScheduleDate] = useState(() => branchDateTime().date);
 
   const loadAppointments = async () => {
     setLoading(true);
@@ -212,6 +218,29 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
   };
   const upcoming = appointments.filter(item => !isMissedAppointment(item));
   const overdue = appointments.filter(isMissedAppointment);
+  const scheduleAppointments = appointments.filter(item => String(item.visit_date).slice(0, 10) === scheduleDate)
+    .sort((a, b) => (appointmentStartMinutes(a.service_time) ?? 420) - (appointmentStartMinutes(b.service_time) ?? 420));
+  const scheduleLanes = [];
+  const scheduledBlocks = scheduleAppointments.map(appointment => {
+    const start = appointmentStartMinutes(appointment.service_time) ?? 420;
+    const duration = Number(appointment.appointment_duration_mins) || 30;
+    let lane = scheduleLanes.findIndex(end => end <= start);
+    if (lane < 0) lane = scheduleLanes.length;
+    scheduleLanes[lane] = start + duration;
+    return { appointment, start, duration, lane };
+  });
+  const shiftScheduleDate = amount => {
+    const date = new Date(`${scheduleDate}T12:00:00`);
+    date.setDate(date.getDate() + amount);
+    setScheduleDate(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`);
+  };
+  const earliestScheduleStart = scheduleAppointments.reduce((earliest, appointment) => Math.min(earliest, appointmentStartMinutes(appointment.service_time) ?? earliest), 24 * 60);
+  const latestScheduleEnd = scheduleAppointments.reduce((latest, appointment) => Math.max(latest, (appointmentStartMinutes(appointment.service_time) ?? 420) + (Number(appointment.appointment_duration_mins) || 30)), 0);
+  const timelineStart = Math.min(9, Math.floor((earliestScheduleStart === 24 * 60 ? 9 * 60 : earliestScheduleStart) / 60)) * 60;
+  const timelineEnd = Math.min(24, Math.max(21, Math.ceil(latestScheduleEnd / 60)));
+  const timelineHalfHours = (timelineEnd * 60 - timelineStart) / 30;
+  const halfHourHeight = 56;
+  const laneWidth = 320;
 
   const renderAppointment = appointment => {
     const date = String(appointment.visit_date).slice(0, 10);
@@ -224,7 +253,7 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#4B4037', fontSize: 13, fontWeight: 650 }}><CalendarDays size={15} color="#A9793C" />{formatDate(date)}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 6, color: '#81766B', fontSize: 12 }}><Clock3 size={14} />{appointment.service_time || 'Time not set'} · {durationLabel(appointment.appointment_duration_mins)}</div>
-        {missed && <div style={{ display: 'inline-flex', marginTop: 6, padding: '2px 7px', borderRadius: 999, color: '#6B7280', background: '#E5E7EB', fontSize: 10, fontWeight: 750 }}>MISSED · 30 MIN PAST START</div>}
+        <div title={missed ? 'This appointment time has passed without being marked as arrived.' : 'This appointment is upcoming.'} style={{ display: 'inline-flex', alignItems: 'center', marginTop: 7, padding: '4px 9px', borderRadius: 999, color: missed ? '#6B7280' : '#276749', background: missed ? '#E5E7EB' : '#E8F5EC', fontSize: 10, fontWeight: 750, letterSpacing: '.025em' }}>{missed ? 'MISSED' : 'UPCOMING'}{missed ? ' · 30 MIN PAST START' : ''}</div>
       </div>
       <div style={{ color: '#6F6257', fontSize: 12, lineHeight: 1.5 }}>{appointment.services || 'Appointment'}</div>
       <div style={{ display: 'grid', justifyItems: 'start', gap: 4 }}>
@@ -240,27 +269,100 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
     </article>;
   };
 
-  return <div style={{ width: '100%', maxWidth: 1240, margin: '0 auto', padding: '24px 12px 48px', boxSizing: 'border-box' }}>
+  return <div style={{ width: '100%', maxWidth: '100%', margin: '0 auto', padding: '24px 0 48px', boxSizing: 'border-box', overflowX: 'hidden' }}>
     <button type="button" onClick={onBack} style={{ ...buttonStyle(), marginBottom: 20, borderRadius: 999, padding: '8px 15px' }}><ArrowLeft size={15} />Back</button>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14, marginBottom: 24 }}>
-      <div><h1 style={{ margin: 0, color: '#302721', fontSize: 26 }}>Appointments</h1><p style={{ margin: '7px 0 0', color: '#82766A', fontSize: 14 }}>{activeLocation?.name || 'Branch'} · Manage bookings, reschedule, or mark clients as arrived.</p></div>
+      <div><h1 style={{ margin: 0, color: '#302721', fontSize: 26 }}>Appointments</h1></div>
       <div style={{ display: 'flex', gap: 9 }}>
         <button type="button" aria-label="Refresh appointments" onClick={loadAppointments} style={buttonStyle()}><RefreshCw size={15} />Refresh</button>
         <button type="button" onClick={onBookAppointment} style={buttonStyle(true)}><Plus size={16} />Book appointment</button>
       </div>
     </div>
 
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
+      <div style={{ position: 'relative', display: 'inline-flex', gap: 4, padding: 4, border: '1px solid #E9DCCB', borderRadius: 12, background: '#FFFFFF' }}>
+        <button type="button" onClick={() => { setViewMode('calendar'); setShowListOptions(false); }} aria-pressed={viewMode === 'calendar'} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 13px', border: 0, borderRadius: 9, color: viewMode === 'calendar' ? '#6B4C2A' : '#81766B', background: viewMode === 'calendar' ? '#F7F0E5' : 'transparent', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><CalendarRange size={15} />Schedule</button>
+        <div style={{ position: 'relative' }} onMouseEnter={() => setShowListOptions(true)} onMouseLeave={() => { if (viewMode !== 'list') setShowListOptions(false); }}>
+          <button type="button" onClick={() => { setViewMode('list'); setShowListOptions(value => !value); }} aria-pressed={viewMode === 'list'} aria-expanded={showListOptions} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '9px 13px', border: 0, borderRadius: 9, color: viewMode === 'list' ? '#6B4C2A' : '#81766B', background: viewMode === 'list' ? '#F7F0E5' : 'transparent', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}><List size={15} />List</button>
+          {showListOptions && <div style={{ position: 'absolute', zIndex: 20, top: 'calc(100% + 8px)', left: 0, display: 'flex', gap: 6, minWidth: 220, padding: 7, border: '1px solid #E9DCCB', borderRadius: 12, background: '#FFFFFF', boxShadow: '0 10px 28px rgba(58,42,26,.14)' }}>
+            {[['missed', 'Missed', overdue.length], ['upcoming', 'Upcoming', upcoming.length]].map(([group, label, count]) => <button key={group} type="button" onClick={() => { setViewMode('list'); setSelectedListGroup(group); setShowListOptions(true); }} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flex: 1, padding: '10px 11px', border: `1px solid ${selectedListGroup === group ? '#D8BD91' : 'transparent'}`, borderRadius: 9, background: selectedListGroup === group ? '#F7F0E5' : '#FFFFFF', color: selectedListGroup === group ? '#6B4C2A' : '#57534E', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{label}<span style={{ color: '#81766B' }}>{count}</span></button>)}
+          </div>}
+        </div>
+      </div>
+      {viewMode === 'calendar' && <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <button type="button" aria-label="Previous day" onClick={() => shiftScheduleDate(-1)} style={{ ...buttonStyle(), padding: 9 }}><ChevronLeft size={17} /></button>
+        <input aria-label="Schedule date" type="date" value={scheduleDate} onChange={event => setScheduleDate(event.target.value)} style={{ padding: '9px 11px', border: '1px solid #E4D6C3', borderRadius: 9, background: '#FFFFFF', color: '#4B4037', fontWeight: 650 }} />
+        <button type="button" aria-label="Next day" onClick={() => shiftScheduleDate(1)} style={{ ...buttonStyle(), padding: 9 }}><ChevronRight size={17} /></button>
+        <button type="button" onClick={() => setScheduleDate(today)} style={buttonStyle()}>Today</button>
+      </div>}
+    </div>
+
     {error && <div role="alert" style={{ marginBottom: 16, padding: '11px 14px', borderRadius: 9, color: '#9B1C1C', background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 13 }}>{error}</div>}
-    {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#81766B' }}>Loading appointments…</div> : appointments.length === 0 ? <div style={{ padding: 42, textAlign: 'center', border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFEFC', color: '#81766B' }}>No appointments have been booked for this branch yet.</div> : <>
-      {overdue.length > 0 && <section style={{ marginBottom: 24, border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFFFF', overflow: 'hidden' }}>
-        <header style={{ padding: '14px 18px', background: '#F3F4F6', color: '#6B7280', fontSize: 14, fontWeight: 750 }}>Missed appointments · {overdue.length}</header>
-        {overdue.map(renderAppointment)}
-      </section>}
-      <section style={{ border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFFFF', overflow: 'hidden' }}>
-        <header style={{ padding: '14px 18px', background: '#FAF6F0', color: '#4B4037', fontSize: 14, fontWeight: 750 }}>Upcoming appointments · {upcoming.length}</header>
-        {upcoming.length ? upcoming.map(renderAppointment) : <div style={{ padding: 25, color: '#81766B', textAlign: 'center' }}>No upcoming appointments.</div>}
-      </section>
-    </>}
+    {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#81766B' }}>Loading appointments…</div> : appointments.length === 0 ? <div style={{ padding: 42, textAlign: 'center', border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFEFC', color: '#81766B' }}>No appointments have been booked for this branch yet.</div> : viewMode === 'calendar' ? <section aria-label={`Appointment schedule for ${formatDate(scheduleDate)}`} style={{ border: '1px solid #E9DCCB', borderRadius: 16, background: '#FFFFFF', overflow: 'hidden', boxShadow: '0 10px 30px rgba(77,54,29,.045)' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '17px 20px', borderBottom: '1px solid #F0E7DC', background: '#FFFEFC' }}>
+        <div><div style={{ color: '#332A23', fontWeight: 750 }}>Daily schedule</div><div style={{ marginTop: 4, color: '#81766B', fontSize: 12 }}>{formatDate(scheduleDate)} · {scheduleAppointments.length} appointment{scheduleAppointments.length === 1 ? '' : 's'}</div></div>
+        <span style={{ padding: '6px 10px', borderRadius: 999, background: '#F7F0E5', color: '#8C6228', fontSize: 11, fontWeight: 700 }}>30 minute timeline</span>
+      </header>
+      {scheduleAppointments.length === 0 ? <div style={{ padding: 44, textAlign: 'center', color: '#81766B' }}>No appointments scheduled for this day.</div> : <div style={{ maxHeight: '72vh', overflow: 'auto', padding: '0 16px 20px' }}>
+        <div style={{ position: 'relative', width: Math.max(420, 120 + scheduleLanes.length * laneWidth), height: timelineHalfHours * halfHourHeight + 42, minWidth: '100%' }}>
+          <div style={{ position: 'sticky', zIndex: 5, top: 0, left: 0, display: 'grid', gridTemplateColumns: `120px repeat(${scheduleLanes.length}, ${laneWidth}px)`, height: 42, width: 'max-content', minWidth: '100%', borderBottom: '1px solid #E9DCCB', background: '#FFFEFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 8, color: '#81766B', fontSize: 11, fontWeight: 700 }}>TIME</div>
+            {scheduleLanes.map((_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid #E9DCCB', color: '#4B4037', fontSize: 12, fontWeight: 750 }}>Appointments {index + 1}</div>)}
+          </div>
+          <div style={{ position: 'absolute', top: 42, left: 0, width: '100%', height: timelineHalfHours * halfHourHeight, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${halfHourHeight - 1}px, #E9DCCB ${halfHourHeight - 1}px, #E9DCCB ${halfHourHeight}px)`, backgroundColor: '#FFFEFC' }} />
+          {Array.from({ length: timelineHalfHours }, (_, index) => {
+            const minutes = timelineStart + index * 30;
+            const isHour = minutes % 60 === 0;
+            return <div key={minutes} style={{ position: 'absolute', zIndex: 2, left: 0, top: 42 + index * halfHourHeight + 3, width: 120, height: 19, paddingLeft: 8, boxSizing: 'border-box', borderRight: '1px solid #E9DCCB', background: '#FFFEFC', color: isHour ? '#81766B' : '#A3988B', fontSize: isHour ? 11 : 10, fontWeight: isHour ? 650 : 500 }}>{new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}</div>;
+          })}
+          {scheduleLanes.map((_, index) => <div key={index} style={{ position: 'absolute', top: 42, left: 120 + index * laneWidth, width: laneWidth, height: timelineHalfHours * halfHourHeight, borderLeft: '1px solid #E9DCCB', background: index % 2 ? 'rgba(247,240,229,.18)' : 'transparent' }} />)}
+          {scheduledBlocks.map(({ appointment, start, duration, lane }, index) => {
+            const top = 42 + Math.max(0, (start - timelineStart) / 30) * halfHourHeight + 4;
+            const height = halfHourHeight - 8;
+            const fills = [['#F3E9D9', '#B88B4A'], ['#E7F0E9', '#628B6A'], ['#F1E8F3', '#876A8D'], ['#E7EEF5', '#5E7793']];
+            const [fill, accent] = fills[index % fills.length];
+            const missed = isMissedAppointment(appointment);
+            const clientName = `${appointment.client_name || 'Client'}${appointment.client_surname ? ` ${appointment.client_surname}` : ''}`;
+            const isCardOpen = hoveredScheduleCardId === appointment.visit_id || pinnedScheduleCardId === appointment.visit_id;
+            const serviceItems = appointment.service_items || [];
+            const serviceNames = serviceItems.length ? serviceItems.map(item => item.service_name).filter(Boolean) : (appointment.service_names || String(appointment.services || '').split(',').map(item => item.trim()).filter(Boolean));
+            const memberTier = String(appointment.effective_membership_tier || appointment.client_membership_tier || '').trim();
+            const hasMembership = Boolean(memberTier && !['none', 'non-member', 'null'].includes(memberTier.toLowerCase()));
+            // The schedule scroll area has room to the right of each card in the
+            // common single-lane view; placing the panel left clips it at the gutter.
+            const showCardToLeft = lane > 0;
+            return <div key={appointment.visit_id} onMouseEnter={() => setHoveredScheduleCardId(appointment.visit_id)} onMouseLeave={() => setHoveredScheduleCardId(null)} style={{ position: 'absolute', zIndex: isCardOpen ? 40 : 3, left: 120 + lane * laneWidth + 8, top, width: laneWidth - 16 }}>
+              <button type="button" aria-expanded={isCardOpen} onClick={() => setPinnedScheduleCardId(current => current === appointment.visit_id ? null : appointment.visit_id)} title={`${missed ? 'Missed' : 'Upcoming'} appointment · ${appointment.service_time} · ${clientName} · hover or click for booking details`} style={{ position: 'relative', width: '100%', height, boxSizing: 'border-box', padding: '5px 8px', overflow: 'hidden', textAlign: 'left', border: `1px solid ${accent}55`, borderLeft: `4px solid ${accent}`, borderRadius: 11, background: fill, color: '#332A23', cursor: 'pointer', boxShadow: '0 3px 10px rgba(40,30,20,.055)' }}>
+                <span style={{ display: 'inline-flex', marginBottom: 3, padding: '2px 6px', borderRadius: 999, color: missed ? '#6B7280' : '#276749', background: missed ? '#E5E7EB' : '#E8F5EC', fontSize: 9, fontWeight: 800, letterSpacing: '.04em' }}>{missed ? 'MISSED' : 'UPCOMING'}</span>
+                <strong style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11, lineHeight: '15px' }}>{clientName} · {durationLabel(duration)}</strong>
+              </button>
+              {isCardOpen && <aside aria-label={`Booking details for ${clientName}`} style={{ position: 'absolute', zIndex: 50, top: 0, left: showCardToLeft ? 'auto' : 'calc(100% + 10px)', right: showCardToLeft ? 'calc(100% + 10px)' : 'auto', width: 320, maxWidth: 'calc(100vw - 64px)', padding: 16, boxSizing: 'border-box', border: '1px solid #E7D7C3', borderRadius: 13, background: '#FFFFFF', color: '#332A23', boxShadow: '0 14px 36px rgba(41,30,20,.2)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                  <div><span style={{ display: 'inline-flex', marginBottom: 6, padding: '4px 8px', borderRadius: 999, color: missed ? '#6B7280' : '#276749', background: missed ? '#E5E7EB' : '#E8F5EC', fontSize: 10, fontWeight: 800 }}>{missed ? 'MISSED' : 'UPCOMING'}</span><div style={{ fontSize: 15, fontWeight: 750 }}>{clientName}</div></div>
+                  <button type="button" aria-label="Close booking details" onClick={() => setPinnedScheduleCardId(null)} style={{ padding: '2px 7px', border: 0, borderRadius: 6, background: '#F7F2E9', color: '#6B4C2A', fontSize: 18, cursor: 'pointer' }}>×</button>
+                </div>
+                <div style={{ display: 'grid', gap: 9, marginBottom: 14, color: '#57534E', fontSize: 12 }}>
+                  <div><strong>Time:</strong> {appointment.service_time} · {durationLabel(duration)}</div>
+                  <div><strong>Phone:</strong> {appointment.client_phone || 'Not available'}</div>
+                  <div><strong>Membership:</strong> {hasMembership ? `${memberTier}${appointment.membership_benefit_status ? ` · ${appointment.membership_benefit_status}` : ''}` : 'No membership'}</div>
+                  <div><strong>Services ({serviceNames.length}):</strong> {serviceNames.length ? serviceNames.join(', ') : 'No services listed'}</div>
+                  <div><strong>Total price:</strong> ₹{Number(appointment.total_amount || 0).toLocaleString('en-IN')}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => { setPinnedScheduleCardId(null); openEdit(appointment); }} style={{ ...buttonStyle(), flex: 1 }}><Pencil size={14} />Edit</button>
+                  <button type="button" disabled={workingId === appointment.visit_id} onClick={() => { setPinnedScheduleCardId(null); convertToVisit(appointment); }} style={{ ...buttonStyle(true), flex: 1, opacity: workingId === appointment.visit_id ? .65 : 1 }}><CheckCircle2 size={14} />Confirm booking</button>
+                </div>
+              </aside>}
+            </div>;
+          })}
+        </div>
+      </div>}
+    </section> : <section style={{ border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFFFF', overflow: 'hidden' }}>
+      <header style={{ padding: '14px 18px', background: selectedListGroup === 'missed' ? '#F3F4F6' : '#FAF6F0', color: selectedListGroup === 'missed' ? '#6B7280' : '#4B4037', fontSize: 14, fontWeight: 750 }}>{selectedListGroup === 'missed' ? `Missed appointments · ${overdue.length}` : `Upcoming appointments · ${upcoming.length}`}</header>
+      {selectedListGroup === 'missed'
+        ? (overdue.length ? overdue.map(renderAppointment) : <div style={{ padding: 25, color: '#81766B', textAlign: 'center' }}>No missed appointments.</div>)
+        : (upcoming.length ? upcoming.map(renderAppointment) : <div style={{ padding: 25, color: '#81766B', textAlign: 'center' }}>No upcoming appointments.</div>)}
+    </section>}
 
     {editing && <div role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !saving) setEditing(null); }} style={{ position: 'fixed', inset: 0, zIndex: 1600, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(35, 28, 22, 0.5)' }}>
       <form onSubmit={saveEdit} style={{ width: 'min(620px, 100%)', maxHeight: '90vh', overflowY: 'auto', padding: 24, borderRadius: 16, background: '#FFFFFF', boxShadow: '0 22px 65px rgba(0,0,0,.25)' }}>
@@ -306,20 +408,20 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
     {editing && servicePickerOpen && <div role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setServicePickerOpen(false); }} style={{ position: 'fixed', inset: 0, zIndex: 1700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 18, background: 'rgba(35, 28, 22, 0.58)' }}>
       <div role="dialog" aria-modal="true" aria-labelledby="appointment-service-picker-title" style={{ width: 'min(700px, 100%)', maxHeight: '86vh', overflowY: 'auto', padding: 24, borderRadius: 16, background: '#FFFFFF', boxShadow: '0 22px 65px rgba(0,0,0,.28)' }}>
         <h2 id="appointment-service-picker-title" style={{ margin: '0 0 6px', color: '#302721', fontSize: 20 }}>{servicePickerStep === 'categories' ? 'Choose a category' : servicePickerStep === 'services' ? 'Choose sub-services' : 'Review services to add'}</h2>
-        <p style={{ margin: '0 0 18px', color: '#81766B', fontSize: 13 }}>{servicePickerStep === 'categories' ? 'Select a category to browse its services.' : servicePickerStep === 'services' ? 'Select one or more services, then continue.' : 'These services will be added to the appointment when you continue.'}</p>
-        {servicePickerStep === 'categories' ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-          {catalogCategories.map(category => <button key={category.category_id} type="button" onClick={() => { setServiceCategoryId(category.category_id); setServicePickerStep('services'); }} style={{ padding: '15px 14px', textAlign: 'left', border: '1px solid #E9DCCB', borderRadius: 10, color: '#4B4037', background: '#FFFEFC', fontWeight: 700, cursor: 'pointer' }}>{category.category_name}<div style={{ marginTop: 5, color: '#918477', fontSize: 12, fontWeight: 400 }}>{(category.services || []).filter(service => service.active !== 0).length} services</div></button>)}
+        <p style={{ margin: '0 0 22px', color: '#81766B', fontSize: 13, lineHeight: 1.6 }}>{servicePickerStep === 'categories' ? 'Choose a category, then select the services to add to this appointment.' : servicePickerStep === 'services' ? `Choose one or more services${pendingServiceIds.length ? ` · ${pendingServiceIds.length} selected` : ''}.` : 'Review the selected services before adding them to the appointment.'}</p>
+        {servicePickerStep === 'categories' ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))', gap: 12 }}>
+          {catalogCategories.map(category => <button key={category.category_id} type="button" onClick={() => { setServiceCategoryId(category.category_id); setServicePickerStep('services'); }} style={{ minHeight: 76, padding: '17px 16px', textAlign: 'left', border: '1px solid #E9DCCB', borderRadius: 11, color: '#4B4037', background: '#FFFEFC', fontWeight: 700, lineHeight: 1.45, cursor: 'pointer' }}>{category.category_name}<div style={{ marginTop: 6, color: '#918477', fontSize: 12, fontWeight: 400 }}>{(category.services || []).filter(service => service.active !== 0).length} services</div></button>)}
           {!catalogCategories.length && <div style={{ color: '#81766B', fontSize: 13 }}>Loading categories…</div>}
         </div> : servicePickerStep === 'services' ? <>
           <button type="button" onClick={() => setServicePickerStep('categories')} style={{ ...buttonStyle(), marginBottom: 12, padding: '7px 10px' }}><ArrowLeft size={14} />Categories</button>
-          <div style={{ display: 'grid', gap: 8 }}>
+          <div style={{ display: 'grid', gap: 10 }}>
             {(catalogCategories.find(category => Number(category.category_id) === Number(serviceCategoryId))?.services || []).filter(service => service.active !== 0).map(service => {
               const id = Number(service.service_id);
               const alreadyAdded = editServices.some(item => Number(item.service_id) === id);
               const checked = pendingServiceIds.includes(id);
-              return <label key={id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 12px', border: `1px solid ${checked ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 9, color: '#4B4037', background: checked ? '#FBF6EF' : '#FFFFFF', opacity: alreadyAdded ? .55 : 1 }}>
-                <input type="checkbox" disabled={alreadyAdded} checked={checked} onChange={() => setPendingServiceIds(current => checked ? current.filter(item => item !== id) : [...current, id])} />
-                <span style={{ flex: 1 }}>{service.service_name}</span><span style={{ color: '#81766B', fontSize: 13 }}>₹{Number(service.price || 0).toLocaleString('en-IN')}</span>
+              return <label key={id} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, padding: '12px 14px', border: `1px solid ${checked ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, color: '#4B4037', background: checked ? '#FBF6EF' : '#FFFFFF', opacity: alreadyAdded ? .55 : 1, cursor: alreadyAdded ? 'not-allowed' : 'pointer' }}>
+                <input type="checkbox" disabled={alreadyAdded} checked={checked} onChange={() => setPendingServiceIds(current => checked ? current.filter(item => item !== id) : [...current, id])} style={{ width: 16, height: 16, accentColor: '#A9793C', flex: '0 0 auto' }} />
+                <span style={{ flex: 1, lineHeight: 1.45 }}>{service.service_name}{(service.duration_mins || service.duration_minutes || service.duration) && <span style={{ display: 'block', marginTop: 3, color: '#918477', fontSize: 11 }}>{durationLabel(service.duration_mins || service.duration_minutes || service.duration)}</span>}</span><span style={{ color: '#6B4C2A', fontSize: 13, fontWeight: 650, whiteSpace: 'nowrap' }}>₹{Number(service.price || 0).toLocaleString('en-IN')}</span>
                 {alreadyAdded && <span style={{ color: '#918477', fontSize: 11 }}>Already added</span>}
               </label>;
             })}

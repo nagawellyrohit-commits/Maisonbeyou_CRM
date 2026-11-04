@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Building2, Store, Handshake, ArrowLeft, Plus, MapPin, Phone, Mail, User,
+  Building2, Store, Handshake, ArrowLeft, Plus, MapPin, Phone, Mail, User, Scissors, Crown, UserCheck, Award,
   CheckCircle2, Clock, ArrowRight, X, AlertCircle, AlertTriangle, Sparkles, Shield, ShieldCheck,
   ChevronRight, Users, Briefcase, ChevronDown, LogOut, TrendingUp, TrendingDown, Minus,
   Calendar, BarChart3, Menu, Palette
@@ -14,6 +14,9 @@ import ReportsView from './ReportsView';
 import MasterAdminReportsDashboard from './MasterAdminReportsDashboard';
 import { masterPortalCssVariables } from '../utils/branding';
 import BrandingCustomizer from './BrandingCustomizer';
+import CentralMasterCatalog from './CentralMasterCatalog';
+import ServiceManagement from './ServiceManagement';
+import MembershipManagement from './MembershipManagement';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
 
@@ -172,6 +175,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
   // Main View: 'locations' (clean studio selection) | 'reports' (reports suite with Date & Firm Type filters)
   const [viewMode, setViewMode] = useState('locations');
   const [reportsSubTab, setReportsSubTab] = useState('overview'); // 'overview' | 'detailed'
+  const [masterDataModule, setMasterDataModule] = useState('services');
+
+  const openCentralMasterData = () => {
+    setViewMode('master-data');
+  };
 
   // Flow State: false = Image 2 (All Locations List), true = Image 3 (Select Firm Type to Add)
   const [isSelectingFirmTypeToAdd, setIsSelectingFirmTypeToAdd] = useState(false);
@@ -307,7 +315,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       ...masterPortalCssVariables(branding),
       minHeight: '100vh',
       backgroundColor: branding?.master_background_color || '#F7F3ED',
-      backgroundImage: viewMode === 'locations'
+      backgroundImage: viewMode === 'locations' || viewMode === 'master-data'
         ? (branding?.master_background_image_url ? `url(${branding.master_background_image_url})` : 'none')
         : `linear-gradient(180deg, rgba(44, 33, 27, 0.78) 0%, rgba(44, 33, 27, 0.70) 280px, rgba(44, 33, 27, 0.65) 100%), url(${studioBg}) center / cover fixed`,
       backgroundSize: 'cover',
@@ -385,6 +393,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   <div style={{ fontWeight: '700', color: '#1C1917' }}>{currentUser?.name || 'Maison Master Admin'}</div>
                   <div style={{ fontSize: '11px', color: '#9F7335', fontWeight: '600' }}>Master Administrator</div>
                 </div>
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+                <button type="button" onClick={() => { setShowUserMenu(false); openCentralMasterData(); }} style={{ width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#9F7335', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', background: 'none', border: 'none', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                  <Scissors size={15} />
+                  <span>Master data</span>
+                </button>
                 <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
                 <button type="button" onClick={() => { setShowUserMenu(false); window.dispatchEvent(new Event('open_master_portal_customizer')); }} style={{ width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#9F7335', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '600', background: 'none', border: 'none', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
                   <Palette size={15} />
@@ -593,7 +606,39 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
             )}
 
             {/* Master Admin Reports Dashboard or Branch Locations Grid */}
-            {viewMode === 'reports' ? (
+            {viewMode === 'master-data' ? (
+              <section style={{ width: 'calc(100% - 48px)', maxWidth: 1500, boxSizing: 'border-box', margin: '0 auto 48px', padding: 'clamp(20px, 3vw, 32px)', borderRadius: 20, border: '1px solid #E8D6BF', background: '#FFFEFC', boxShadow: '0 12px 36px rgba(54,39,25,.08)' }}>
+                <button type="button" onClick={() => setViewMode('locations')} className="btn-luxury-header-action" style={{ marginBottom: 22 }}><ArrowLeft size={15} /> Back to {isBranch ? 'All Branches' : 'All Franchises'}</button>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A97735', textTransform: 'uppercase' }}>Master administration</div>
+                <h2 style={{ margin: '6px 0', color: '#302820', fontSize: 26 }}>Central master data</h2>
+                <p style={{ margin: '0 0 18px', color: '#786D62', lineHeight: 1.55 }}>Manage the shared master catalog here. During branch or franchise setup, choose which of these lists to copy into the new location.</p>
+                <div role="tablist" aria-label="Master data type" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 205px), 1fr))', gap: 14, margin: '28px 0 30px' }}>
+                  {[
+                    { id: 'services', eyebrow: 'SERVICES', label: 'Service catalog', icon: Scissors },
+                    { id: 'membership', eyebrow: 'MEMBERSHIP', label: 'Plans & privileges', icon: Crown },
+                    { id: 'designation', eyebrow: 'DESIGNATION', label: 'Seniority levels', icon: UserCheck },
+                    { id: 'hierarchy', eyebrow: 'HIERARCHY', label: 'Studio roles', icon: Award }
+                  ].map(tab => {
+                    const Icon = tab.icon;
+                    const selected = masterDataModule === tab.id;
+                    return (
+                      <button key={tab.id} type="button" role="tab" aria-selected={selected} onClick={() => setMasterDataModule(tab.id)} style={{ minHeight: 132, padding: '18px 20px', border: `1.5px solid ${selected ? '#2C2926' : '#D99A64'}`, borderRadius: 22, background: selected ? '#FAF6EE' : '#FFFFFF', color: '#51463D', textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: selected ? '0 5px 16px rgba(54,39,25,.08)' : '0 3px 10px rgba(54,39,25,.025)', transition: 'border-color .16s ease, transform .16s ease, box-shadow .16s ease' }} onMouseEnter={event => { event.currentTarget.style.transform = 'translateY(-2px)'; event.currentTarget.style.boxShadow = '0 8px 20px rgba(54,39,25,.09)'; }} onMouseLeave={event => { event.currentTarget.style.transform = 'none'; event.currentTarget.style.boxShadow = selected ? '0 5px 16px rgba(54,39,25,.08)' : '0 3px 10px rgba(54,39,25,.025)'; }}>
+                        <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '.06em' }}>{tab.eyebrow}</span>
+                          <span style={{ width: 38, height: 38, display: 'grid', placeItems: 'center', borderRadius: 12, background: '#F4EEE5', color: '#6F5D4D' }}><Icon size={19} /></span>
+                        </span>
+                        <span style={{ fontSize: 17, lineHeight: 1.25, fontWeight: 750 }}>{tab.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {masterDataModule === 'services'
+                  ? <ServiceManagement masterCatalogMode />
+                  : masterDataModule === 'membership'
+                    ? <MembershipManagement masterCatalogMode />
+                    : <CentralMasterCatalog activeTab={masterDataModule} />}
+              </section>
+            ) : viewMode === 'reports' ? (
               <MasterAdminReportsDashboard onBack={() => setViewMode('locations')} />
             ) : loading ? (
               <div style={{ textAlign: 'center', padding: '64px 20px', color: '#78716C' }}>

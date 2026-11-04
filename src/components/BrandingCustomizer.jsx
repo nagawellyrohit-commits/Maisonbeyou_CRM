@@ -56,9 +56,10 @@ export default function BrandingCustomizer({ location, initialBranding, section 
   useEffect(() => setView(section), [section]);
 
   useEffect(() => {
-    const openCustomizer = () => {
+    const openCustomizer = event => {
       setDraft(getLocationBranding({ ...location, branding_config: initialBranding }));
-      setView(section);
+      const requestedSection = event.detail?.section;
+      setView(requestedSection || section);
       setOpen(true);
     };
     const eventName = scope === 'master' ? 'open_master_portal_customizer' : 'open_branding_customizer';
@@ -143,7 +144,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
   const sectionLabels = {
     visits: 'Dashboard', clients: 'Clients', services: 'Services', staff: 'Team',
     membership: 'Membership', reports: 'Reports', users: 'User Access', visitor_home: 'Visitor Welcome',
-    branch_details: 'Branch Details', login: 'Login',
+    branch_details: 'Branch Details', appointments: 'Appointments', login: 'Login',
     studio_management: 'Studio Management', all_branches: 'All Branches', locations: 'All Branches', login: 'Login Screen'
   };
 
@@ -257,6 +258,31 @@ export default function BrandingCustomizer({ location, initialBranding, section 
                 <input type="range" min="0" max="8" step="1" value={draft.visitor_card_border_width} onChange={event => update('visitor_card_border_width', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
                 <label style={rangeLabelStyle}>Card corner roundness <strong>{Number(draft.visitor_card_radius) || 18}px</strong></label>
                 <input type="range" min="0" max="48" step="1" value={draft.visitor_card_radius} onChange={event => update('visitor_card_radius', Number(event.target.value))} style={{ width: '100%', accentColor: draft.primary_color }} />
+              </section>}
+
+              {scope === 'branch' && view === 'appointments' && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Appointment booking screen</div>
+                {[
+                  ['appointment_summary_heading', 'Summary page heading'],
+                  ['appointment_page_heading', 'Slot page heading'],
+                  ['appointment_page_subtitle', 'Slot page description'],
+                  ['appointment_continue_label', 'Continue button text'],
+                  ['appointment_confirm_label', 'Confirm button text']
+                ].map(([key, label]) => <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, fontWeight: 700, color: '#57534E' }}>{label}<input value={draft[key] ?? DEFAULT_LOCATION_BRANDING[key]} maxLength={140} onChange={event => update(key, event.target.value)} style={inputStyle} /></label>)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {[
+                    ['appointment_background_color', 'Page background'],
+                    ['appointment_card_color', 'Card fill'],
+                    ['appointment_primary_color', 'Buttons and accents'],
+                    ['appointment_heading_color', 'Headings'],
+                    ['appointment_text_color', 'Main text'],
+                    ['appointment_border_color', 'Card border']
+                  ].map(([key, label]) => <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: 8, border: '1px solid #E7DED2', borderRadius: 8, color: '#57534E', fontSize: 10.5, fontWeight: 700, background: '#FFFFFF' }}><input aria-label={label} type="color" value={draft[key] || DEFAULT_LOCATION_BRANDING[key]} onChange={event => update(key, event.target.value)} style={{ width: 25, height: 25, padding: 0, border: 0, background: 'none', cursor: 'pointer' }} /><span>{label}</span></label>)}
+                </div>
+                <label style={rangeLabelStyle}>Card border thickness <strong>{Number(draft.appointment_card_border_width) || 0}px</strong></label>
+                <input type="range" min="0" max="8" step="1" value={draft.appointment_card_border_width} onChange={event => update('appointment_card_border_width', Number(event.target.value))} style={{ width: '100%', accentColor: draft.appointment_primary_color }} />
+                <label style={rangeLabelStyle}>Card corner roundness <strong>{Number(draft.appointment_card_radius) || 14}px</strong></label>
+                <input type="range" min="0" max="48" step="1" value={draft.appointment_card_radius} onChange={event => update('appointment_card_radius', Number(event.target.value))} style={{ width: '100%', accentColor: draft.appointment_primary_color }} />
               </section>}
 
               <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>

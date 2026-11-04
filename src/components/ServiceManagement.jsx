@@ -12,8 +12,9 @@ import { CATEGORY_ICONS, renderCategoryIcon, CATEGORY_IMAGE_PRESETS } from '../u
 import { getServiceMedia, isVideoMediaUrl } from '../utils/serviceMedia';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 
-export default function ServiceManagement({ branding }) {
+export default function ServiceManagement({ branding, masterCatalogMode = false }) {
   const [categories, setCategories] = useState([]);
+  const [masterCatalogData, setMasterCatalogData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -229,6 +230,13 @@ export default function ServiceManagement({ branding }) {
     try {
       setLoading(true);
       setError('');
+      if (masterCatalogMode) {
+        const result = await apiRequest('/admin/master-catalog');
+        const catalog = result.catalog || {};
+        setMasterCatalogData(catalog);
+        setCategories(catalog.service_catalog?.categories || []);
+        return;
+      }
       try {
         const res = await apiRequest('/admin/categories');
         setCategories(res.categories || []);
@@ -253,7 +261,22 @@ export default function ServiceManagement({ branding }) {
 
   useEffect(() => {
     fetchAdminCategories();
-  }, []);
+  }, [masterCatalogMode]);
+
+  const saveMasterCategories = async (nextCategories) => {
+    const nextCatalog = {
+      ...(masterCatalogData || {}),
+      service_catalog: { ...(masterCatalogData?.service_catalog || {}), categories: nextCategories }
+    };
+    const result = await apiRequest('/admin/master-catalog', {
+      method: 'PUT',
+      body: JSON.stringify({ catalog: nextCatalog })
+    });
+    const savedCatalog = result.catalog || nextCatalog;
+    setMasterCatalogData(savedCatalog);
+    setCategories(savedCatalog.service_catalog?.categories || nextCategories);
+    return savedCatalog.service_catalog?.categories || nextCategories;
+  };
 
   // Category Actions
   useEffect(() => {
@@ -592,6 +615,35 @@ export default function ServiceManagement({ branding }) {
     });
 
     try {
+      if (masterCatalogMode) {
+        let nextCategories;
+        if (categoryModal.mode === 'create') {
+          nextCategories = [...categories, {
+            category_id: Date.now(),
+            category_name: catName.trim(),
+            description: (catDesc || '').trim(),
+            icon: catIcon || 'Sparkles',
+            image_url: finalImageUrl,
+            image_position: imagePositionStr,
+            display_order: parseInt(catOrder) || categories.length + 1,
+            active: 1,
+            services: []
+          }];
+        } else {
+          nextCategories = categories.map(category => Number(category.category_id) === Number(categoryModal.data.category_id) ? {
+            ...category,
+            category_name: catName.trim(),
+            description: (catDesc || '').trim(),
+            icon: catIcon || 'Sparkles',
+            image_url: finalImageUrl,
+            image_position: imagePositionStr,
+            display_order: parseInt(catOrder) || 1
+          } : category);
+        }
+        await saveMasterCategories(nextCategories);
+        setCategoryModal({ open: false, mode: 'create', data: null });
+        return;
+      }
       if (categoryModal.mode === 'create') {
         await apiRequest('/admin/categories', {
           method: 'POST',
@@ -626,6 +678,10 @@ export default function ServiceManagement({ branding }) {
 
   const handleToggleCatActive = async (cat) => {
     try {
+      if (masterCatalogMode) {
+        await saveMasterCategories(categories.map(category => Number(category.category_id) === Number(cat.category_id) ? { ...category, active: category.active === 1 ? 0 : 1 } : category));
+        return;
+      }
       await apiRequest(`/admin/categories/${cat.category_id}`, {
         method: 'PUT',
         body: JSON.stringify({ active: cat.active === 1 ? 0 : 1 })
@@ -641,6 +697,11 @@ export default function ServiceManagement({ branding }) {
     if (!cat) return;
     setDeleteCatConfirmModal(prev => ({ ...prev, deleting: true }));
     try {
+      if (masterCatalogMode) {
+        await saveMasterCategories(categories.filter(category => Number(category.category_id) !== Number(cat.category_id)));
+        setDeleteCatConfirmModal({ open: false, category: null, deleting: false });
+        return;
+      }
       await apiRequest(`/admin/categories/${cat.category_id}`, {
         method: 'DELETE'
       });
@@ -671,6 +732,10 @@ export default function ServiceManagement({ branding }) {
     setCategories(resequenced);
 
     try {
+      if (masterCatalogMode) {
+        await saveMasterCategories(resequenced);
+        return;
+      }
       await Promise.all(
         resequenced.map((catItem, idx) =>
           apiRequest(`/admin/categories/${catItem.category_id}`, {
@@ -908,6 +973,21 @@ export default function ServiceManagement({ branding }) {
         session_interval_unit: servSessionIntervalUnit || 'days'
       };
 
+      if (masterCatalogMode) {
+        const categoryId = Number(serviceModal.categoryId || serviceModal.data?.category_id);
+        const nextCategories = categories.map(category => {
+          if (Number(category.category_id) !== categoryId) return category;
+          const services = category.services || [];
+          if (serviceModal.mode === 'create') {
+            return { ...category, services: [...services, { ...payload, service_id: Date.now(), category_id: categoryId, active: 1 }] };
+          }
+          return { ...category, services: services.map(service => Number(service.service_id) === Number(serviceModal.data.service_id) ? { ...service, ...payload } : service) };
+        });
+        await saveMasterCategories(nextCategories);
+        setServiceModal({ open: false, mode: 'create', categoryId: null, data: null });
+        return;
+      }
+
       if (serviceModal.mode === 'create') {
         await apiRequest('/admin/services', {
           method: 'POST',
@@ -928,6 +1008,13 @@ export default function ServiceManagement({ branding }) {
 
   const handleToggleServActive = async (serv) => {
     try {
+      if (masterCatalogMode) {
+        await saveMasterCategories(categories.map(category => ({
+          ...category,
+          services: (category.services || []).map(service => Number(service.service_id) === Number(serv.service_id) ? { ...service, active: service.active === 1 ? 0 : 1 } : service)
+        })));
+        return;
+      }
       await apiRequest(`/admin/services/${serv.service_id}`, {
         method: 'PUT',
         body: JSON.stringify({ active: serv.active === 1 ? 0 : 1 })

@@ -201,6 +201,14 @@ export default function BranchFranchiseKYCModal({
   const [isSavingAdmins, setIsSavingAdmins] = useState(false);
   const [createdAdminResult, setCreatedAdminResult] = useState([]);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [availableLocations, setAvailableLocations] = useState([]);
+  const [copyServiceCatalog, setCopyServiceCatalog] = useState(false);
+  const [copyMembershipPlans, setCopyMembershipPlans] = useState(false);
+  const [copyDesignationList, setCopyDesignationList] = useState(false);
+  const [copyRoleList, setCopyRoleList] = useState(false);
+  const [copyClientProfiles, setCopyClientProfiles] = useState(false);
+  const [clientSourceLocationId, setClientSourceLocationId] = useState('');
+  const [copyOptionsError, setCopyOptionsError] = useState('');
 
   // Hidden file input refs
   const fileInputRefs = useRef({});
@@ -225,6 +233,13 @@ export default function BranchFranchiseKYCModal({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, currentStep, onSuccess, savedLocation, onClose]);
 
+  useEffect(() => {
+    if (!isOpen || isEdit) return;
+    apiRequest('/locations')
+      .then(result => setAvailableLocations(result.locations || []))
+      .catch(() => setAvailableLocations([]));
+  }, [isOpen, isEdit]);
+
   // Sync preselected registration relationship and firm type when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -234,6 +249,13 @@ export default function BranchFranchiseKYCModal({
       setAdminErrors({});
       setCreatedAdminResult([]);
       setCopiedKey(null);
+      setCopyServiceCatalog(false);
+      setCopyMembershipPlans(false);
+      setCopyDesignationList(false);
+      setCopyRoleList(false);
+      setCopyClientProfiles(false);
+      setClientSourceLocationId('');
+      setCopyOptionsError('');
 
       const initialType = locationToEdit?.type || defaultType || 'branch';
       const initialFirm = locationToEdit?.kyc?.firm_type || locationToEdit?.firm_type || defaultFirmType || 'Proprietor';
@@ -1079,6 +1101,13 @@ export default function BranchFranchiseKYCModal({
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
+    if (!isEdit && relationshipType === 'branch' && copyClientProfiles && !clientSourceLocationId) {
+      setCopyOptionsError('Choose a source branch for the client profiles.');
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      return;
+    }
+    if (relationshipType !== 'branch' && copyClientProfiles) setCopyClientProfiles(false);
+    setCopyOptionsError('');
 
     try {
       setIsSubmitting(true);
@@ -1137,6 +1166,14 @@ export default function BranchFranchiseKYCModal({
             din_number: (s.din_number || '').trim()
           };
         }),
+        startup_data_copy: {
+          client_source_location_id: clientSourceLocationId ? Number(clientSourceLocationId) : null,
+          service_catalog: !isEdit && copyServiceCatalog,
+          membership_plans: !isEdit && copyMembershipPlans,
+          designations: !isEdit && copyDesignationList,
+          team_roles: !isEdit && copyRoleList,
+          client_profiles: !isEdit && relationshipType === 'branch' && copyClientProfiles
+        },
         status: locationToEdit?.status || 'Active'
       };
 
@@ -1155,7 +1192,7 @@ export default function BranchFranchiseKYCModal({
 
       if (res?.location) {
         const savedLoc = res.location;
-        setSavedLocation(savedLoc);
+        setSavedLocation({ ...savedLoc, startup_data_copy: res.startup_data_copy || null });
         setCreatedAdminResult((res.admin_users || []).map(account => ({
           ...account,
           email: account.email || '',
@@ -3500,6 +3537,41 @@ export default function BranchFranchiseKYCModal({
             </div>
           </div>
 
+          {!isEdit && <section style={{ display: 'grid', gap: 18, padding: '22px 20px', border: '1.5px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
+            <div>
+              <h3 style={{ margin: '0 0 6px', color: '#302721', fontSize: 16 }}>Optional data setup</h3>
+              <p style={{ margin: 0, color: '#81766B', fontSize: 12.5, lineHeight: 1.55 }}>Choose which shared master data to copy once into this new {relationshipType}. Leave everything off to keep the current setup.</p>
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {[
+                [copyServiceCatalog, setCopyServiceCatalog, 'Categories & services', 'Copy the central master categories and services.'],
+                [copyMembershipPlans, setCopyMembershipPlans, 'Membership plans', 'Copy the central master plans, prices, and benefits. Selecting this also copies categories and services needed by complimentary benefits.'],
+                [copyDesignationList, setCopyDesignationList, 'Designations', 'Copy the central master designation options.'],
+                [copyRoleList, setCopyRoleList, 'Team roles', 'Copy the central master role options.']
+              ].map(([checked, setChecked, title, description]) => <label key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '13px 14px', border: `1px solid ${checked ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, background: checked ? '#FBF6EF' : '#FFFFFF', cursor: title === 'Categories & services' && copyMembershipPlans ? 'not-allowed' : 'pointer' }}>
+                <input type="checkbox" disabled={title === 'Categories & services' && copyMembershipPlans} checked={checked} onChange={event => {
+                  setChecked(event.target.checked);
+                  if (title === 'Membership plans' && event.target.checked) setCopyServiceCatalog(true);
+                }} style={{ width: 16, height: 16, marginTop: 2, accentColor: '#A9793C', flex: '0 0 auto' }} />
+                <span><strong style={{ display: 'block', color: '#4B4037', fontSize: 13 }}>{title}</strong><span style={{ display: 'block', marginTop: 4, color: '#81766B', fontSize: 12, lineHeight: 1.45 }}>{description}</span></span>
+              </label>)}
+            </div>
+            {relationshipType === 'branch' && <div style={{ display: 'grid', gap: 10, paddingTop: 14, borderTop: '1px solid #EEE6DC' }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '13px 14px', border: `1px solid ${copyClientProfiles ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, background: copyClientProfiles ? '#FBF6EF' : '#FFFFFF', cursor: 'pointer' }}>
+                <input type="checkbox" checked={copyClientProfiles} onChange={event => setCopyClientProfiles(event.target.checked)} style={{ width: 16, height: 16, marginTop: 2, accentColor: '#A9793C', flex: '0 0 auto' }} />
+                <span><strong style={{ display: 'block', color: '#4B4037', fontSize: 13 }}>Copy client profiles from another branch</strong><span style={{ display: 'block', marginTop: 4, color: '#81766B', fontSize: 12, lineHeight: 1.45 }}>One-time copy of client profile and membership details. Past visits remain with their original branch.</span></span>
+              </label>
+              {copyClientProfiles && <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 12, fontWeight: 700 }}>Copy client profiles from
+                <select required value={clientSourceLocationId} onChange={event => setClientSourceLocationId(event.target.value)} style={{ padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF', fontSize: 13 }}>
+                  <option value="">Select a source branch</option>
+                  {availableLocations.filter(location => location.type === 'branch' && (location.status || 'Active').toLowerCase() === 'active' && Number(location.location_id) !== Number(locationToEdit?.location_id)).map(location => <option key={location.location_id} value={location.location_id}>{location.name}</option>)}
+                </select>
+              </label>}
+            </div>}
+            {relationshipType === 'franchise' && <p style={{ margin: 0, paddingTop: 12, borderTop: '1px solid #EEE6DC', color: '#81766B', fontSize: 12 }}>Client profile copying is branch-only and is unavailable for franchises.</p>}
+            {copyOptionsError && <div role="alert" style={{ padding: '10px 12px', border: '1px solid #FECACA', borderRadius: 8, background: '#FEF2F2', color: '#9B1C1C', fontSize: 12 }}>{copyOptionsError}</div>}
+          </section>}
+
           {/* Section 5: Submit Action (Matching New Visitor Form Submit) */}
           <div style={{
             marginTop: '32px',
@@ -4052,6 +4124,9 @@ export default function BranchFranchiseKYCModal({
                 : <><strong>{savedLocation?.name || branchName}</strong> has been registered with complete KYC.</>}
               {!isEdit && ' Every registered proprietor, partner, or director can now sign in to this branch with OTP using their registered mobile number.'}
             </p>
+            {!isEdit && savedLocation?.startup_data_copy && (savedLocation.startup_data_copy.error || Object.entries(savedLocation.startup_data_copy).some(([key, value]) => key !== 'error' && Number(value) > 0)) && <div style={{ width: '100%', maxWidth: 720, margin: '-8px 0 24px', padding: '14px 16px', border: `1px solid ${savedLocation.startup_data_copy.error ? '#FECACA' : '#D9E9DA'}`, borderRadius: 10, background: savedLocation.startup_data_copy.error ? '#FEF2F2' : '#F3FAF4', color: savedLocation.startup_data_copy.error ? '#9B1C1C' : '#315D3B', textAlign: 'left', fontSize: 12.5 }}>
+              {savedLocation.startup_data_copy.error ? `The location was created, but the selected data copy failed: ${savedLocation.startup_data_copy.error}` : <><strong>One-time data copy complete:</strong> {savedLocation.startup_data_copy.categories} categories, {savedLocation.startup_data_copy.services} services, {savedLocation.startup_data_copy.membership_plans} membership plans, {savedLocation.startup_data_copy.designations} designations, {savedLocation.startup_data_copy.team_roles || 0} team roles, and {savedLocation.startup_data_copy.client_profiles} client profiles.</>}
+            </div>}
 
             {/* Credentials Card */}
             {!isEdit && (

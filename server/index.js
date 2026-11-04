@@ -27,6 +27,42 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 const JWT_SECRET = process.env.JWT_SECRET || 'maison-beyou-secret-key-2026';
 
+function ensureCentralMasterCatalogTable() {
+  db.exec(`CREATE TABLE IF NOT EXISTS CENTRAL_MASTER_CATALOG (
+    catalog_id INTEGER PRIMARY KEY CHECK (catalog_id = 1),
+    catalog_json TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+}
+
+function getCentralMasterCatalog() {
+  ensureCentralMasterCatalogTable();
+  const saved = db.prepare('SELECT catalog_json FROM CENTRAL_MASTER_CATALOG WHERE catalog_id = 1').get();
+  if (saved?.catalog_json) {
+    try { return JSON.parse(saved.catalog_json); } catch {}
+  }
+  const firstLocation = db.prepare("SELECT location_id FROM LOCATIONS WHERE LOWER(COALESCE(status, 'active')) = 'active' ORDER BY location_id ASC LIMIT 1").get()
+    || db.prepare('SELECT location_id FROM LOCATIONS ORDER BY location_id ASC LIMIT 1').get();
+  const catalog = { service_catalog: { categories: [] }, membership_plans: [], designations: [], roles: [] };
+  if (firstLocation?.location_id) {
+    const locationId = Number(firstLocation.location_id);
+    const categories = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE location_id = ? ORDER BY display_order, category_id').all(locationId);
+    const servicesForCategory = db.prepare('SELECT * FROM SERVICES WHERE category_id = ? ORDER BY display_order, service_id');
+    catalog.service_catalog.categories = categories.map(category => ({
+      ...category,
+      services: servicesForCategory.all(category.category_id)
+    }));
+    ensureMembershipPlansTable(locationId);
+    catalog.membership_plans = db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? AND COALESCE(is_active, 1) = 1 ORDER BY price, plan_id').all(locationId);
+    ensureTeamMasterOptions(locationId);
+    const options = db.prepare('SELECT option_type, option_name FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND active = 1 ORDER BY option_type, option_name COLLATE NOCASE').all(locationId);
+    catalog.designations = options.filter(option => option.option_type === 'designation').map(option => ({ name: option.option_name }));
+    catalog.roles = options.filter(option => option.option_type === 'role').map(option => ({ name: option.option_name }));
+  }
+  db.prepare('INSERT OR IGNORE INTO CENTRAL_MASTER_CATALOG (catalog_id, catalog_json) VALUES (1, ?)').run(JSON.stringify(catalog));
+  return catalog;
+}
+
 const uploadsDir = path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -366,6 +402,19 @@ const DEFAULT_LOCATION_BRANDING = {
   dashboard_button_border: '#D99A64',
   dashboard_button_border_width: 1,
   dashboard_button_radius: 48,
+  appointment_page_heading: 'Book an appointment slot',
+  appointment_page_subtitle: 'Select the date, duration, and start time. Review your total on the previous step.',
+  appointment_summary_heading: 'Review booking summary',
+  appointment_continue_label: 'CONTINUE TO BOOK SLOTS',
+  appointment_confirm_label: 'CONFIRM & RETURN TO APPOINTMENTS',
+  appointment_background_color: '#F7F2E9',
+  appointment_card_color: '#FFFFFF',
+  appointment_primary_color: '#A9793C',
+  appointment_heading_color: '#302721',
+  appointment_text_color: '#4B4037',
+  appointment_border_color: '#E8D7C0',
+  appointment_card_radius: 22,
+  appointment_card_border_width: 1,
   service_heading: 'Service & Pricing Management',
   service_add_category_label: 'Add New Category',
   service_add_first_category_label: 'Add Your Category',
@@ -1689,6 +1738,59 @@ app.put('/api/branding/:id', authenticateToken, authorizeRoles('master_admin', '
   }
 });
 
+// Central master catalog: one editable template shared by the master admin and offered during location setup.
+app.get('/api/admin/master-catalog', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+  try {
+    res.json({ catalog: getCentralMasterCatalog() });
+  } catch (error) {
+    console.error('Load central master catalog error:', error);
+    res.status(500).json({ error: 'Could not load central master catalog.' });
+  }
+});
+
+app.put('/api/admin/master-catalog', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+  try {
+    const catalog = req.body?.catalog;
+    if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog)) return res.status(400).json({ error: 'Provide a valid master catalog.' });
+    const serviceCategories = Array.isArray(catalog.service_catalog?.categories) ? catalog.service_catalog.categories : [];
+    const membershipPlans = Array.isArray(catalog.membership_plans) ? catalog.membership_plans : [];
+    const designations = Array.isArray(catalog.designations) ? catalog.designations : [];
+    const roles = Array.isArray(catalog.roles) ? catalog.roles : [];
+    const normalized = {
+      service_catalog: { categories: serviceCategories.map((category, index) => ({
+        ...category,
+        category_name: String(category.category_name || '').trim(),
+        display_order: Number(category.display_order) || index + 1,
+        active: category.active === 0 ? 0 : 1,
+        services: (Array.isArray(category.services) ? category.services : []).map((service, serviceIndex) => ({
+          ...service,
+          service_name: String(service.service_name || '').trim(),
+          price: Math.max(0, Number(service.price) || 0),
+          duration_mins: Math.max(1, Number(service.duration_mins) || 30),
+          display_order: Number(service.display_order) || serviceIndex + 1,
+          has_sessions: Number(service.has_sessions) || 0,
+          total_sessions: Number(service.total_sessions) || 1,
+          session_interval: Number(service.session_interval) || 0,
+          session_interval_unit: service.session_interval_unit || 'days',
+          active: service.active === 0 ? 0 : 1
+        }))
+      })) },
+      membership_plans: membershipPlans.map(plan => ({ ...plan, name: String(plan.name || plan.fullName || '').trim(), price: Math.max(0, Number(plan.price) || 0) })),
+      designations: designations.map(item => ({ name: String(item.name || item.option_name || '').trim() })).filter(item => item.name),
+      roles: roles.map(item => ({ name: String(item.name || item.option_name || '').trim() })).filter(item => item.name)
+    };
+    if (normalized.service_catalog.categories.some(category => !category.category_name || category.services.some(service => !service.service_name))) return res.status(400).json({ error: 'Each category and service needs a name before saving.' });
+    if (normalized.membership_plans.some(plan => !plan.name)) return res.status(400).json({ error: 'Each membership plan needs a name before saving.' });
+    ensureCentralMasterCatalogTable();
+    db.prepare(`INSERT INTO CENTRAL_MASTER_CATALOG (catalog_id, catalog_json, updated_at) VALUES (1, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(catalog_id) DO UPDATE SET catalog_json = excluded.catalog_json, updated_at = CURRENT_TIMESTAMP`).run(JSON.stringify(normalized));
+    res.json({ success: true, catalog: normalized });
+  } catch (error) {
+    console.error('Save central master catalog error:', error);
+    res.status(500).json({ error: 'Could not save central master catalog.' });
+  }
+});
+
 // Get all locations or filter by type (?type=branch or ?type=franchise)
 app.get('/api/locations', authenticateToken, (req, res) => {
   try {
@@ -1917,6 +2019,32 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
     }
 
     const cleanType = type.trim().toLowerCase();
+    const startupDataCopy = req.body.startup_data_copy && typeof req.body.startup_data_copy === 'object' ? req.body.startup_data_copy : {};
+    const copyMembershipPlans = Boolean(startupDataCopy.membership_plans);
+    const copyMasterCatalog = Boolean(startupDataCopy.service_catalog || copyMembershipPlans);
+    const copyDesignations = Boolean(startupDataCopy.designations);
+    const copyTeamRoles = Boolean(startupDataCopy.team_roles);
+    const copyClientProfiles = Boolean(startupDataCopy.client_profiles);
+    const masterSourceId = Number(startupDataCopy.master_source_location_id) || 0;
+    const clientSourceId = Number(startupDataCopy.client_source_location_id) || 0;
+    const hasMasterCopy = copyMasterCatalog || copyMembershipPlans || copyDesignations || copyTeamRoles;
+    let masterSource = null;
+    let centralCatalog = null;
+    let clientSource = null;
+    if (hasMasterCopy) {
+      if (masterSourceId) {
+        masterSource = db.prepare('SELECT location_id, type FROM LOCATIONS WHERE location_id = ?').get(masterSourceId);
+        if (!masterSource) return res.status(400).json({ error: 'The selected master data source location does not exist.' });
+      } else {
+        centralCatalog = getCentralMasterCatalog();
+      }
+    }
+    if (copyClientProfiles) {
+      if (cleanType !== 'branch') return res.status(400).json({ error: 'Client profiles can only be copied to a branch, never a franchise.' });
+      if (!clientSourceId) return res.status(400).json({ error: 'Choose a source branch for the client profiles.' });
+      clientSource = db.prepare("SELECT location_id, type FROM LOCATIONS WHERE location_id = ? AND type = 'branch'").get(clientSourceId);
+      if (!clientSource) return res.status(400).json({ error: 'Client profiles can only be copied from another branch.' });
+    }
     const cleanFirmType = (firm_type || '').trim();
     const stakeholderAdmins = (Array.isArray(stakeholders) ? stakeholders : []).filter(s => s && (s.name || '').trim());
     if (cleanFirmType) {
@@ -2084,6 +2212,113 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       });
     }
 
+    const copyResults = { categories: 0, services: 0, membership_plans: 0, designations: 0, team_roles: 0, client_profiles: 0 };
+    if (hasMasterCopy || copyClientProfiles) {
+      const copyOnce = db.transaction(() => {
+        const serviceIdMap = new Map();
+        if (copyMasterCatalog) {
+          const sourceCategories = centralCatalog
+            ? (centralCatalog.service_catalog?.categories || [])
+            : db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE location_id = ? ORDER BY display_order, category_id').all(masterSource.location_id);
+          const categoryColumns = db.pragma('table_info(SERVICE_CATEGORIES)').map(column => column.name).filter(column => !['category_id', 'location_id', 'created_at', 'updated_at'].includes(column));
+          const createCategory = db.prepare(`INSERT INTO SERVICE_CATEGORIES (location_id, ${categoryColumns.join(', ')}) VALUES (${Array.from({ length: categoryColumns.length + 1 }, () => '?').join(', ')})`);
+          const serviceColumns = db.pragma('table_info(SERVICES)').map(column => column.name).filter(column => !['service_id', 'category_id', 'created_at', 'updated_at'].includes(column));
+          const createService = db.prepare(`INSERT INTO SERVICES (category_id, ${serviceColumns.join(', ')}) VALUES (${Array.from({ length: serviceColumns.length + 1 }, () => '?').join(', ')})`);
+          const sourceServices = centralCatalog ? null : db.prepare('SELECT * FROM SERVICES WHERE category_id = ? ORDER BY display_order, service_id');
+          for (const category of sourceCategories) {
+            const categoryInsert = createCategory.run(newLocId, ...categoryColumns.map(column => category[column] ?? null));
+            const newCategoryId = Number(categoryInsert.lastInsertRowid);
+            copyResults.categories += 1;
+            const categoryServices = centralCatalog ? (category.services || []) : sourceServices.all(category.category_id);
+            for (const service of categoryServices) {
+              const serviceInsert = createService.run(newCategoryId, ...serviceColumns.map(column => service[column] ?? null));
+              if (service.service_id) serviceIdMap.set(Number(service.service_id), Number(serviceInsert.lastInsertRowid));
+              copyResults.services += 1;
+            }
+          }
+        }
+
+        if (copyMembershipPlans) {
+          ensureMembershipPlansTable(newLocId);
+          const planColumns = db.pragma('table_info(MEMBERSHIP_PLANS)').map(column => column.name).filter(column => !['plan_id', 'location_id', 'created_at', 'updated_at'].includes(column));
+          const createPlan = db.prepare(`INSERT INTO MEMBERSHIP_PLANS (location_id, ${planColumns.join(', ')}) VALUES (${Array.from({ length: planColumns.length + 1 }, () => '?').join(', ')})`);
+          if (masterSource) ensureMembershipPlansTable(masterSource.location_id);
+          const sourcePlans = centralCatalog
+            ? centralCatalog.membership_plans || []
+            : db.prepare('SELECT * FROM MEMBERSHIP_PLANS WHERE location_id = ? ORDER BY price, plan_id').all(masterSource.location_id);
+          for (const [planIndex, plan] of sourcePlans.entries()) {
+            const planKey = String(plan.id || plan.name || `PLAN${planIndex + 1}`).toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40) || `PLAN${planIndex + 1}`;
+            const copiedPlan = { ...plan, id: `${planKey}-${planIndex + 1}-L${newLocId}` };
+            copiedPlan.name = copiedPlan.name || copiedPlan.fullName || copiedPlan.tier || 'Membership';
+            copiedPlan.fullName = copiedPlan.fullName || copiedPlan.name;
+            copiedPlan.tier = copiedPlan.tier || copiedPlan.name;
+            copiedPlan.validity = copiedPlan.validity || '12 months';
+            copiedPlan.price = Number(copiedPlan.price) || 0;
+            copiedPlan.credits = Number(copiedPlan.credits) || 0;
+            copiedPlan.discount_percent = Number(copiedPlan.discount_percent) || 0;
+            copiedPlan.is_active = copiedPlan.is_active === 0 ? 0 : 1;
+            copiedPlan.is_custom = Number(copiedPlan.is_custom) || 0;
+            copiedPlan.free_services = copiedPlan.free_services || '[]';
+            if (Array.isArray(copiedPlan.benefits)) copiedPlan.benefits = JSON.stringify(copiedPlan.benefits);
+            else if (typeof copiedPlan.benefits === 'string' && copiedPlan.benefits.trim() && !copiedPlan.benefits.trim().startsWith('[')) copiedPlan.benefits = JSON.stringify(copiedPlan.benefits.split(',').map(value => value.trim()).filter(Boolean));
+            copiedPlan.benefits = copiedPlan.benefits || '[]';
+            if (copiedPlan.free_services) {
+              try {
+                copiedPlan.free_services = JSON.stringify(JSON.parse(copiedPlan.free_services).map(item => ({ ...item, service_id: serviceIdMap.get(Number(item.service_id)) || item.service_id })));
+              } catch {}
+            }
+            createPlan.run(newLocId, ...planColumns.map(column => copiedPlan[column]));
+            copyResults.membership_plans += 1;
+          }
+        }
+
+        if (copyDesignations) {
+          const sourceDesignations = centralCatalog
+            ? (centralCatalog.designations || []).map(item => ({ option_name: item.name || item.option_name }))
+            : db.prepare("SELECT option_name FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'designation' AND active = 1 ORDER BY option_name COLLATE NOCASE").all(masterSource.location_id);
+          const createDesignation = db.prepare("INSERT INTO TEAM_MASTER_OPTIONS (location_id, option_type, option_name, active) VALUES (?, 'designation', ?, 1)");
+          for (const item of sourceDesignations) {
+            createDesignation.run(newLocId, item.option_name);
+            copyResults.designations += 1;
+          }
+        }
+
+        if (copyTeamRoles) {
+          const sourceRoles = centralCatalog
+            ? (centralCatalog.roles || []).map(item => ({ option_name: item.name || item.option_name }))
+            : db.prepare("SELECT option_name FROM TEAM_MASTER_OPTIONS WHERE location_id = ? AND option_type = 'role' AND active = 1 ORDER BY option_name COLLATE NOCASE").all(masterSource.location_id);
+          const createRole = db.prepare("INSERT INTO TEAM_MASTER_OPTIONS (location_id, option_type, option_name, active) VALUES (?, 'role', ?, 1)");
+          for (const item of sourceRoles) {
+            if (!item.option_name) continue;
+            createRole.run(newLocId, item.option_name);
+            copyResults.team_roles += 1;
+          }
+        }
+
+        if (copyClientProfiles) {
+          const clientColumns = db.pragma('table_info(CLIENTS)').map(column => column.name).filter(column => !['client_id', 'location_id', 'created_at', 'updated_at'].includes(column));
+          const createClient = db.prepare(`INSERT OR IGNORE INTO CLIENTS (location_id, ${clientColumns.join(', ')}) VALUES (${Array.from({ length: clientColumns.length + 1 }, () => '?').join(', ')})`);
+          const sourceClients = db.prepare('SELECT * FROM CLIENTS WHERE location_id = ? ORDER BY client_id').all(clientSource.location_id);
+          for (const client of sourceClients) {
+            const result = createClient.run(newLocId, ...clientColumns.map(column => client[column]));
+            if (result.changes) copyResults.client_profiles += 1;
+          }
+        }
+      });
+      try {
+        copyOnce();
+      } catch (error) {
+        copyResults.categories = 0;
+        copyResults.services = 0;
+        copyResults.membership_plans = 0;
+        copyResults.designations = 0;
+        copyResults.team_roles = 0;
+        copyResults.client_profiles = 0;
+        copyResults.error = error.message || 'The selected startup data could not be copied.';
+        console.error('Location startup data copy error:', error);
+      }
+    }
+
     const savedLocation = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(newLocId);
     const savedKyc = db.prepare('SELECT * FROM LOCATION_KYC WHERE location_id = ?').get(newLocId);
     const savedStakeholders = parseStakeholders(db.prepare('SELECT * FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC').all(newLocId));
@@ -2110,7 +2345,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       targetType: 'LOCATION',
       targetId: newLocId,
       locationId: newLocId,
-      details: { name: savedLocation.name, code: savedLocation.code, type: cleanType },
+      details: { name: savedLocation.name, code: savedLocation.code, type: cleanType, startup_data_copy: copyResults },
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
@@ -2126,7 +2361,8 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
         } : null,
         stakeholders: savedStakeholders || []
       },
-      admin_users: provisionedDirectors
+      admin_users: provisionedDirectors,
+      startup_data_copy: copyResults
     });
   } catch (error) {
     console.error('Create location error:', error);
@@ -6934,16 +7170,11 @@ const appointmentSlotMinutes = slot => {
 };
 const normalizeAppointmentDuration = value => {
   const minutes = Number(value ?? 30);
-  return Number.isInteger(minutes) && minutes >= 30 && minutes <= 480 && minutes % 30 === 0 ? minutes : null;
+  // Service durations can be values such as 35 or 65 minutes. Slot starts
+  // remain on the half-hour grid, but the booked duration must preserve the
+  // actual combined service time instead of rejecting it as non-30-minute.
+  return Number.isInteger(minutes) && minutes >= 5 && minutes <= 480 && minutes % 5 === 0 ? minutes : null;
 };
-const appointmentServiceKey = service => {
-  const serviceId = Number(service?.service_id);
-  if (Number.isInteger(serviceId) && serviceId > 0 && serviceId !== 999999) return `id:${serviceId}`;
-  const normalizedName = String(service?.service_name || service?.service_name_snapshot || service?.name || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return normalizedName ? `name:${normalizedName}` : null;
-};
-
 app.get('/api/branch/operating-hours', authenticateToken, (req, res) => {
   if (!req.locationId) return res.status(400).json({ error: 'Branch context is required to view opening hours.' });
   res.json({ hours: getBranchOperatingHours(req.locationId) });
@@ -7093,20 +7324,6 @@ app.patch('/api/appointments/:id', authenticateToken, authorizeRoles('admin', 'm
     if (!hours?.open || slotMinutes < opensAt || slotMinutes + duration > closesAt || (slotMinutes - opensAt) % 30 !== 0) {
       return res.status(400).json({ error: 'That time and duration do not fit branch opening hours.' });
     }
-    const existing = db.prepare(`
-      SELECT visit_id, service_time, appointment_duration_mins FROM VISITS
-      WHERE location_id = ? AND date(visit_date) = date(?) AND COALESCE(is_appointment, 0) = 1
-        AND visit_id != ? AND LOWER(COALESCE(payment_status, '')) != 'cancelled'
-    `).all(locationId, date, visitId);
-    const overlaps = existing.filter(row => {
-      const otherStart = appointmentSlotMinutes(row.service_time);
-      const otherDuration = normalizeAppointmentDuration(row.appointment_duration_mins) || 30;
-      return otherStart !== null && slotMinutes < otherStart + otherDuration && otherStart < slotMinutes + duration;
-    });
-    const currentServiceKeys = new Set((nextServices || db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(visitId)).map(appointmentServiceKey).filter(Boolean));
-    const sameServiceOverlap = overlaps.some(row => db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(row.visit_id).some(service => currentServiceKeys.has(appointmentServiceKey(service))));
-    if (sameServiceOverlap) return res.status(409).json({ error: 'This service is already booked during that time. Choose another slot or service.' });
-
     const transaction = db.transaction(() => {
       db.prepare('UPDATE VISITS SET visit_date = ?, service_time = ?, appointment_duration_mins = ? WHERE visit_id = ? AND location_id = ? AND COALESCE(is_appointment, 0) = 1')
         .run(date, slot, duration, visitId, locationId);
@@ -7245,7 +7462,7 @@ app.get('/api/appointments/slots', authenticateToken, (req, res) => {
     const duration = normalizeAppointmentDuration(req.query.duration);
     if (!locationId) return res.status(400).json({ error: 'Branch context is required to view appointment slots.' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Choose a valid appointment date.' });
-    if (duration === null) return res.status(400).json({ error: 'Choose an appointment duration in 30-minute increments.' });
+    if (duration === null) return res.status(400).json({ error: 'Appointment duration must be between 5 minutes and 8 hours in 5-minute increments.' });
     const currentBranchTime = getBranchDateTime();
     const isPastDate = date < currentBranchTime.date;
     const weekday = appointmentWeekdayForDate(date);
@@ -7274,15 +7491,17 @@ app.get('/api/appointments/slots', authenticateToken, (req, res) => {
     `).all(locationId, date, excludeVisitId, excludeVisitId);
     res.json({ date, weekday, hours: dayHours, duration, is_open: Boolean(dayHours.open && !isPastDate), slots: slots.map(slot => {
       const slotStart = appointmentSlotMinutes(slot);
-      const slotEnd = slotStart + duration;
+      // The schedule marks only matching start times as occupied. Appointment
+      // durations still constrain closing-time fit, but do not grey every
+      // later half-hour start within an existing service's duration.
       const conflicts = booked.filter(row => {
         const bookedStart = appointmentSlotMinutes(row.slot);
-        const bookedDuration = normalizeAppointmentDuration(row.appointment_duration_mins) || 30;
-        return bookedStart !== null && slotStart < bookedStart + bookedDuration && bookedStart < slotEnd;
+        return bookedStart !== null && bookedStart === slotStart;
       });
       return { slot, booked: conflicts.map(row => ({
         visit_id: row.visit_id,
         slot: row.slot,
+        duration_mins: normalizeAppointmentDuration(row.appointment_duration_mins) || 30,
         client_name: `${row.name || ''} ${row.surname || ''}`.trim(),
         services: row.services || '',
         service_ids: String(row.service_ids || '').split('|').filter(Boolean).map(Number),
@@ -7324,7 +7543,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       const date = String(todayDate).slice(0, 10);
       const slot = String(service_time || '').trim();
       appointmentDuration = normalizeAppointmentDuration(req.body.appointment_duration_mins);
-      if (appointmentDuration === null) throw new Error('Choose an appointment duration in 30-minute increments.');
+      if (appointmentDuration === null) throw new Error('Appointment duration must be between 5 minutes and 8 hours in 5-minute increments.');
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !slot) throw new Error('Choose an appointment date and an open time slot.');
       const currentBranchTime = getBranchDateTime();
       if (date < currentBranchTime.date) throw new Error('Appointment date cannot be in the past.');
@@ -7342,18 +7561,6 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
         throw new Error('That appointment time is outside this branch’s opening hours. Select an open slot.');
       }
       if (slotMinutes + appointmentDuration > closesAt) throw new Error('The selected appointment duration extends past branch closing time. Choose an earlier slot.');
-      const existingBookings = db.prepare(`SELECT visit_id, service_time, appointment_duration_mins FROM VISITS WHERE location_id = ? AND date(visit_date) = date(?) AND COALESCE(is_appointment, 0) = 1 AND LOWER(COALESCE(payment_status, '')) != 'cancelled'`).all(req.locationId, date);
-      const overlapsBooking = existingBookings.filter(existing => {
-        const existingStart = appointmentSlotMinutes(existing.service_time);
-        const existingDuration = normalizeAppointmentDuration(existing.appointment_duration_mins) || 30;
-        return existingStart !== null && slotMinutes < existingStart + existingDuration && existingStart < slotMinutes + appointmentDuration;
-      });
-      const selectedServiceKeys = new Set((Array.isArray(services) ? services : []).map(appointmentServiceKey).filter(Boolean));
-      const sameServiceConflict = overlapsBooking.some(existing => {
-        const bookedServices = db.prepare('SELECT service_id, service_name_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(existing.visit_id);
-        return bookedServices.some(service => selectedServiceKeys.has(appointmentServiceKey(service)));
-      });
-      if (sameServiceConflict) throw new Error('This service is already booked during that time. Choose another slot or service.');
     }
     let finalClientId = client_id;
 

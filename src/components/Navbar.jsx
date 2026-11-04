@@ -1364,7 +1364,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                         type="button"
                         onClick={() => {
                           setShowSwitchMenu(false);
-                          window.dispatchEvent(new Event('open_branding_customizer'));
+                          window.dispatchEvent(new CustomEvent('open_branding_customizer', { detail: { section: activeTab === 'appointments' ? 'appointments' : undefined } }));
                         }}
                         style={{
                           width: '100%',

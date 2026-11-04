@@ -9,7 +9,6 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout, 
   const [counts, setCounts] = useState({ branchCount: 2, franchiseCount: 2, totalLocations: 4 });
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
-
   const fetchSummary = async () => {
     try {
       setLoading(true);
@@ -88,6 +87,7 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout, 
         zIndex: 2,
         width: '100%'
       }}>
+        <>
         {/* Header matching user reference */}
         <div className="concierge-header" style={{ marginBottom: 'clamp(28px, 4vh, 42px)' }}>
           <h1 className="concierge-title" style={{ letterSpacing: '0.14em' }}>
@@ -157,6 +157,7 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout, 
             </div>
           </div>
         </div>
+        </>
       </main>
       <BrandingCustomizer scope="master" section="studio_management" showMasterLoginTab location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
     </div>

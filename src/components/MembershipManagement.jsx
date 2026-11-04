@@ -52,14 +52,48 @@ function ComplimentaryServiceSelector({ services, value = [], membershipPrice, o
   );
 }
 
-export default function MembershipManagement({ onOpenClient, activeLocation, currentUser, branding }) {
+function parsePlanArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return value.split(',').map(item => item.trim()).filter(Boolean);
+  }
+}
+
+function normalizeCentralPlan(plan, index) {
+  const name = plan.name || plan.fullName || plan.tier || `Membership ${index + 1}`;
+  return {
+    ...plan,
+    id: String(plan.id || `master-plan-${index + 1}`),
+    plan_id: plan.plan_id || plan.id || `master-plan-${index + 1}`,
+    name,
+    fullName: plan.fullName || `${name.toUpperCase()} MEMBERSHIP`,
+    tier: plan.tier || name,
+    price: Number(plan.price) || 0,
+    credits: Number(plan.credits ?? plan.price) || 0,
+    validity: plan.validity || 'Valid for 30 days',
+    validityBadge: plan.validityBadge || String(plan.validity || 'Valid for 30 days').toUpperCase(),
+    durationLabel: plan.durationLabel || (plan.validity ? `(${String(plan.validity).replace(/^valid for /i, 'per ')})` : '(per 30 days)'),
+    benefits: parsePlanArray(plan.benefits),
+    free_services: parsePlanArray(plan.free_services),
+    discount_percent: Number(plan.discount_percent) || 0,
+    is_active: plan.is_active === 0 ? 0 : 1
+  };
+}
+
+export default function MembershipManagement({ onOpenClient, activeLocation, currentUser, branding, masterCatalogMode = false }) {
   const user = currentUser || JSON.parse(localStorage.getItem('crm_user') || '{}');
   const effectiveRole = user?.original_role || user?.role;
-  const canManagePlans = effectiveRole === 'master_admin'
+  const canManagePlans = masterCatalogMode
+    || effectiveRole === 'master_admin'
     || effectiveRole === 'admin'
     || (effectiveRole === 'reception' && canAccessModule(user, 'membership'));
 
   const [plans, setPlans] = useState([]);
+  const [centralCatalogData, setCentralCatalogData] = useState(null);
   const [archivedPlans, setArchivedPlans] = useState([]);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [members, setMembers] = useState([]);
@@ -175,6 +209,20 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     const requestId = ++membershipRequestId.current;
     try {
       setLoading(true);
+      if (masterCatalogMode) {
+        const result = await apiRequest('/admin/master-catalog');
+        if (requestId !== membershipRequestId.current) return;
+        const catalog = result.catalog || {};
+        const allPlans = (catalog.membership_plans || []).map(normalizeCentralPlan);
+        setCentralCatalogData(catalog);
+        setPlans(allPlans.filter(plan => Number(plan.is_active) !== 0));
+        setArchivedPlans(allPlans.filter(plan => Number(plan.is_active) === 0));
+        setProgramTitle(catalog.membership_program_title || 'WORLD OF PRIVILEGES');
+        setTempTitle(catalog.membership_program_title || 'WORLD OF PRIVILEGES');
+        setMembers([]);
+        setStats({ total_members: 0, total_allocated: 0, total_used: 0, total_balance: 0, overall_usage_pct: 0, tier_counts: {} });
+        return result;
+      }
       const res = await apiRequest('/memberships');
       // Ignore responses from a previous branch if the user switched locations
       // while the request was in flight.
@@ -230,17 +278,24 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     setLoading(true);
     fetchMemberships();
     return () => { membershipRequestId.current += 1; };
-  }, [activeLocation?.location_id, currentUser?.location_id]);
+  }, [activeLocation?.location_id, currentUser?.location_id, masterCatalogMode]);
 
   useEffect(() => {
     let cancelled = false;
     setServiceOptions([]);
-    apiRequest('/categories').then(result => {
+    (masterCatalogMode ? apiRequest('/admin/master-catalog').then(result => ({ categories: result.catalog?.service_catalog?.categories || [] })) : apiRequest('/categories')).then(result => {
       if (cancelled) return;
       setServiceOptions((result.categories || []).flatMap(category => category.services || []).filter(service => Number(service.active ?? 1) === 1));
     }).catch(error => console.error('Could not load services for membership benefits:', error));
     return () => { cancelled = true; };
-  }, [activeLocation?.location_id, currentUser?.location_id]);
+  }, [activeLocation?.location_id, currentUser?.location_id, masterCatalogMode]);
+
+  const saveCentralPlans = async nextPlans => {
+    const nextCatalog = { ...(centralCatalogData || {}), membership_plans: nextPlans };
+    const result = await apiRequest('/admin/master-catalog', { method: 'PUT', body: JSON.stringify({ catalog: nextCatalog }) });
+    setCentralCatalogData(result.catalog || nextCatalog);
+    await fetchMemberships();
+  };
 
   const handleSelectPlanForEnroll = (plan) => {
     if (!plan) return;
@@ -427,10 +482,16 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         free_services: newPlanForm.freeServices
       };
 
-      const res = await apiRequest('/memberships/plans', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
+      const res = masterCatalogMode
+        ? await (async () => {
+            const planId = `${payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`;
+            await saveCentralPlans([...(centralCatalogData?.membership_plans || []), { ...payload, id: planId, is_active: 1 }]);
+            return { success: true };
+          })()
+        : await apiRequest('/memberships/plans', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+          });
 
       if (res && res.success) {
         setShowAddPlanModal(false);
@@ -458,7 +519,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           freeServices: []
         });
         await fetchMemberships();
-        notifyMembershipChanged();
+        if (!masterCatalogMode) notifyMembershipChanged();
       } else {
         alert(res?.error || 'Failed to save membership tier');
       }
@@ -520,6 +581,14 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     if (!tempTitle || !tempTitle.trim()) return;
     try {
       setSavingTitle(true);
+      if (masterCatalogMode) {
+        const nextCatalog = { ...(centralCatalogData || {}), membership_program_title: tempTitle.trim() };
+        const result = await apiRequest('/admin/master-catalog', { method: 'PUT', body: JSON.stringify({ catalog: nextCatalog }) });
+        setCentralCatalogData(result.catalog || nextCatalog);
+        setProgramTitle(tempTitle.trim());
+        setIsEditingTitle(false);
+        return;
+      }
       const res = await apiRequest('/memberships/title', {
         method: 'PUT',
         body: JSON.stringify({ title: tempTitle.trim() })
@@ -636,16 +705,27 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
         free_services: editPlanForm.freeServices
       };
 
-      const res = await apiRequest(`/memberships/plans/${editingPlan.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
+      const res = masterCatalogMode
+        ? await (async () => {
+            const nextPlans = (centralCatalogData?.membership_plans || []).map((plan, index) => {
+              const normalized = normalizeCentralPlan(plan, index);
+              return String(normalized.id) === String(editingPlan.id)
+                ? { ...plan, ...payload, id: normalized.id, is_active: normalized.is_active }
+                : plan;
+            });
+            await saveCentralPlans(nextPlans);
+            return { success: true };
+          })()
+        : await apiRequest(`/memberships/plans/${editingPlan.id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+          });
 
       if (res && res.success) {
         setShowEditPlanModal(false);
         setEditingPlan(null);
         await fetchMemberships();
-        notifyMembershipChanged();
+        if (!masterCatalogMode) notifyMembershipChanged();
       } else {
         alert(res?.error || 'Failed to update membership plan');
       }
@@ -670,16 +750,25 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     if (!deleteConfirmModal.planId) return;
     try {
       setDeleteConfirmModal(prev => ({ ...prev, deleting: true }));
-      const res = await apiRequest(`/memberships/plans/${deleteConfirmModal.planId}`, {
-        method: 'DELETE'
-      });
+      const res = masterCatalogMode
+        ? await (async () => {
+            const nextPlans = (centralCatalogData?.membership_plans || []).map((plan, index) => {
+              const normalized = normalizeCentralPlan(plan, index);
+              return String(normalized.id) === String(deleteConfirmModal.planId) ? { ...plan, is_active: 0 } : plan;
+            });
+            await saveCentralPlans(nextPlans);
+            return { success: true };
+          })()
+        : await apiRequest(`/memberships/plans/${deleteConfirmModal.planId}`, { method: 'DELETE' });
       if (res && res.success) {
         setDeleteConfirmModal({ open: false, planId: null, planName: '', deleting: false });
         setMembershipTab('archived');
         await fetchMemberships();
-        const archived = [...archivedPlans, ...plans].find(plan => plan.id === deleteConfirmModal.planId || String(plan.plan_id) === String(deleteConfirmModal.planId));
-        if (archived) loadPlanHistory(archived);
-        notifyMembershipChanged();
+        if (!masterCatalogMode) {
+          const archived = [...archivedPlans, ...plans].find(plan => plan.id === deleteConfirmModal.planId || String(plan.plan_id) === String(deleteConfirmModal.planId));
+          if (archived) loadPlanHistory(archived);
+          notifyMembershipChanged();
+        }
       } else {
         alert(res?.error || 'Failed to delete plan');
         setDeleteConfirmModal(prev => ({ ...prev, deleting: false }));
@@ -708,11 +797,19 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
   const handleRestorePlan = async plan => {
     try {
-      await apiRequest(`/memberships/plans/${encodeURIComponent(plan.id)}/restore`, { method: 'PUT' });
+      if (masterCatalogMode) {
+        const nextPlans = (centralCatalogData?.membership_plans || []).map((item, index) => {
+          const normalized = normalizeCentralPlan(item, index);
+          return String(normalized.id) === String(plan.id) ? { ...item, is_active: 1 } : item;
+        });
+        await saveCentralPlans(nextPlans);
+      } else {
+        await apiRequest(`/memberships/plans/${encodeURIComponent(plan.id)}/restore`, { method: 'PUT' });
+      }
       setSelectedHistoryPlan(null);
       setPlanHistory(null);
       await fetchMemberships();
-      notifyMembershipChanged();
+      if (!masterCatalogMode) notifyMembershipChanged();
     } catch (error) {
       alert(error.message || 'Could not restore the plan.');
     }
@@ -774,6 +871,11 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
             {branding?.membership_heading || 'Membership Tiers & Privileges'}
           </h1>
         </div>
+        {masterCatalogMode && canManagePlans && membershipTab === 'plans' && (
+          <button type="button" onClick={() => setShowAddPlanModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 15px', border: '1px solid #B88B4A', borderRadius: 8, background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)', color: '#FFFFFF', fontSize: 12, fontWeight: 750, cursor: 'pointer', boxShadow: '0 3px 10px rgba(184,139,74,.18)' }}>
+            <Plus size={15} /> Add membership
+          </button>
+        )}
 
       </div>
 
@@ -782,7 +884,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           {[
             ['plans', 'Active Plans'],
             ['archived', `Archived Plans (${archivedPlans.length})`],
-            ['migrate', 'Migrate Members']
+            ...(!masterCatalogMode ? [['migrate', 'Migrate Members']] : [])
           ].map(([tab, label]) => (
             <button key={tab} type="button" role="tab" aria-selected={membershipTab === tab} onClick={() => setMembershipTab(tab)} style={{ padding: '9px 14px', borderRadius: 8, border: membershipTab === tab ? '1px solid #B88B4A' : '1px solid #E7DFD5', background: membershipTab === tab ? '#FAF6EE' : '#FFFFFF', color: membershipTab === tab ? '#8C6228' : '#57534E', fontWeight: 700, cursor: 'pointer' }}>{label}</button>
           ))}
@@ -872,7 +974,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
               }}>
                 {branding?.membership_program_heading || programTitle}
               </h2>
-              {canManagePlans && (
+              {canManagePlans && !masterCatalogMode && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1203,7 +1305,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           })}
 
           {/* Add New Membership Card Tile for Master or Main Admin */}
-          {canManagePlans && (
+          {canManagePlans && !masterCatalogMode && (
             <div
               role={isInlineAddingPlan ? undefined : 'button'}
               tabIndex={isInlineAddingPlan ? -1 : 0}
@@ -1457,7 +1559,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                     <span style={{ fontSize: 10, fontWeight: 800, color: '#7C2D12', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 99, padding: '4px 8px' }}>ARCHIVED</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" onClick={() => loadPlanHistory(plan)} style={{ flex: 1, padding: '8px 10px', border: '1px solid #DAC493', borderRadius: 7, background: '#FAF6EE', color: '#8C6228', fontWeight: 700, cursor: 'pointer' }}>View membership history</button>
+                    {!masterCatalogMode && <button type="button" onClick={() => loadPlanHistory(plan)} style={{ flex: 1, padding: '8px 10px', border: '1px solid #DAC493', borderRadius: 7, background: '#FAF6EE', color: '#8C6228', fontWeight: 700, cursor: 'pointer' }}>View membership history</button>}
                     <button type="button" onClick={() => handleRestorePlan(plan)} style={{ padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', color: '#57534E', fontWeight: 700, cursor: 'pointer' }}>Restore</button>
                   </div>
                 </article>
