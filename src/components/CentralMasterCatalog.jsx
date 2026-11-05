@@ -1,12 +1,83 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Plus, Trash2, Save, LoaderCircle } from 'lucide-react';
+import { Plus, Trash2, Save, LoaderCircle, Store, UserRound, AlertCircle } from 'lucide-react';
 import { apiRequest } from '../utils/api';
+import brandLogoImg from '../assets/brand-logo-icon.png';
 
 const emptyCatalog = { service_catalog: { categories: [] }, membership_plans: [], designations: [], roles: [] };
 const inputStyle = { width: '100%', minWidth: 0, boxSizing: 'border-box', padding: '10px 11px', border: '1px solid #E4DACE', borderRadius: 9, background: '#FFFEFC', color: '#302820', fontSize: 13 };
 const panelStyle = { border: '1px solid #EEE5DA', borderRadius: 13, padding: 16, background: '#FFFFFF' };
 
-export default function CentralMasterCatalog({ activeTab = 'services' }) {
+function BrandOwnerHierarchy({ currentUser }) {
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const locationResponse = await apiRequest('/locations?type=branch');
+        const locations = locationResponse.locations || [];
+        const branchRows = await Promise.all(locations.map(async location => {
+          try {
+            const result = await apiRequest(`/locations/${location.location_id}/admin-users`);
+            return { ...location, admins: (result.admins || []).filter(admin => Number(admin.active) !== 0) };
+          } catch {
+            return { ...location, admins: [], admins_unavailable: true };
+          }
+        }));
+        if (mounted) setBranches(branchRows);
+      } catch (requestError) {
+        if (mounted) setError(requestError.message || 'Could not load the branch reporting structure.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, []);
+
+  const panel = { border: '1px solid #E7D8C4', borderRadius: 14, background: '#FFFFFF', boxShadow: '0 4px 14px rgba(87,58,32,0.04)' };
+  const chartWidth = Math.max(280, branches.length * 292 - 12);
+  const branchCenters = branches.map((_, index) => index * 292 + 140);
+  const connectors = branches.length
+    ? `M ${chartWidth / 2} 0 V 12 H ${branchCenters[0]} ${branchCenters.slice(1).map(center => `M ${branchCenters[0]} 12 H ${center}`).join(' ')} ${branchCenters.map(center => `M ${center} 12 V 30`).join(' ')}`
+    : '';
+  return <section aria-label="Brand reporting hierarchy" style={{ display: 'grid', gap: 16 }}>
+    <div style={{ color: '#786D62', fontSize: 13 }}>All branch admins and owners report directly to the brand owner.</div>
+    {error && <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 11, border: '1px solid #FECACA', borderRadius: 9, background: '#FEF2F2', color: '#991B1B', fontSize: 13 }}><AlertCircle size={16} />{error}</div>}
+    {loading ? <div style={{ padding: 20, color: '#786D62' }}>Loading branch reporting structure…</div> : <>
+      <div style={{ overflowX: 'auto', paddingBottom: 6 }}>
+        <div style={{ width: chartWidth, margin: '0 auto' }}>
+          <div style={{ ...panel, width: 360, maxWidth: '100%', boxSizing: 'border-box', margin: '0 auto', padding: '18px 22px', textAlign: 'center', borderColor: '#C9A86C', background: '#FAF6EE' }}>
+            <img src={brandLogoImg} alt="Brand logo" style={{ display: 'block', width: 48, height: 48, objectFit: 'contain', margin: '0 auto 9px' }} />
+            <div style={{ color: '#8C6228', fontSize: 10, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>Brand Owner</div>
+            <div style={{ marginTop: 4, color: '#302820', fontSize: 17, fontWeight: 800 }}>{currentUser?.name || 'Maison BeYou Owner'}</div>
+          </div>
+          {branches.length > 0 && <svg aria-hidden="true" width={chartWidth} height="32" style={{ display: 'block', overflow: 'visible' }}>
+            <path d={connectors} fill="none" stroke="#D6C19B" strokeWidth="2" />
+          </svg>}
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(branches.length, 1)}, 280px)`, gap: 12, alignItems: 'start' }}>
+        {branches.map(branch => <article key={branch.location_id} style={{ ...panel, padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, paddingBottom: 12, borderBottom: '1px solid #F0E9E0' }}>
+            <span style={{ width: 34, height: 34, flexShrink: 0, display: 'grid', placeItems: 'center', borderRadius: 10, background: '#F4EEE5', color: '#A97735' }}><Store size={17} /></span>
+            <div style={{ minWidth: 0 }}><div style={{ color: '#302820', fontSize: 14, fontWeight: 800 }}>{branch.name || branch.city || 'Branch'}</div><div style={{ marginTop: 3, color: '#8C6228', fontSize: 10, fontWeight: 750, textTransform: 'uppercase' }}>Branch · Reports to Brand Owner</div></div>
+          </div>
+          <div style={{ display: 'grid', gap: 8, paddingTop: 12 }}>
+            {branch.admins_unavailable ? <div style={{ color: '#9A6255', fontSize: 12 }}>Could not load branch admins.</div> : branch.admins.length ? branch.admins.map(admin => <div key={admin.user_id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: 9, borderRadius: 9, background: '#FFFCF7' }}><UserRound size={15} color="#A97735" style={{ marginTop: 2, flexShrink: 0 }} /><div style={{ minWidth: 0 }}><div style={{ color: '#51463D', fontSize: 12, fontWeight: 750 }}>{admin.name} <span style={{ color: '#8A8175', fontWeight: 500 }}>· Branch Admin / Owner</span></div>{admin.email && <div style={{ marginTop: 3, color: '#786D62', fontSize: 11, overflowWrap: 'anywhere' }}>{admin.email}</div>}</div></div>) : <div style={{ color: '#8A8175', fontSize: 12 }}>No active branch admin/owner account assigned.</div>}
+          </div>
+        </article>)}
+        {!branches.length && <div style={{ ...panel, padding: 24, color: '#8A8175', textAlign: 'center', fontSize: 13 }}>No branches found.</div>}
+      </div>
+        </div>
+      </div>
+    </>}
+  </section>;
+}
+
+export default function CentralMasterCatalog({ activeTab = 'services', currentUser }) {
   const [catalog, setCatalog] = useState(emptyCatalog);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,7 +97,7 @@ export default function CentralMasterCatalog({ activeTab = 'services' }) {
     }
   }, []);
 
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  useEffect(() => { if (activeTab !== 'hierarchy') loadCatalog(); }, [activeTab, loadCatalog]);
 
   const saveCatalog = async () => {
     setSaving(true);
@@ -48,6 +119,7 @@ export default function CentralMasterCatalog({ activeTab = 'services' }) {
   const addListItem = field => setCatalog(current => ({ ...current, [field]: [...current[field], { name: '', price: 0, duration_mins: 30, benefits: '' }] }));
   const removeListItem = (field, index) => setCatalog(current => ({ ...current, [field]: current[field].filter((_, i) => i !== index) }));
 
+  if (activeTab === 'hierarchy') return <BrandOwnerHierarchy currentUser={currentUser} />;
   if (loading) return <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: 22, color: '#786D62' }}><LoaderCircle size={17} /> Loading master data…</div>;
 
   const renderServices = () => <div style={{ display: 'grid', gap: 14 }}>
@@ -75,7 +147,7 @@ export default function CentralMasterCatalog({ activeTab = 'services' }) {
     {catalog[field].length === 0 && <div style={emptyStyle}>No {field === 'roles' ? 'team roles' : 'designations'} yet. Add one to start the shared catalog.</div>}
   </div>;
 
-  const views = { services: renderServices, membership: renderPlans, designation: () => renderNames('designations'), hierarchy: () => renderNames('roles') };
+  const views = { services: renderServices, membership: renderPlans, designation: () => renderNames('designations') };
   return <div style={{ display: 'grid', gap: 14 }}>
     {error && <div role="alert" style={{ padding: 11, borderRadius: 9, background: '#FFF1F0', color: '#9F2D24', fontSize: 13 }}>{error}</div>}
     {notice && <div role="status" style={{ padding: 11, borderRadius: 9, background: '#F1F8F1', color: '#27613A', fontSize: 13 }}>{notice}</div>}

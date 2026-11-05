@@ -13,6 +13,9 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('services'); // 'courses' | 'services' | 'payments'
+  const [redeemingLoyalty, setRedeemingLoyalty] = useState(false);
+  const [loyaltyRedemptionMessage, setLoyaltyRedemptionMessage] = useState('');
+  const [loyaltyRedemptionError, setLoyaltyRedemptionError] = useState('');
 
   // Membership Validity Extension States
   const [showValidityModal, setShowValidityModal] = useState(false);
@@ -22,6 +25,22 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
   const [newExpiryDate, setNewExpiryDate] = useState('');
   const [selectedTier, setSelectedTier] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('active');
+
+  const handleRedeemLoyaltyToWallet = async () => {
+    try {
+      setRedeemingLoyalty(true);
+      setLoyaltyRedemptionMessage('');
+      setLoyaltyRedemptionError('');
+      const result = await apiRequest(`/clients/${clientId}/loyalty/redeem-wallet`, { method: 'POST', body: JSON.stringify({}) });
+      const refreshed = await apiRequest(`/clients/${clientId}`);
+      setData(refreshed);
+      setLoyaltyRedemptionMessage(`${Number(result.points_redeemed).toLocaleString('en-IN')} points added ${formatCurrency(result.wallet_credit)} to the client’s wallet.`);
+    } catch (err) {
+      setLoyaltyRedemptionError(err.message || 'Could not redeem points to the wallet.');
+    } finally {
+      setRedeemingLoyalty(false);
+    }
+  };
 
   // Treatment Course Management States
   const [extendModal, setExtendModal] = useState({ open: false, course: null, additionalSessions: 1, intervalValue: 15, intervalUnit: 'days' });
@@ -651,6 +670,46 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
         </div>
 
       </div>
+
+      {/* Loyalty points balance and activity */}
+      <section className="card" aria-label="Loyalty points" style={{ padding: '20px 24px', border: '1px solid #DAC493', background: 'linear-gradient(135deg, #FAF6EE 0%, #FFFFFF 100%)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 38, height: 38, borderRadius: 11, background: '#F2EBDD', color: '#A97735', display: 'grid', placeItems: 'center' }}><Sparkles size={19} /></span>
+            <div>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em', color: '#8C6228', fontWeight: 800 }}>Loyalty points</div>
+              <div style={{ fontSize: 24, lineHeight: 1.15, color: '#302820', fontWeight: 800 }}>{Number(client.loyalty?.balance || 0).toLocaleString('en-IN')} <span style={{ fontSize: 13, fontWeight: 600 }}>points</span></div>
+            </div>
+          </div>
+          <div style={{ color: '#786D62', fontSize: 12 }}>Conversion rate · {Number(client.loyalty?.settings?.redemption_points || 100)} points = {formatCurrency(client.loyalty?.settings?.redemption_value || 50)}</div>
+        </div>
+        {client.loyalty?.ledger?.length > 0 ? (
+          <div style={{ borderTop: '1px solid #E7D8C4', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {client.loyalty.ledger.slice(0, 5).map(entry => (
+              <div key={entry.ledger_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 12 }}>
+                <span style={{ color: '#57534E' }}>{entry.description} · {formatDate(entry.created_at)}</span>
+                <strong style={{ color: Number(entry.points) >= 0 ? '#28764A' : '#B42318', whiteSpace: 'nowrap' }}>{Number(entry.points) > 0 ? '+' : ''}{Number(entry.points).toLocaleString('en-IN')} pts</strong>
+              </div>
+            ))}
+          </div>
+        ) : <div style={{ borderTop: '1px solid #E7D8C4', paddingTop: 10, color: '#786D62', fontSize: 12 }}>No points activity yet. Points will appear after eligible bills are paid.</div>}
+      </section>
+
+      <section className="card" aria-label="Client wallet" style={{ padding: '18px 24px', border: '1px solid #E7D8C4', background: '#FFFFFF', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.08em', color: '#8C6228', fontWeight: 800 }}>Client wallet</div>
+            <div style={{ fontSize: 24, lineHeight: 1.2, color: '#302820', fontWeight: 800 }}>{formatCurrency(client.wallet?.balance || 0)}</div>
+          </div>
+          <button type="button" disabled={redeemingLoyalty || Number(client.loyalty?.balance || 0) <= 0 || Number(client.loyalty?.balance || 0) < Number(client.loyalty?.settings?.minimum_redemption_points || 0)} onClick={handleRedeemLoyaltyToWallet} style={{ border: 0, borderRadius: 9, padding: '10px 14px', background: '#A97735', color: '#FFFFFF', fontWeight: 750, cursor: redeemingLoyalty ? 'wait' : 'pointer', opacity: redeemingLoyalty || Number(client.loyalty?.balance || 0) <= 0 || Number(client.loyalty?.balance || 0) < Number(client.loyalty?.settings?.minimum_redemption_points || 0) ? 0.55 : 1 }}>
+            {redeemingLoyalty ? 'Redeeming…' : `Redeem ${Number(client.loyalty?.balance || 0).toLocaleString('en-IN')} points to wallet`}
+          </button>
+        </div>
+        <div style={{ color: '#786D62', fontSize: 12 }}>Available points convert at {Number(client.loyalty?.settings?.redemption_points || 100)} points = {formatCurrency(client.loyalty?.settings?.redemption_value || 50)} and are credited directly to this wallet.</div>
+        {loyaltyRedemptionMessage && <div role="status" style={{ color: '#166534', fontSize: 13 }}>{loyaltyRedemptionMessage}</div>}
+        {loyaltyRedemptionError && <div role="alert" style={{ color: '#B42318', fontSize: 13 }}>{loyaltyRedemptionError}</div>}
+        {client.wallet?.ledger?.slice(0, 3).map(entry => <div key={entry.wallet_entry_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, borderTop: '1px solid #F1E8DB', paddingTop: 8, color: '#57534E', fontSize: 12 }}><span>{entry.description} · {formatDate(entry.created_at)}</span><strong style={{ color: Number(entry.amount) >= 0 ? '#28764A' : '#B42318' }}>{Number(entry.amount) > 0 ? '+' : ''}{formatCurrency(entry.amount)}</strong></div>)}
+      </section>
 
       {/* Tabs: Treatment Plans vs Service History vs Payment History */}
       <div className="card" style={{ overflow: 'hidden' }}>

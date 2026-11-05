@@ -197,6 +197,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard, branding 
                   <th style={{ padding: '14px 16px', fontWeight: '600' }}>Status</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600' }}>Total Visits</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600' }}>Lifetime Spend</th>
+                  <th style={{ padding: '14px 16px', fontWeight: '600' }}>Loyalty Points</th>
                   <th style={{ padding: '14px 16px', fontWeight: '600' }}>Last Visit</th>
                   <th style={{ padding: '14px 20px', fontWeight: '600', textAlign: 'right' }}>Actions</th>
                 </tr>
@@ -288,7 +289,12 @@ export default function ClientsList({ onOpenClient, onBackToDashboard, branding 
                         {formatCurrency(c.total_spend)}
                       </td>
 
-                      {/* 6. Last Visit with Days Ago Recency */}
+                      {/* 6. Available Loyalty Points */}
+                      <td style={{ padding: '14px 16px', fontWeight: '800', color: '#8C6228', whiteSpace: 'nowrap' }}>
+                        {Number(c.loyalty_points || 0).toLocaleString('en-IN')} pts
+                      </td>
+
+                      {/* 7. Last Visit with Days Ago Recency */}
                       <td style={{ padding: '14px 16px' }}>
                         {c.last_visit_date ? (
                           <div>
@@ -315,7 +321,7 @@ export default function ClientsList({ onOpenClient, onBackToDashboard, branding 
                         )}
                       </td>
 
-                      {/* 7. Actions */}
+                      {/* 8. Actions */}
                       <td style={{ padding: '14px 20px', textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: '8px', whiteSpace: 'nowrap' }}>
                           <button

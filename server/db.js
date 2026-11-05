@@ -313,7 +313,7 @@ export function initDatabase() {
       amount_paid REAL NOT NULL,
       balance REAL NOT NULL,
       payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
-      payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending')),
+      payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending', 'Cancelled')),
       upi_ref TEXT,
       created_by INTEGER REFERENCES USERS(user_id),
       notes TEXT,
@@ -823,10 +823,10 @@ export function initDatabase() {
     console.error('Locations migration notice:', e.message);
   }
 
-  // Safe migration to support 'Membership' in VISITS payment_method constraint
+  // Safe migration to support Membership payments and cancelled appointments in VISITS.
   try {
     const visitSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='VISITS'").get()?.sql || '';
-    if (visitSql && !visitSql.includes("'Membership'")) {
+    if (visitSql && (!visitSql.includes("'Membership'") || !visitSql.includes("'Cancelled'"))) {
       db.exec(`
         PRAGMA foreign_keys = OFF;
         CREATE TABLE VISITS_new (
@@ -842,7 +842,7 @@ export function initDatabase() {
           amount_paid REAL NOT NULL,
           balance REAL NOT NULL,
           payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
-          payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending')),
+          payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending', 'Cancelled')),
           upi_ref TEXT,
           created_by INTEGER REFERENCES USERS(user_id),
           notes TEXT,
@@ -878,7 +878,7 @@ export function initDatabase() {
         ALTER TABLE VISITS_new RENAME TO VISITS;
         PRAGMA foreign_keys = ON;
       `);
-      console.log('VISITS table migrated to support Membership payment_method.');
+      console.log('VISITS table migrated to support Membership payments and cancelled appointments.');
     }
   } catch (e) {
     console.error('VISITS migration notice:', e.message);

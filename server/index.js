@@ -9,6 +9,7 @@ import { PNG } from 'pngjs';
 import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import db, { initDatabase, recordAuditLog, generateLocationCode, ensureTeamMasterOptions } from './db.js';
+import { registerGiftVoucherRoutes } from './gift-vouchers.js';
 import {
   calculateNextDueDate,
   formatSessionMessage,
@@ -69,7 +70,7 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 app.use(cors());
-app.use(express.json({ limit: '150mb' }));
+app.use(express.json({ limit: '150mb', verify: (req, res, buffer) => { req.rawBody = Buffer.from(buffer); } }));
 app.use(express.urlencoded({ extended: true, limit: '150mb' }));
 app.use('/uploads', express.static(uploadsDir));
 
@@ -187,6 +188,157 @@ function validateCategoryImageUrlOnDisk(imageUrl) {
 // Initialize database
 initDatabase();
 
+const DEFAULT_LOYALTY_SETTINGS = {
+  enabled: true,
+  earning_mode: 'flat',
+  minimum_bill: 500,
+  points_per_rupee: 1,
+  max_points_per_bill: 2000,
+  points_expiry_months: 12,
+  minimum_redemption_points: 100,
+  redemption_points: 100,
+  redemption_value: 50,
+  earn_on_discounted_bills: true,
+  eligible_service_ids: [],
+  eligible_service_names: [],
+  slabs: [
+    { minimum_spend: 500, points_per_rupee: 1 },
+    { minimum_spend: 1000, points_per_rupee: 1.5 },
+    { minimum_spend: 5000, points_per_rupee: 2 }
+  ],
+  service_rules: []
+};
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS LOYALTY_PROGRAM_SETTINGS (
+    settings_id INTEGER PRIMARY KEY CHECK (settings_id = 1),
+    settings_json TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS LOYALTY_BRANCH_CONVERSIONS (
+    location_id INTEGER PRIMARY KEY REFERENCES LOCATIONS(location_id),
+    redemption_points REAL NOT NULL,
+    redemption_value REAL NOT NULL,
+    settings_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS CLIENT_LOYALTY_LEDGER (
+    ledger_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_key TEXT NOT NULL UNIQUE,
+    client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+    location_id INTEGER REFERENCES LOCATIONS(location_id),
+    visit_id INTEGER REFERENCES VISITS(visit_id),
+    entry_type TEXT NOT NULL CHECK (entry_type IN ('earned', 'redeemed', 'adjustment')),
+    points INTEGER NOT NULL,
+    bill_amount REAL DEFAULT 0,
+    description TEXT NOT NULL,
+    expires_at TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS CLIENT_WALLET_LEDGER (
+    wallet_entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_key TEXT NOT NULL UNIQUE,
+    client_id INTEGER NOT NULL REFERENCES CLIENTS(client_id),
+    location_id INTEGER REFERENCES LOCATIONS(location_id),
+    amount REAL NOT NULL,
+    description TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+try { db.exec('ALTER TABLE LOYALTY_BRANCH_CONVERSIONS ADD COLUMN settings_json TEXT'); } catch (error) {}
+db.prepare(`INSERT OR IGNORE INTO LOYALTY_PROGRAM_SETTINGS (settings_id, settings_json) VALUES (1, ?)`)
+  .run(JSON.stringify(DEFAULT_LOYALTY_SETTINGS));
+
+function getLoyaltySettings() {
+  const row = db.prepare('SELECT settings_json FROM LOYALTY_PROGRAM_SETTINGS WHERE settings_id = 1').get();
+  try { return { ...DEFAULT_LOYALTY_SETTINGS, ...(row ? JSON.parse(row.settings_json) : {}) }; }
+  catch { return { ...DEFAULT_LOYALTY_SETTINGS }; }
+}
+
+function normalizeLoyaltySettings(input) {
+  return {
+    ...DEFAULT_LOYALTY_SETTINGS,
+    ...input,
+    enabled: Boolean(input.enabled),
+    earning_mode: input.earning_mode === 'slab' ? 'slab' : 'flat',
+    minimum_bill: Math.max(0, Number(input.minimum_bill) || 0),
+    points_per_rupee: Math.max(0, Number(input.points_per_rupee) || 0),
+    max_points_per_bill: Math.max(0, Math.floor(Number(input.max_points_per_bill) || 0)),
+    points_expiry_months: Math.max(0, Math.floor(Number(input.points_expiry_months) || 0)),
+    minimum_redemption_points: Math.max(0, Math.floor(Number(input.minimum_redemption_points) || 0)),
+    redemption_points: Math.max(1, Number(input.redemption_points) || 100),
+    redemption_value: Math.max(0, Number(input.redemption_value) || 0),
+    earn_on_discounted_bills: Boolean(input.earn_on_discounted_bills),
+    eligible_service_ids: Array.isArray(input.eligible_service_ids) ? [...new Set(input.eligible_service_ids.map(Number).filter(id => Number.isInteger(id) && id > 0))] : [],
+    eligible_service_names: Array.isArray(input.eligible_service_names) ? [...new Set(input.eligible_service_names.map(name => String(name || '').trim()).filter(Boolean))] : [],
+    slabs: Array.isArray(input.slabs) ? input.slabs.map(slab => ({ minimum_spend: Math.max(0, Number(slab.minimum_spend) || 0), points_per_rupee: Math.max(0, Number(slab.points_per_rupee) || 0) })).sort((a, b) => a.minimum_spend - b.minimum_spend) : [],
+    service_rules: Array.isArray(input.service_rules) ? input.service_rules.map(rule => ({ service_id: Number(rule.service_id) || null, service_name: String(rule.service_name || '').trim(), minimum_bill: Math.max(0, Number(rule.minimum_bill) || 0), points_per_rupee: Math.max(0, Number(rule.points_per_rupee) || 0), enabled: rule.enabled !== false })).filter(rule => rule.service_name || Number.isInteger(rule.service_id)) : []
+  };
+}
+
+function getLoyaltySettingsForLocation(locationId) {
+  const settings = getLoyaltySettings();
+  if (!locationId) return settings;
+  const override = db.prepare('SELECT redemption_points, redemption_value, settings_json FROM LOYALTY_BRANCH_CONVERSIONS WHERE location_id = ?').get(locationId);
+  if (!override) return { ...settings, branch_settings_override: false };
+  let branchSettings = {};
+  try { branchSettings = override.settings_json ? JSON.parse(override.settings_json) : {}; } catch {}
+  return { ...settings, ...branchSettings,
+    redemption_points: Number(branchSettings.redemption_points ?? override.redemption_points ?? settings.redemption_points),
+    redemption_value: Number(branchSettings.redemption_value ?? override.redemption_value ?? settings.redemption_value),
+    branch_settings_override: true
+  };
+}
+
+function getClientLoyaltySummary(clientId) {
+  const clientLocation = db.prepare('SELECT location_id FROM CLIENTS WHERE client_id = ?').get(clientId)?.location_id;
+  const nowDate = new Date().toISOString().slice(0, 10);
+  const balance = Number(db.prepare(`SELECT COALESCE(SUM(points), 0) AS balance
+    FROM CLIENT_LOYALTY_LEDGER WHERE client_id = ? AND (expires_at IS NULL OR date(expires_at) >= date(?))`).get(clientId, nowDate)?.balance) || 0;
+  const ledger = db.prepare(`SELECT ledger_id, entry_type, points, bill_amount, description, expires_at, created_at
+    FROM CLIENT_LOYALTY_LEDGER WHERE client_id = ? ORDER BY ledger_id DESC LIMIT 50`).all(clientId);
+  return { balance: Math.max(0, balance), ledger, settings: getLoyaltySettingsForLocation(clientLocation) };
+}
+
+function getClientWalletSummary(clientId) {
+  const balance = Number(db.prepare('SELECT COALESCE(SUM(amount), 0) AS balance FROM CLIENT_WALLET_LEDGER WHERE client_id = ?').get(clientId)?.balance) || 0;
+  const ledger = db.prepare('SELECT wallet_entry_id, amount, description, created_at FROM CLIENT_WALLET_LEDGER WHERE client_id = ? ORDER BY wallet_entry_id DESC LIMIT 20').all(clientId);
+  return { balance: Math.max(0, balance), ledger };
+}
+
+function awardLoyaltyPointsForVisit(visitId) {
+  const visit = db.prepare('SELECT * FROM VISITS WHERE visit_id = ?').get(visitId);
+  const settings = getLoyaltySettingsForLocation(visit?.location_id);
+  if (!settings.enabled) return 0;
+  if (!visit || visit.payment_status !== 'Paid' || visit.is_appointment) return 0;
+  if (db.prepare('SELECT 1 FROM CLIENT_LOYALTY_LEDGER WHERE entry_key = ?').get(`earn:visit:${visitId}`)) return 0;
+  const items = db.prepare(`SELECT visit_service_id, service_id, service_name_snapshot, price_snapshot, COALESCE(is_privilege, 0) AS is_privilege
+    FROM VISIT_SERVICES WHERE visit_id = ?`).all(visitId).filter(item => !item.is_privilege && Number(item.price_snapshot) > 0);
+  const serviceSubtotal = items.reduce((sum, item) => sum + Number(item.price_snapshot || 0), 0);
+  if (serviceSubtotal <= 0) return 0;
+  const discountMultiplier = settings.earn_on_discounted_bills
+    ? Math.max(0, (serviceSubtotal - Number(visit.discount_amount || 0)) / serviceSubtotal)
+    : 1;
+  const eligibleAmount = serviceSubtotal * discountMultiplier;
+  if (eligibleAmount < Number(settings.minimum_bill || 0)) return 0;
+  const rate = settings.earning_mode === 'slab'
+    ? [...(settings.slabs || [])].sort((a, b) => Number(b.minimum_spend) - Number(a.minimum_spend))
+      .find(slab => eligibleAmount >= Number(slab.minimum_spend))?.points_per_rupee || 0
+    : Math.max(0, Number(settings.points_per_rupee || 0));
+  let points = eligibleAmount * Number(rate);
+  points = Math.floor(Math.min(points, Number(settings.max_points_per_bill || 0)));
+  if (points <= 0) return 0;
+  const expires = new Date();
+  expires.setMonth(expires.getMonth() + Math.max(0, Number(settings.points_expiry_months || 0)));
+  db.prepare(`INSERT OR IGNORE INTO CLIENT_LOYALTY_LEDGER
+    (entry_key, client_id, location_id, visit_id, entry_type, points, bill_amount, description, expires_at)
+    VALUES (?, ?, ?, ?, 'earned', ?, ?, ?, ?)`).run(
+    `earn:visit:${visitId}`, visit.client_id, visit.location_id, visit.visit_id, points,
+    eligibleAmount, `Earned from visit #${visitId}`, settings.points_expiry_months > 0 ? expires.toISOString().slice(0, 10) : null
+  );
+  return points;
+}
+
 function getUserPermissions(userId) {
   const profile = db.prepare(`
     SELECT p.location_id, p.permissions, u.role
@@ -207,6 +359,7 @@ function getUserPermissions(userId) {
 function permissionModulesForRequest(req) {
   const route = req.path || '';
   const method = String(req.method || 'GET').toUpperCase();
+  if (/^\/api\/gift-vouchers(?:\/|$)/.test(route)) return ['gift_vouchers'];
   if (/^\/api\/admin\/branch-users(?:\/|$)/.test(route)) return ['user_management'];
   if (/^\/api\/admin\/team-options(?:\/|$)/.test(route)) return ['team'];
   if (/^\/api\/admin\/team-(?:departments|hierarchy|org-chart)(?:\/|$)/.test(route)) return ['team'];
@@ -265,7 +418,7 @@ export function authenticateToken(req, res, next) {
 
   jwt.verify(token, JWT_SECRET, (err, decodedUser) => {
     if (err) {
-      return res.status(403).json({ error: 'Invalid or expired token' });
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
     // Verify user exists and is active in the database (revocation check)
@@ -1788,6 +1941,130 @@ app.put('/api/admin/master-catalog', authenticateToken, authorizeRoles('master_a
   } catch (error) {
     console.error('Save central master catalog error:', error);
     res.status(500).json({ error: 'Could not save central master catalog.' });
+  }
+});
+
+app.get('/api/admin/loyalty/settings', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+  res.json({ settings: getLoyaltySettings() });
+});
+
+app.put('/api/admin/loyalty/settings', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+  try {
+    const input = req.body?.settings;
+    if (!input || typeof input !== 'object') return res.status(400).json({ error: 'Provide valid loyalty settings.' });
+    const settings = {
+      ...DEFAULT_LOYALTY_SETTINGS,
+      ...input,
+      enabled: Boolean(input.enabled),
+      earning_mode: input.earning_mode === 'slab' ? 'slab' : 'flat',
+      minimum_bill: Math.max(0, Number(input.minimum_bill) || 0),
+      points_per_rupee: Math.max(0, Number(input.points_per_rupee) || 0),
+      max_points_per_bill: Math.max(0, Math.floor(Number(input.max_points_per_bill) || 0)),
+      points_expiry_months: Math.max(0, Math.floor(Number(input.points_expiry_months) || 0)),
+      minimum_redemption_points: Math.max(0, Math.floor(Number(input.minimum_redemption_points) || 0)),
+      redemption_points: Math.max(1, Math.floor(Number(input.redemption_points) || 100)),
+      redemption_value: Math.max(0, Number(input.redemption_value) || 0),
+      earn_on_discounted_bills: Boolean(input.earn_on_discounted_bills),
+      eligible_service_ids: Array.isArray(input.eligible_service_ids) ? [...new Set(input.eligible_service_ids.map(Number).filter(id => Number.isInteger(id) && id > 0))] : [],
+      eligible_service_names: Array.isArray(input.eligible_service_names) ? [...new Set(input.eligible_service_names.map(name => String(name || '').trim()).filter(Boolean))] : [],
+      slabs: Array.isArray(input.slabs) ? input.slabs.map(slab => ({ minimum_spend: Math.max(0, Number(slab.minimum_spend) || 0), points_per_rupee: Math.max(0, Number(slab.points_per_rupee) || 0) })).sort((a, b) => a.minimum_spend - b.minimum_spend) : [],
+      service_rules: Array.isArray(input.service_rules) ? input.service_rules.map(rule => ({ service_id: Number(rule.service_id) || null, service_name: String(rule.service_name || '').trim(), minimum_bill: Math.max(0, Number(rule.minimum_bill) || 0), points_per_rupee: Math.max(0, Number(rule.points_per_rupee) || 0), enabled: rule.enabled !== false })).filter(rule => rule.service_name || Number.isInteger(rule.service_id)) : []
+    };
+    if (settings.redemption_points <= 0) return res.status(400).json({ error: 'Redemption points must be greater than zero.' });
+    db.prepare(`UPDATE LOYALTY_PROGRAM_SETTINGS SET settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE settings_id = 1`).run(JSON.stringify(settings));
+    recordAuditLog({ userId: req.user.user_id, action: 'UPDATE_LOYALTY_SETTINGS', targetType: 'LOYALTY_SETTINGS', targetId: 1, details: { enabled: settings.enabled, earning_mode: settings.earning_mode }, ipAddress: req.ip || req.connection?.remoteAddress });
+    res.json({ success: true, settings });
+  } catch (error) {
+    console.error('Save loyalty settings error:', error);
+    res.status(500).json({ error: 'Could not save loyalty settings.' });
+  }
+});
+
+app.get('/api/loyalty/settings', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const locationId = Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to view loyalty settings.' });
+    const settings = getLoyaltySettingsForLocation(locationId);
+    res.json({ settings, central_settings: getLoyaltySettings(), uses_central_settings: !settings.branch_settings_override });
+  } catch (error) {
+    console.error('Load branch loyalty settings error:', error);
+    res.status(500).json({ error: 'Could not load this branch’s loyalty settings.' });
+  }
+});
+
+app.put('/api/loyalty/settings', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const locationId = Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to save loyalty settings.' });
+    const useCentral = Boolean(req.body?.use_central_settings);
+    if (useCentral) {
+      db.prepare('DELETE FROM LOYALTY_BRANCH_CONVERSIONS WHERE location_id = ?').run(locationId);
+    } else {
+      const input = req.body?.settings;
+      if (!input || typeof input !== 'object') return res.status(400).json({ error: 'Provide valid loyalty settings.' });
+      const settings = normalizeLoyaltySettings(input);
+      if (settings.redemption_points <= 0) return res.status(400).json({ error: 'Redemption points must be greater than zero.' });
+      db.prepare(`INSERT INTO LOYALTY_BRANCH_CONVERSIONS (location_id, redemption_points, redemption_value, settings_json, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(location_id) DO UPDATE SET redemption_points = excluded.redemption_points,
+          redemption_value = excluded.redemption_value, settings_json = excluded.settings_json, updated_at = CURRENT_TIMESTAMP`)
+        .run(locationId, settings.redemption_points, settings.redemption_value, JSON.stringify(settings));
+    }
+    recordAuditLog({ userId: req.user.user_id, action: 'UPDATE_BRANCH_LOYALTY_SETTINGS', targetType: 'LOYALTY_SETTINGS', targetId: locationId, locationId, details: { uses_central_settings: useCentral }, ipAddress: req.ip || req.connection?.remoteAddress });
+    const settings = getLoyaltySettingsForLocation(locationId);
+    res.json({ success: true, settings, uses_central_settings: !settings.branch_settings_override });
+  } catch (error) {
+    console.error('Save branch loyalty settings error:', error);
+    res.status(500).json({ error: 'Could not save this branch’s loyalty settings.' });
+  }
+});
+
+app.get('/api/loyalty/branch-conversion', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const locationId = Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to view its loyalty conversion.' });
+    const central = getLoyaltySettings();
+    const override = db.prepare('SELECT redemption_points, redemption_value FROM LOYALTY_BRANCH_CONVERSIONS WHERE location_id = ?').get(locationId);
+    res.json({
+      uses_central_conversion: !override,
+      redemption_points: Number(override?.redemption_points ?? central.redemption_points),
+      redemption_value: Number(override?.redemption_value ?? central.redemption_value),
+      central_redemption_points: central.redemption_points,
+      central_redemption_value: central.redemption_value
+    });
+  } catch (error) {
+    console.error('Load branch loyalty conversion error:', error);
+    res.status(500).json({ error: 'Could not load this branch’s loyalty conversion.' });
+  }
+});
+
+app.put('/api/loyalty/branch-conversion', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  try {
+    const locationId = Number(req.locationId);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to save its loyalty conversion.' });
+    const useCentral = Boolean(req.body?.use_central_conversion);
+    if (useCentral) {
+      db.prepare('DELETE FROM LOYALTY_BRANCH_CONVERSIONS WHERE location_id = ?').run(locationId);
+    } else {
+      const redemptionPoints = Number(req.body?.redemption_points);
+      const redemptionValue = Number(req.body?.redemption_value);
+      if (!Number.isFinite(redemptionPoints) || redemptionPoints <= 0 || !Number.isFinite(redemptionValue) || redemptionValue <= 0) {
+        return res.status(400).json({ error: 'Enter a positive points amount and rupee value.' });
+      }
+      const branchSettings = { ...getLoyaltySettingsForLocation(locationId), redemption_points: redemptionPoints, redemption_value: redemptionValue };
+      delete branchSettings.branch_settings_override;
+      db.prepare(`INSERT INTO LOYALTY_BRANCH_CONVERSIONS (location_id, redemption_points, redemption_value, settings_json, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(location_id) DO UPDATE SET redemption_points = excluded.redemption_points,
+          redemption_value = excluded.redemption_value, settings_json = excluded.settings_json, updated_at = CURRENT_TIMESTAMP`)
+        .run(locationId, redemptionPoints, redemptionValue, JSON.stringify(branchSettings));
+    }
+    recordAuditLog({ userId: req.user.user_id, action: 'UPDATE_BRANCH_LOYALTY_CONVERSION', targetType: 'LOYALTY_SETTINGS', targetId: locationId, locationId, details: { uses_central_conversion: useCentral, redemption_points: useCentral ? null : Number(req.body.redemption_points), redemption_value: useCentral ? null : Number(req.body.redemption_value) }, ipAddress: req.ip || req.connection?.remoteAddress });
+    const settings = getLoyaltySettingsForLocation(locationId);
+    res.json({ success: true, uses_central_conversion: !settings.branch_conversion_override, redemption_points: settings.redemption_points, redemption_value: settings.redemption_value });
+  } catch (error) {
+    console.error('Save branch loyalty conversion error:', error);
+    res.status(500).json({ error: 'Could not save this branch’s loyalty conversion.' });
   }
 });
 
@@ -3638,6 +3915,7 @@ app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'recep
     // Compute dynamic Active/Inactive status and parse JSON contact arrays
     clients = clients.map(c => {
       const comp = computeClientActivity(c);
+      comp.loyalty_points = getClientLoyaltySummary(c.client_id).balance;
       try {
         comp.mobile_numbers = comp.mobile_numbers ? JSON.parse(comp.mobile_numbers) : [comp.phone];
       } catch(e) {
@@ -4093,6 +4371,8 @@ export function getFullClientRecord(clientId) {
   });
 
   if (client) {
+    client.loyalty = getClientLoyaltySummary(clientId);
+    client.wallet = getClientWalletSummary(clientId);
     const rawTier = client.membership_tier || '';
     const canonicalCost = rawTier.toLowerCase().includes('lumiere') ? 50000 :
       rawTier.toLowerCase().includes('infini') ? 25000 :
@@ -4687,6 +4967,47 @@ app.get('/api/clients/:id/membership-privileges', authenticateToken, (req, res) 
   } catch (error) {
     console.error('Membership privileges error:', error);
     res.status(500).json({ error: 'Failed to fetch membership privileges' });
+  }
+});
+
+app.post('/api/clients/:id/loyalty/redeem-wallet', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
+  try {
+    const clientId = Number(req.params.id);
+    const locationId = Number(req.locationId);
+    if (!clientId || !locationId) return res.status(400).json({ error: 'Branch context and a valid client are required.' });
+    const client = db.prepare('SELECT client_id, location_id FROM CLIENTS WHERE client_id = ?').get(clientId);
+    if (!client || Number(client.location_id) !== locationId) return res.status(404).json({ error: 'Client not found in this branch.' });
+    const loyalty = getClientLoyaltySummary(clientId);
+    const settings = loyalty.settings;
+    if (!settings.enabled) return res.status(400).json({ error: 'The loyalty program is currently inactive.' });
+    const points = Number(loyalty.balance) || 0;
+    const minimum = Math.max(0, Number(settings.minimum_redemption_points) || 0);
+    const pointsPerReward = Math.max(1, Number(settings.redemption_points) || 100);
+    const valuePerReward = Math.max(0, Number(settings.redemption_value) || 0);
+    if (points < minimum || points <= 0) return res.status(400).json({ error: `At least ${minimum.toLocaleString('en-IN')} available points are required to redeem.` });
+    if (valuePerReward <= 0) return res.status(400).json({ error: 'The loyalty wallet conversion rate is not configured.' });
+    const walletCredit = Math.round((points / pointsPerReward * valuePerReward) * 100) / 100;
+    if (walletCredit <= 0) return res.status(400).json({ error: 'These points do not convert to a wallet credit.' });
+    const entryKey = `loyalty-wallet:${clientId}:${Date.now()}:${randomBytes(6).toString('hex')}`;
+    const redeem = db.transaction(() => {
+      const currentBalance = Number(db.prepare(`SELECT COALESCE(SUM(points), 0) AS balance FROM CLIENT_LOYALTY_LEDGER
+        WHERE client_id = ? AND (expires_at IS NULL OR date(expires_at) >= date('now'))`).get(clientId)?.balance) || 0;
+      if (currentBalance < points) throw new Error('Loyalty balance changed. Refresh the client profile and try again.');
+      db.prepare(`INSERT INTO CLIENT_LOYALTY_LEDGER
+        (entry_key, client_id, location_id, entry_type, points, bill_amount, description)
+        VALUES (?, ?, ?, 'redeemed', ?, 0, ?)`)
+        .run(`${entryKey}:points`, clientId, locationId, -points, `Redeemed ${points} points to wallet`);
+      db.prepare(`INSERT INTO CLIENT_WALLET_LEDGER (entry_key, client_id, location_id, amount, description)
+        VALUES (?, ?, ?, ?, ?)`)
+        .run(`${entryKey}:wallet`, clientId, locationId, walletCredit, `Loyalty redemption · ${points} points`);
+    });
+    redeem();
+    recordAuditLog({ userId: req.user.user_id, action: 'REDEEM_LOYALTY_TO_WALLET', targetType: 'CLIENT', targetId: clientId, locationId, details: { points, wallet_credit: walletCredit }, ipAddress: req.ip || req.connection?.remoteAddress });
+    res.json({ success: true, points_redeemed: points, wallet_credit: walletCredit, loyalty: getClientLoyaltySummary(clientId), wallet: getClientWalletSummary(clientId) });
+  } catch (error) {
+    if (error.message?.startsWith('Loyalty balance changed')) return res.status(409).json({ error: error.message });
+    console.error('Redeem loyalty to wallet error:', error);
+    res.status(500).json({ error: 'Could not redeem loyalty points to the client wallet.' });
   }
 });
 
@@ -6765,13 +7086,23 @@ function escapeHtml(value) {
   })[char]);
 }
 
-async function deliverVisitNotification(channel, recipient, message, subject, html) {
+async function deliverVisitNotification(channel, recipient, message, subject, html, attachments = [], mediaUrl = null, options = {}) {
   if (channel === 'whatsapp') {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const auth = process.env.TWILIO_AUTH_TOKEN;
     const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || (String(process.env.TWILIO_PHONE_NUMBER || '').startsWith('whatsapp:') ? process.env.TWILIO_PHONE_NUMBER : '');
     if (sid && auth && twilioFrom) {
-      const params = new URLSearchParams({ To: `whatsapp:${recipient}`, From: twilioFrom, Body: message });
+      const contentSid = process.env.TWILIO_WHATSAPP_CONTENT_SID;
+      if (options.requireApprovedTemplate && !contentSid) throw new Error('An approved Twilio WhatsApp template is required for automatic voucher delivery.');
+      const params = new URLSearchParams({ To: `whatsapp:${recipient}`, From: twilioFrom });
+      if (options.statusCallbackUrl) params.set('StatusCallback', options.statusCallbackUrl);
+      if (contentSid) {
+        params.set('ContentSid', contentSid);
+        params.set('ContentVariables', JSON.stringify(Object.fromEntries((options.templateParams || []).map((value, index) => [String(index + 1), String(value)]))));
+      } else {
+        params.set('Body', message);
+      }
+      if (mediaUrl) params.set('MediaUrl', mediaUrl);
       const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: 'POST',
         headers: {
@@ -6783,13 +7114,22 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || `Twilio WhatsApp returned ${response.status}`);
-      return { provider: 'Twilio WhatsApp' };
+      return { provider: 'Twilio WhatsApp', provider_reference: data.sid || null };
     }
 
     const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (accessToken && phoneNumberId) {
+      const templateName = process.env.WHATSAPP_TEMPLATE_NAME;
+      if (options.requireApprovedTemplate && !templateName) throw new Error('An approved Meta WhatsApp template is required for automatic voucher delivery.');
       const version = process.env.WHATSAPP_API_VERSION || 'v21.0';
+      const templateComponents = [];
+      if (mediaUrl && /^(1|true|yes)$/i.test(String(process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA || ''))) {
+        templateComponents.push({ type: 'header', parameters: [{ type: 'image', image: { link: mediaUrl } }] });
+      }
+      if (options.templateParams?.length) templateComponents.push({
+        type: 'body', parameters: options.templateParams.map(text => ({ type: 'text', text: String(text) }))
+      });
       const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -6797,14 +7137,19 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
           messaging_product: 'whatsapp',
           recipient_type: 'individual',
           to: recipient.replace('+', ''),
-          type: 'text',
-          text: { preview_url: false, body: message }
+          ...(templateName ? {
+            type: 'template', template: { name: templateName, language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en' }, components: templateComponents }
+          } : mediaUrl ? {
+            type: 'image', image: { link: mediaUrl, caption: message }
+          } : {
+            type: 'text', text: { preview_url: false, body: message }
+          })
         }),
         signal: AbortSignal.timeout(12000)
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message || `WhatsApp Cloud API returned ${response.status}`);
-      return { provider: 'WhatsApp Cloud API' };
+      return { provider: 'WhatsApp Cloud API', provider_reference: data.messages?.[0]?.id || null };
     }
 
     throw new Error('WhatsApp is not configured. Set Twilio WhatsApp or WhatsApp Cloud API credentials.');
@@ -6817,12 +7162,12 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: resendFrom, to: [recipient], subject, html, text: message }),
+        body: JSON.stringify({ from: resendFrom, to: [recipient], subject, html, text: message, ...(attachments.length ? { attachments: attachments.map(file => ({ filename: file.filename, content: Buffer.from(file.content).toString('base64') })) } : {}) }),
         signal: AbortSignal.timeout(12000)
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || `Resend returned ${response.status}`);
-      return { provider: 'Resend' };
+      return { provider: 'Resend', provider_reference: data.id || null };
     }
 
     const sendGridKey = process.env.SENDGRID_API_KEY;
@@ -6835,12 +7180,14 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
           personalizations: [{ to: [{ email: recipient }] }],
           from: { email: sendGridFrom },
           subject,
-          content: [{ type: 'text/plain', value: message }, { type: 'text/html', value: html }]
+          content: [{ type: 'text/plain', value: message }, { type: 'text/html', value: html }],
+          ...(attachments.length ? { attachments: attachments.map(file => ({ filename: file.filename, type: file.contentType, disposition: 'attachment', content: Buffer.from(file.content).toString('base64') })) } : {})
         }),
         signal: AbortSignal.timeout(12000)
       });
-      if (!response.ok) throw new Error(`SendGrid returned ${response.status}`);
-      return { provider: 'SendGrid' };
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.errors?.[0]?.message || `SendGrid returned ${response.status}`);
+      return { provider: 'SendGrid', provider_reference: response.headers.get('x-message-id') || null };
     }
 
     throw new Error('Email is not configured. Set Resend or SendGrid credentials.');
@@ -8132,6 +8479,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 
   try {
     const result = transaction();
+    if (result?.payment_status === 'Paid') awardLoyaltyPointsForVisit(result.visit_id);
     await dispatchVisitNotifications(result.visit_id);
     res.status(201).json({
       message: 'Visit successfully recorded.',
@@ -8521,6 +8869,8 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
     });
 
     transaction();
+    const loyaltyVisit = db.prepare('SELECT payment_status FROM VISITS WHERE visit_id = ?').get(visitId);
+    if (loyaltyVisit?.payment_status === 'Paid') awardLoyaltyPointsForVisit(visitId);
 
     // Fetch updated visit
     const updated = db.prepare(`
@@ -9415,6 +9765,15 @@ app.get('/api/reports/day-details', authenticateToken, authorizeRoles('admin'), 
     console.error('Day details error:', err);
     res.status(500).json({ error: 'Failed to fetch day details' });
   }
+});
+
+registerGiftVoucherRoutes({
+  app,
+  db,
+  authenticateToken,
+  authorizeRoles,
+  recordAuditLog,
+  deliverNotification: deliverVisitNotification
 });
 
 // Serve built static frontend if available

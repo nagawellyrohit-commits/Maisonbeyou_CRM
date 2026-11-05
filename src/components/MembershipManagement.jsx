@@ -12,6 +12,7 @@ import { showConfirm } from '../utils/messageBox';
 
 function ComplimentaryServiceSelector({ services, value = [], membershipPrice, onChange }) {
   const [serviceToAdd, setServiceToAdd] = useState('');
+  const serviceSelectRef = useRef(null);
   const selectedIds = new Set(value.map(item => String(item.service_id)));
   const selectedServices = value.map(item => {
     const current = services.find(service => String(service.service_id) === String(item.service_id));
@@ -31,9 +32,10 @@ function ComplimentaryServiceSelector({ services, value = [], membershipPrice, o
     <section style={{ border: '1px solid #E7D8C4', borderRadius: 9, padding: 12, background: '#FFFCF7', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 12, color: '#6B4A22' }}>Complimentary services</strong>
+        <button type="button" onClick={() => serviceSelectRef.current?.focus()} style={{ border: 0, background: 'transparent', color: '#9E7437', fontSize: 11, fontWeight: 700, cursor: 'pointer', padding: 0 }}>+ Add more</button>
         <span style={{ fontSize: 11, color: '#57534E' }}>Current value: <strong>{formatCurrency(includedValue)}</strong></span>
       </div>
-      <select aria-label="Add a free service benefit" value={serviceToAdd} onChange={event => selectService(event.target.value)} style={{ width: '100%', minWidth: 0, padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', fontSize: 12 }}>
+      <select ref={serviceSelectRef} aria-label="Add a free service benefit" value={serviceToAdd} onChange={event => selectService(event.target.value)} style={{ width: '100%', minWidth: 0, padding: '8px 10px', border: '1px solid #D6D3D1', borderRadius: 7, background: '#FFFFFF', fontSize: 12 }}>
         <option value="">Select a service to include free…</option>
         {services.filter(service => !selectedIds.has(String(service.service_id))).map(service => (
           <option key={service.service_id} value={service.service_id}>{service.service_name} — {formatCurrency(service.price)}</option>
@@ -168,7 +170,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     validityBadge: 'VALID FOR 30 DAYS',
     durationLabel: '(per 30 days)',
     discountPercent: 0,
-    image: '/memberships/card_infini_3d.jpg',
+    image: '',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
     benefitInput: '',
     benefits: [],
@@ -177,7 +179,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
   // Add Membership Plan Modal (Master Admin & Main Admin only)
   const [showAddPlanModal, setShowAddPlanModal] = useState(false);
-  const [isInlineAddingPlan, setIsInlineAddingPlan] = useState(false);
+  const [isInlineAddingPlan, setIsInlineAddingPlan] = useState(true);
   const [savingPlan, setSavingPlan] = useState(false);
   const [newPlanForm, setNewPlanForm] = useState({
     name: '',
@@ -189,7 +191,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
     validityBadge: 'VALID FOR 30 DAYS',
     durationLabel: '(per 30 days)',
     discountPercent: 0,
-    image: '/memberships/card_infini_3d.jpg',
+    image: '',
     tagline: 'Exclusive personalized aesthetic luxury membership.',
     benefitInput: '',
     benefits: [
@@ -495,7 +497,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
 
       if (res && res.success) {
         setShowAddPlanModal(false);
-        setIsInlineAddingPlan(false);
+        setIsInlineAddingPlan(true);
         setNewPlanDurationValue('30');
         setNewPlanDurationUnit('day');
         setNewPlanForm({
@@ -508,7 +510,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           validityBadge: 'VALID FOR 30 DAYS',
           durationLabel: '(per 30 days)',
           discountPercent: 0,
-          image: '/memberships/card_infini_3d.jpg',
+          image: '',
           tagline: 'Exclusive personalized aesthetic luxury membership.',
           benefitInput: '',
           benefits: [
@@ -867,16 +869,10 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
       {/* Top Header Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700', paddingLeft: '20px' }}>
+          <h1 style={{ fontSize: '26px', color: '#1C1917', margin: 0, fontWeight: '700' }}>
             {branding?.membership_heading || 'Membership Tiers & Privileges'}
           </h1>
         </div>
-        {masterCatalogMode && canManagePlans && membershipTab === 'plans' && (
-          <button type="button" onClick={() => setShowAddPlanModal(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 15px', border: '1px solid #B88B4A', borderRadius: 8, background: 'linear-gradient(135deg, #B88B4A 0%, #9F7335 100%)', color: '#FFFFFF', fontSize: 12, fontWeight: 750, cursor: 'pointer', boxShadow: '0 3px 10px rgba(184,139,74,.18)' }}>
-            <Plus size={15} /> Add membership
-          </button>
-        )}
-
       </div>
 
       {canManagePlans && (
@@ -1305,7 +1301,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
           })}
 
           {/* Add New Membership Card Tile for Master or Main Admin */}
-          {canManagePlans && !masterCatalogMode && (
+          {canManagePlans && (
             <div
               role={isInlineAddingPlan ? undefined : 'button'}
               tabIndex={isInlineAddingPlan ? -1 : 0}
@@ -1467,7 +1463,7 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                   <ComplimentaryServiceSelector services={serviceOptions} value={newPlanForm.freeServices} membershipPrice={newPlanForm.price} onChange={freeServices => setNewPlanForm(prev => ({ ...prev, freeServices }))} />
 
                   <div style={{ display: 'flex', gap: '7px', marginTop: 'auto' }}>
-                    <button type="button" onClick={() => setIsInlineAddingPlan(false)} style={{ flex: 1, padding: '8px 5px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF', color: '#57534E', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>Cancel</button>
+                    <button type="button" onClick={handleStartInlineAddPlan} style={{ flex: 1, padding: '8px 5px', border: '1px solid #E7D8C4', borderRadius: '7px', background: '#FFFFFF', color: '#57534E', fontSize: '10px', fontWeight: '700', cursor: 'pointer' }}>Clear</button>
                     <button type="submit" disabled={savingPlan} style={{ flex: 1.4, padding: '8px 5px', border: '1px solid #D8BC8F', borderRadius: '7px', background: '#FAF6EE', color: '#8E633A', fontSize: '10px', fontWeight: '800', cursor: savingPlan ? 'wait' : 'pointer' }}>{savingPlan ? 'SAVING...' : '+ ADD MEMBERSHIP'}</button>
                   </div>
                 </form>

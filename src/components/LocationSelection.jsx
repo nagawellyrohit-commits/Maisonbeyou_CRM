@@ -17,6 +17,7 @@ import BrandingCustomizer from './BrandingCustomizer';
 import CentralMasterCatalog from './CentralMasterCatalog';
 import ServiceManagement from './ServiceManagement';
 import MembershipManagement from './MembershipManagement';
+import LoyaltyManagement from './LoyaltyManagement';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
 
@@ -607,7 +608,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
 
             {/* Master Admin Reports Dashboard or Branch Locations Grid */}
             {viewMode === 'master-data' ? (
-              <section style={{ width: 'calc(100% - 48px)', maxWidth: 1500, boxSizing: 'border-box', margin: '0 auto 48px', padding: 'clamp(20px, 3vw, 32px)', borderRadius: 20, border: '1px solid #E8D6BF', background: '#FFFEFC', boxShadow: '0 12px 36px rgba(54,39,25,.08)' }}>
+              <section className="master-data-content" style={{ width: '100%', maxWidth: 1360, boxSizing: 'border-box', margin: '0 auto 48px', padding: '0 0 24px', background: 'transparent', border: 'none', borderRadius: 0, boxShadow: 'none' }}>
                 <button type="button" onClick={() => setViewMode('locations')} className="btn-luxury-header-action" style={{ marginBottom: 22 }}><ArrowLeft size={15} /> Back to {isBranch ? 'All Branches' : 'All Franchises'}</button>
                 <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.13em', color: '#A97735', textTransform: 'uppercase' }}>Master administration</div>
                 <h2 style={{ margin: '6px 0', color: '#302820', fontSize: 26 }}>Central master data</h2>
@@ -616,8 +617,9 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   {[
                     { id: 'services', eyebrow: 'SERVICES', label: 'Service catalog', icon: Scissors },
                     { id: 'membership', eyebrow: 'MEMBERSHIP', label: 'Plans & privileges', icon: Crown },
+                    { id: 'loyalty', eyebrow: 'LOYALTY', label: 'Points & rewards', icon: Award },
                     { id: 'designation', eyebrow: 'DESIGNATION', label: 'Seniority levels', icon: UserCheck },
-                    { id: 'hierarchy', eyebrow: 'HIERARCHY', label: 'Studio roles', icon: Award }
+                    { id: 'hierarchy', eyebrow: 'HIERARCHY', label: 'Brand reporting', icon: Award }
                   ].map(tab => {
                     const Icon = tab.icon;
                     const selected = masterDataModule === tab.id;
@@ -636,7 +638,9 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   ? <ServiceManagement masterCatalogMode />
                   : masterDataModule === 'membership'
                     ? <MembershipManagement masterCatalogMode />
-                    : <CentralMasterCatalog activeTab={masterDataModule} />}
+                    : masterDataModule === 'loyalty'
+                      ? <LoyaltyManagement />
+                      : <CentralMasterCatalog activeTab={masterDataModule} currentUser={currentUser} />}
               </section>
             ) : viewMode === 'reports' ? (
               <MasterAdminReportsDashboard onBack={() => setViewMode('locations')} />

@@ -6,6 +6,7 @@ export const DASHBOARD_MODULES = [
   { id: 'services', label: 'Services' },
   { id: 'team', label: 'Team' },
   { id: 'membership', label: 'Membership' },
+  { id: 'gift_vouchers', label: 'Gift vouchers' },
   { id: 'reports', label: 'Reports & analytics' }
 ];
 

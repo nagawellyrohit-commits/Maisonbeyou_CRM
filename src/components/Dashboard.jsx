@@ -4,7 +4,7 @@ import {
   Building2, Handshake, CalendarDays, Clock3,
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
-  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut, Palette,
+  Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut, Palette, Gift,
   Edit2, FileText, Crown, Settings
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
@@ -13,6 +13,8 @@ import ServiceManagement from './ServiceManagement';
 import StaffManagement from './StaffManagement';
 import MembershipManagement from './MembershipManagement';
 import BusinessHoursManagement from './BusinessHoursManagement';
+import LoyaltyManagement from './LoyaltyManagement';
+import GiftVoucherManagement from './GiftVoucherManagement';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import BranchUserManagement from './BranchUserManagement';
@@ -118,7 +120,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [error, setError] = useState('');
 
   const initialSection = hasModuleAccess('visits') ? 'visits'
-    : ['clients', 'services', 'team', 'membership', 'reports', 'user_management'].find(key => hasModuleAccess(key)) || 'visits';
+    : ['clients', 'services', 'team', 'membership', 'gift_vouchers', 'reports', 'user_management'].find(key => hasModuleAccess(key)) || 'visits';
   // In-dashboard sub-module section switcher.
   const [activeSection, setActiveSection] = useState(initialSection);
 
@@ -577,7 +579,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           minWidth: 0
         }}>
           {/* Quick Module Navigation Menu (Services, Membership, Team, Clients, Reports, KYC Details) */}
-          {(isAdmin || ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => hasModuleAccess(module))) && (
+          {(isAdmin || ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'gift_vouchers', 'reports'].some(module => hasModuleAccess(module))) && (
             <div ref={adminMenuRef} style={{ position: 'relative' }}>
               {!isActualAdmin && (
                 <button
@@ -679,6 +681,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     { id: 'services', label: 'Services', icon: Scissors, show: !isAdmin && hasModuleAccess('services') },
                     { id: 'staff', label: 'Team', icon: Users, show: !isAdmin && hasModuleAccess('team') },
                     { id: 'membership', label: 'Membership', icon: Crown, show: !isAdmin && hasModuleAccess('membership') },
+                    { id: 'gift-vouchers', label: 'Gift vouchers', icon: Gift, show: hasModuleAccess('gift_vouchers') },
                     { id: 'reports', label: 'Reports', icon: BarChart3, show: hasModuleAccess('reports') },
                   ].filter(item => item.show).map(item => {
                     const Icon = item.icon;
@@ -917,7 +920,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       </div>
 
       {/* Today's Summary Grid (Section 3 Requirement) */}
-      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
+      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && activeSection !== 'gift-vouchers' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1598,6 +1601,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             {[
               { id: 'services', label: 'Services', description: 'Service catalog', icon: Scissors },
               { id: 'membership', label: 'Membership', description: 'Plans & privileges', icon: Crown },
+              { id: 'loyalty', label: 'Loyalty', description: 'Branch points conversion', icon: Award },
               { id: 'designation', label: 'Designation', description: 'Seniority levels', icon: UserCheck },
               { id: 'team', label: 'Team', description: 'Team members', icon: Users },
               { id: 'hierarchy', label: 'Hierarchy', description: 'Studio roles', icon: Award },
@@ -1620,6 +1624,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           {masterTab === 'services' && <ServiceManagement branding={branding} />}
           {masterTab === 'hours' && <BusinessHoursManagement key={`master-hours-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} activeLocation={activeLocation} />}
           {masterTab === 'membership' && <MembershipManagement onOpenClient={onOpenClient} activeLocation={activeLocation} currentUser={dashboardUser} branding={branding} />}
+          {masterTab === 'loyalty' && <LoyaltyManagement scope="branch" activeLocation={activeLocation} />}
           {masterTab === 'team' && <StaffManagement key={`master-team-${activeLocation?.location_id || dashboardUser?.location_id || 'none'}`} branding={branding} currentUser={dashboardUser} activeLocation={activeLocation} />}
           {masterTab === 'user-access' && <BranchUserManagement activeLocation={activeLocation} branding={branding} />}
         </div>
@@ -1640,6 +1645,12 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             currentUser={dashboardUser}
             branding={branding}
           />
+        </div>
+      )}
+
+      {activeSection === 'gift-vouchers' && hasModuleAccess('gift_vouchers') && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
+          <GiftVoucherManagement currentUser={dashboardUser} activeLocation={activeLocation} />
         </div>
       )}
 
