@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowDownToLine, BarChart3, Camera, CheckCircle2, Clipboard, Gift, LoaderCircle, Plus, Printer, QrCode, RefreshCw, Search, Settings, X } from 'lucide-react';
+import { AlertCircle, ArrowDownToLine, BarChart3, Camera, CheckCircle2, Clipboard, Gift, LoaderCircle, Plus, Printer, RefreshCw, Search, X } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate } from '../utils/api';
 
 const cardStyle = { padding: 18, border: '1px solid #E7D8C4', borderRadius: 14, background: '#FFFFFF', boxShadow: '0 4px 14px rgba(87,58,32,.035)' };
@@ -115,9 +115,14 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
   }, []);
 
   const loadRows = useCallback(async () => {
-    if (isReceptionOnly) { setVouchers([]); setReport({ totals: {}, branches: [] }); setLoading(false); return; }
     setLoading(true);
     try {
+      if (isReceptionOnly) {
+        const listResult = await apiRequest('/gift-vouchers');
+        setVouchers(listResult.vouchers || []);
+        setReport({ totals: {}, branches: [] });
+        return;
+      }
       const locationQuery = isMaster && filterBranch !== 'all' ? `?location_id=${encodeURIComponent(filterBranch)}` : '';
       const [listResult, reportResult] = await Promise.all([apiRequest(`/gift-vouchers${locationQuery}`), apiRequest(`/gift-vouchers/reports${locationQuery}`)]);
       setVouchers(listResult.vouchers || []);
@@ -159,16 +164,12 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
 
   const handleCreate = async event => {
     event.preventDefault();
-    if (Number(settings.require_recipient_contact) && !form.recipient_phone.trim() && !form.recipient_email.trim()) {
-      setError('Global voucher policy requires a recipient mobile number or email address.');
-      return;
-    }
     setBusy(true); setError(''); setNotice('');
     try {
       const payload = {
         ...form,
-        status: form.payment_status === 'draft' ? 'draft' : undefined,
-        payment_status: form.payment_status === 'paid' ? 'paid' : 'pending',
+        status: undefined,
+        payment_status: 'paid',
         issuing_location_id: isMaster ? Number(selectedBranch) : undefined,
         category_ids: selectedCategoryIds,
         service_ids: selectedServiceIds,
@@ -178,8 +179,8 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
       const result = await apiRequest('/gift-vouchers', { method: 'POST', body: JSON.stringify(payload) });
       setVoucherDetails({ voucher: result.voucher, delivery_history: result.delivery_history || [], redemptions: [], ledger: [] });
       setView('details');
-      setNotice(result.voucher.payment_status === 'paid' ? 'Voucher activated; its card was generated and delivery was attempted for the selected channels.' : 'Voucher created and held pending payment confirmation. It will activate and send after payment is confirmed.');
-      setForm(current => ({ ...current, title: 'Maison Beyou Gift Voucher', purchaser_name: '', purchaser_phone: '', purchaser_email: '', recipient_name: '', recipient_phone: '', recipient_email: '', gift_message: '', payment_status: 'pending', payment_method: '', payment_reference: '', notes: '', send_whatsapp: false, send_email: false, send_purchaser_copy: false }));
+      setNotice(`Voucher ${result.voucher.voucher_code} created and activated. It is ready to redeem.`);
+      setForm(current => ({ ...current, title: 'Maison Beyou Gift Voucher', purchaser_name: '', purchaser_phone: '', purchaser_email: '', recipient_name: '', recipient_phone: '', recipient_email: '', gift_message: '', payment_status: 'paid', payment_method: '', payment_reference: '', notes: '', send_whatsapp: false, send_email: false, send_purchaser_copy: false }));
       setSelectedCategoryIds([]); setSelectedServiceIds([]);
       await loadRows();
     } catch (requestError) { setError(requestError.message || 'Could not create voucher.'); }
@@ -191,7 +192,7 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     if (!code) { setError('Enter or scan a voucher code.'); return; }
     setBusy(true); setError(''); setNotice(''); setVoucherDetails(null); setRedemptionServices([]); setRedemptionAmount('');
     try {
-      const result = await apiRequest(`/gift-vouchers/lookup/${encodeURIComponent(code)}`);
+      const result = await apiRequest(`/gift-vouchers/lookup/${encodeURIComponent(code)}?refresh_card=1`);
       setVoucherDetails(result);
       setLookupCode(code);
       setRedemptionRef(`GVR-${crypto.randomUUID().replaceAll('-', '').slice(0, 22).toUpperCase()}`);
@@ -201,7 +202,7 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
 
   const openDetails = async voucher => {
     setBusy(true); setError(''); setNotice('');
-    try { setVoucherDetails(await apiRequest(`/gift-vouchers/lookup/${encodeURIComponent(voucher.voucher_code)}`)); setView('details'); }
+    try { setVoucherDetails(await apiRequest(`/gift-vouchers/lookup/${encodeURIComponent(voucher.voucher_code)}?refresh_card=1`)); setView('details'); }
     catch (requestError) { setError(requestError.message || 'Could not load voucher details.'); }
     finally { setBusy(false); }
   };
@@ -243,16 +244,6 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     finally { setBusy(false); }
   };
 
-  const retryDelivery = async delivery => {
-    setBusy(true); setError(''); setNotice('');
-    try {
-      await apiRequest(`/gift-vouchers/deliveries/${delivery.delivery_id}/retry`, { method: 'POST', body: JSON.stringify({}) });
-      setNotice(`${delivery.channel === 'email' ? 'Email' : 'WhatsApp'} retry recorded. A provider acceptance is shown as Sent, not Delivered.`);
-      await openDetails(voucherDetails.voucher);
-    } catch (requestError) { setError(requestError.message || 'Could not retry delivery.'); }
-    finally { setBusy(false); }
-  };
-
   const saveSettings = async event => {
     event.preventDefault(); setBusy(true); setError(''); setNotice('');
     try {
@@ -267,9 +258,8 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     const matchesStatus = statusFilter === 'all' || voucher.status === statusFilter;
     return matchesSearch && matchesStatus;
   }), [vouchers, search, statusFilter]);
-  const tabs = isReceptionOnly ? [['redeem', 'Redeem voucher', QrCode]] : [
-    ['dashboard', 'Overview', BarChart3], ['vouchers', 'Vouchers', Gift], ['create', 'Create voucher', Plus], ['redeem', 'Redeem voucher', QrCode],
-    ...(isMaster ? [['settings', 'Voucher settings', Settings]] : [])
+  const tabs = isReceptionOnly ? [] : [
+    ['dashboard', 'Overview', BarChart3], ['vouchers', 'Vouchers', Gift]
   ];
 
   const renderForm = () => <form onSubmit={handleCreate} style={{ display: 'grid', gap: 14 }}>
@@ -277,14 +267,14 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     <section style={cardStyle}>
       <h3 style={{ margin: '0 0 12px', color: '#302820', fontSize: 16 }}>1. Voucher details</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
-        <label style={labelStyle}>Voucher type<select style={fieldStyle} value={form.voucher_type} onChange={event => updateForm('voucher_type', event.target.value)}><option value="amount">Amount-based</option><option value="service">Service-based</option></select></label>
+        <label style={labelStyle}>Voucher type<select style={fieldStyle} value={form.voucher_type} onChange={event => { updateForm('voucher_type', event.target.value); updateForm('eligibility_mode', 'selected'); setSelectedCategoryIds([]); setSelectedServiceIds([]); }}><option value="amount">Amount-based</option><option value="service">Service-based</option></select></label>
         <label style={labelStyle}>Voucher title<input style={fieldStyle} required maxLength={100} value={form.title} onChange={event => updateForm('title', event.target.value)} placeholder="e.g. A Gift for You" /></label>
         <label style={labelStyle}>{form.voucher_type === 'amount' ? 'Voucher amount (₹)' : 'Service voucher value (₹)'}<input style={fieldStyle} required type="number" min={settings.minimum_value} step="0.01" value={form.original_value} onChange={event => updateForm('original_value', event.target.value)} /></label>
         {form.voucher_type === 'service' && <label style={labelStyle}>Allowed service redemptions<input style={fieldStyle} required type="number" min="1" max="100" value={form.service_redemptions_allowed} onChange={event => updateForm('service_redemptions_allowed', event.target.value)} /><span style={{ color: '#786D62', fontWeight: 400 }}>Defaults to one. Increase only for multi-session gifts.</span></label>}
       </div>
     </section>
 
-    <section style={cardStyle}>
+    {form.voucher_type === 'service' && <><section style={cardStyle}>
       <h3 style={{ margin: '0 0 5px', color: '#302820', fontSize: 16 }}>2. Select categories</h3>
       <p style={{ margin: '0 0 12px', color: '#786D62', fontSize: 12 }}>Categories are saved as a snapshot with the voucher, so later catalogue edits do not change eligibility.</p>
       {activeCategories.length ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 8 }}>{activeCategories.map(category => <label key={category.category_id} style={{ display: 'flex', gap: 9, alignItems: 'center', padding: 10, border: '1px solid #F0E6D9', borderRadius: 9, color: '#51463D', fontSize: 13 }}><input type="checkbox" checked={selectedCategoryIds.includes(Number(category.category_id))} onChange={() => toggleCategory(category.category_id)} />{category.category_name}</label>)}</div> : <div style={{ color: '#A16207', fontSize: 13 }}>Select a branch to load its active categories.</div>}
@@ -301,38 +291,21 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
         {form.eligibility_mode !== 'all' && <div style={{ display: 'grid', gap: 7, marginTop: 12 }}>{serviceOptions.map(service => <label key={service.service_id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', border: '1px solid #F0E6D9', borderRadius: 8, color: '#51463D', fontSize: 12.5 }}><input type="checkbox" checked={selectedServiceIds.includes(Number(service.service_id))} onChange={() => toggleService(service.service_id)} /><span style={{ flex: 1 }}>{service.service_name}<span style={{ color: '#948575' }}> · {service.category_name}</span></span><span style={{ color: '#8C6228', whiteSpace: 'nowrap' }}>{formatCurrency(service.price)}</span></label>)}</div>}
         <div style={{ marginTop: 12, padding: 12, borderRadius: 9, background: '#FAF6EE', color: '#6B5B4A', fontSize: 12 }}><strong>Saved eligible service snapshot:</strong> {eligibleServicesPreview.map(service => service.service_name).join(', ') || (form.eligibility_mode === 'unrestricted' ? 'Any service' : 'Choose at least one eligible service.')}</div>
       </>}
-    </section>
+    </section></>}
 
     <section style={cardStyle}>
       <h3 style={{ margin: '0 0 12px', color: '#302820', fontSize: 16 }}>4. Validity and gift details</h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }}>
         <label style={labelStyle}>Expiry date<input style={fieldStyle} required type="date" min={todayIso()} max={dateAfterDays(settings.max_validity_days || 1095)} value={form.expiry_date} onChange={event => updateForm('expiry_date', event.target.value)} /></label>
-        <label style={labelStyle}>Purchaser name<input style={fieldStyle} value={form.purchaser_name} onChange={event => updateForm('purchaser_name', event.target.value)} /></label>
-        <label style={labelStyle}>Purchaser mobile<input style={fieldStyle} type="tel" value={form.purchaser_phone} onChange={event => updateForm('purchaser_phone', event.target.value)} /></label>
-        <label style={labelStyle}>Purchaser email<input style={fieldStyle} type="email" value={form.purchaser_email} onChange={event => updateForm('purchaser_email', event.target.value)} /></label>
-        <label style={labelStyle}>Recipient name{Number(settings.require_recipient_contact) ? ' (contact required)' : ''}<input style={fieldStyle} value={form.recipient_name} onChange={event => updateForm('recipient_name', event.target.value)} /></label>
-        <label style={labelStyle}>Recipient mobile<input style={fieldStyle} type="tel" value={form.recipient_phone} onChange={event => updateForm('recipient_phone', event.target.value)} /></label>
-        <label style={labelStyle}>Recipient email<input style={fieldStyle} type="email" value={form.recipient_email} onChange={event => updateForm('recipient_email', event.target.value)} /></label>
+        <label style={labelStyle}>Purchaser name *<input style={fieldStyle} required value={form.purchaser_name} onChange={event => updateForm('purchaser_name', event.target.value)} /></label>
+        <label style={labelStyle}>Purchaser mobile *<input style={fieldStyle} required type="tel" inputMode="numeric" pattern="[0-9]{10}" title="Enter a 10-digit mobile number" maxLength={10} value={form.purchaser_phone} onChange={event => updateForm('purchaser_phone', event.target.value.replace(/\D/g, '').slice(0, 10))} /></label>
+        <label style={labelStyle}>Purchaser email *<input style={fieldStyle} required type="email" value={form.purchaser_email} onChange={event => updateForm('purchaser_email', event.target.value)} /></label>
         <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Personal gift message<textarea style={{ ...fieldStyle, resize: 'vertical' }} rows={3} maxLength={350} value={form.gift_message} onChange={event => updateForm('gift_message', event.target.value)} /></label>
         <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Internal notes<textarea style={{ ...fieldStyle, resize: 'vertical' }} rows={2} value={form.notes} onChange={event => updateForm('notes', event.target.value)} /></label>
       </div>
     </section>
 
-    <section style={cardStyle}>
-      <h3 style={{ margin: '0 0 12px', color: '#302820', fontSize: 16 }}>5. Payment and delivery</h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 }}>
-        <label style={labelStyle}>Voucher stage<select style={fieldStyle} value={form.payment_status} onChange={event => updateForm('payment_status', event.target.value)}><option value="draft">Draft · save without issuing</option><option value="pending">Pending payment</option><option value="paid">Paid · activate now</option></select></label>
-        <label style={labelStyle}>Payment method<select style={fieldStyle} value={form.payment_method} onChange={event => updateForm('payment_method', event.target.value)}><option value="">Not recorded</option><option>Cash</option><option>UPI</option><option>Card</option><option>Bank transfer</option><option>Other</option></select></label>
-        <label style={labelStyle}>Payment reference<input style={fieldStyle} value={form.payment_reference} onChange={event => updateForm('payment_reference', event.target.value)} /></label>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 14 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#51463D', fontSize: 12 }}><input type="checkbox" checked={form.send_whatsapp} onChange={event => updateForm('send_whatsapp', event.target.checked)} /> Send on WhatsApp</label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#51463D', fontSize: 12 }}><input type="checkbox" checked={form.send_email} onChange={event => updateForm('send_email', event.target.checked)} /> Send by email</label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#51463D', fontSize: 12 }}><input type="checkbox" checked={form.send_purchaser_copy} onChange={event => updateForm('send_purchaser_copy', event.target.checked)} /> Send purchaser a copy</label>
-      </div>
-      <p style={{ margin: '10px 0 0', color: '#786D62', fontSize: 11 }}>Delivery is opt-in. Payment confirmation activates the voucher and generates the QR gift card. WhatsApp requires an approved message template and a public HTTPS card URL; email needs Resend or SendGrid configuration.</p>
-    </section>
-    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" style={outlineButton} onClick={() => setView('vouchers')}>Cancel</button><button type="submit" disabled={busy || (isMaster && !selectedBranch)} style={{ ...primaryButton, opacity: busy ? .65 : 1 }}>{busy ? 'Saving…' : form.payment_status === 'paid' ? 'Create and activate voucher' : form.payment_status === 'draft' ? 'Save draft' : 'Create pending voucher'}</button></div>
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}><button type="button" style={outlineButton} onClick={() => setView('vouchers')}>Cancel</button><button type="submit" disabled={busy || (isMaster && !selectedBranch)} style={{ ...primaryButton, opacity: busy ? .65 : 1 }}>{busy ? 'Creating…' : 'Create active voucher'}</button></div>
   </form>;
 
   const renderDetails = () => {
@@ -345,14 +318,14 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
       <section style={{ ...cardStyle, display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         <div><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><h2 style={{ margin: 0, fontSize: 20, color: '#302820' }}>{voucher.title}</h2><StatusPill status={voucher.status} /></div><div style={{ marginTop: 8, color: '#8C6228', fontWeight: 800, fontSize: 18, letterSpacing: 1 }}>{voucher.voucher_code}</div><div style={{ marginTop: 6, color: '#786D62', fontSize: 12 }}>Issued by {voucher.issuing_branch_name} · {formatDate(voucher.issue_date)} · Valid until {formatDate(voucher.expiry_date)}</div></div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {voucher.card_image_path && <a href={voucher.card_image_path} download style={outlineButton}><ArrowDownToLine size={15} /> Card image</a>}
-          {voucher.card_pdf_path && <a href={voucher.card_pdf_path} target="_blank" rel="noreferrer" style={outlineButton}><Printer size={15} /> PDF / print</a>}
+          {voucher.card_image_path && <a href={`${voucher.card_image_path}?v=${Date.now()}`} download style={outlineButton}><ArrowDownToLine size={15} /> Card image</a>}
+          {voucher.card_pdf_path && <a href={`${voucher.card_pdf_path}?v=${Date.now()}`} target="_blank" rel="noreferrer" style={outlineButton}><Printer size={15} /> PDF / print</a>}
           <button type="button" style={outlineButton} onClick={() => navigator.clipboard?.writeText(voucher.voucher_code).then(() => setNotice('Voucher code copied.'))}><Clipboard size={15} /> Copy code</button>
         </div>
       </section>
-      {voucher.card_image_path && <section style={cardStyle}><img src={voucher.card_image_path} alt={`Gift voucher ${voucher.voucher_code}`} style={{ display: 'block', width: '100%', maxWidth: 900, margin: '0 auto', borderRadius: 12, border: '1px solid #EADBBE' }} /></section>}
+      {voucher.card_image_path && <section style={cardStyle}><img src={`${voucher.card_image_path}?v=${Date.now()}`} alt={`Gift voucher ${voucher.voucher_code}`} style={{ display: 'block', width: '100%', maxWidth: 900, margin: '0 auto', borderRadius: 12, border: '1px solid #EADBBE' }} /></section>}
       <section style={{ ...cardStyle, display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12 }}>
-        <Metric label="Original value" value={formatCurrency(voucher.original_value)} /><Metric label="Redeemed" value={formatCurrency(redeemedValue)} /><Metric label="Remaining" value={formatCurrency(voucher.remaining_balance)} /><Metric label="Payment" value={statusLabel(voucher.payment_status)} />
+        <Metric label="Original value" value={formatCurrency(voucher.original_value)} /><Metric label="Redeemed" value={formatCurrency(redeemedValue)} /><Metric label="Remaining" value={formatCurrency(voucher.remaining_balance)} />
         <div style={{ gridColumn: '1 / -1', paddingTop: 10, borderTop: '1px solid #F0E9E0', color: '#786D62', fontSize: 12 }}><strong>Eligible services:</strong> {voucher.eligibility_mode === 'unrestricted' ? 'All services' : services.map(service => `${service.service_name} (${service.category_name})`).join(', ') || 'None recorded'}</div>
         {voucher.recipient_name && <div style={{ color: '#786D62', fontSize: 12 }}><strong>Recipient:</strong> {voucher.recipient_name}</div>}
         {voucher.purchaser_name && <div style={{ color: '#786D62', fontSize: 12 }}><strong>Purchaser:</strong> {voucher.purchaser_name}</div>}
@@ -361,19 +334,21 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
       {voucher.status === 'pending_payment' && (isMaster || voucher.issuing_location_id === activeLocation?.location_id) && <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" style={{ ...outlineButton, color: '#B42318', borderColor: '#FECACA' }} disabled={busy} onClick={() => mutateVoucher(voucher, 'cancel')}>Cancel voucher</button></div>}
       {['active', 'partially_redeemed'].includes(voucher.status) && (isMaster || voucher.issuing_location_id === activeLocation?.location_id) && <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" style={{ ...outlineButton, color: '#B42318', borderColor: '#FECACA' }} disabled={busy} onClick={() => mutateVoucher(voucher, 'refund')}>Refund unused voucher</button></div>}
       {(voucher.redemptions?.length > 0) && <section style={cardStyle}><h3 style={{ margin: '0 0 10px', color: '#302820' }}>Redemption history</h3><div style={{ display: 'grid', gap: 8 }}>{voucher.redemptions.map(item => <div key={item.redemption_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: 9, background: '#FFFCF7', borderRadius: 8, fontSize: 12 }}><span>{item.redeeming_branch_name} · {formatDate(item.created_at)} · {item.services?.map(service => service.service_name).join(', ')}</span><strong>{formatCurrency(item.amount)} · {item.redeeming_user_name}</strong></div>)}</div></section>}
-      <section style={cardStyle}><h3 style={{ margin: '0 0 10px', color: '#302820' }}>Delivery history</h3>{voucherDetails.delivery_history?.length ? <div style={{ display: 'grid', gap: 8 }}>{voucherDetails.delivery_history.map(item => <div key={item.delivery_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(130px,1fr) minmax(110px,auto) auto', gap: 8, alignItems: 'center', padding: 9, background: '#FFFCF7', borderRadius: 8, fontSize: 12 }}><span>{item.channel} · {item.recipient_kind} · {item.recipient}<small style={{ display: 'block', color: '#948575' }}>{item.error || item.provider_reference || item.provider || 'No provider response yet'}</small></span><StatusPill status={item.status} />{['failed', 'retry_required', 'not_configured'].includes(item.status) ? <button type="button" style={outlineButton} disabled={busy} onClick={() => retryDelivery(item)}>Resend</button> : null}</div>)}</div> : <div style={{ color: '#786D62', fontSize: 12 }}>No delivery was requested. Delivery is opt-in for each voucher.</div>}</section>
-      <section style={cardStyle}><h3 style={{ margin: '0 0 10px', color: '#302820' }}>Financial ledger</h3>{voucherDetails.ledger?.length ? <div style={{ display: 'grid', gap: 7 }}>{voucherDetails.ledger.map(entry => <div key={entry.ledger_id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: '#65594C' }}><span>{entry.entry_type} · {entry.notes} · {formatDate(entry.created_at)}</span><strong>{Number(entry.amount) > 0 ? '+' : ''}{formatCurrency(entry.amount)} · balance {formatCurrency(entry.updated_balance)}</strong></div>)}</div> : <div style={{ color: '#786D62', fontSize: 12 }}>No financial ledger entries yet.</div>}</section>
     </div>;
   };
 
   const renderRedeem = () => {
     const voucher = voucherDetails?.voucher;
-    const serviceChoices = voucher ? (voucher.eligibility_mode === 'unrestricted' ? (catalog.categories || []).flatMap(category => category.services || []).map(service => service.service_name) : (voucher.eligible_services || []).map(service => service.service_name)) : [];
+    const serviceChoices = voucher ? (voucher.voucher_type === 'amount' || voucher.eligibility_mode === 'unrestricted' ? (catalog.categories || []).flatMap(category => category.services || []).map(service => service.service_name) : (voucher.eligible_services || []).map(service => service.service_name)) : [];
     return <div style={{ display: 'grid', gap: 12 }}>
       <section style={cardStyle}>
         <h2 style={{ margin: '0 0 10px', color: '#302820', fontSize: 19 }}>Redeem gift voucher</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><input style={{ ...fieldStyle, flex: '1 1 250px' }} placeholder="Enter voucher code" value={lookupCode} onChange={event => setLookupCode(event.target.value.toUpperCase())} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); lookupVoucher(); } }} /><button type="button" style={primaryButton} disabled={busy} onClick={() => lookupVoucher()}><Search size={15} /> Find voucher</button><button type="button" style={outlineButton} onClick={() => setScannerOpen(true)}><Camera size={15} /> Scan QR</button></div>
         {scannerOpen && <div style={{ marginTop: 14, maxWidth: 480, ...cardStyle }}><VoucherScanner onCode={value => { setLookupCode(value); lookupVoucher(value); }} onClose={() => setScannerOpen(false)} /></div>}
+      </section>
+      <section style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginBottom: 12 }}><h3 style={{ margin: 0, color: '#302820', fontSize: 16 }}>Active vouchers</h3><button type="button" style={outlineButton} disabled={loading} onClick={loadRows}><RefreshCw size={14} /> Refresh</button></div>
+        {vouchers.filter(item => ['active', 'partially_redeemed'].includes(item.status) && Number(item.remaining_balance) > 0).length ? <div style={{ display: 'grid', gap: 8 }}>{vouchers.filter(item => ['active', 'partially_redeemed'].includes(item.status) && Number(item.remaining_balance) > 0).map(item => <button key={item.voucher_id} type="button" onClick={() => lookupVoucher(item.voucher_code)} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto auto', alignItems: 'center', gap: 12, width: '100%', padding: '12px 14px', border: '1px solid #E7D8C4', borderRadius: 10, background: '#FFFEFC', color: '#302820', textAlign: 'left', cursor: 'pointer' }}><span><strong style={{ display: 'block', fontSize: 13 }}>{item.title}</strong><span style={{ display: 'block', marginTop: 4, color: '#8C6228', fontSize: 12, fontWeight: 750 }}>{item.voucher_code}</span></span><span style={{ color: '#786D62', fontSize: 12 }}>{item.issuing_branch_name || ''}</span><span style={{ fontWeight: 750, whiteSpace: 'nowrap' }}>{formatCurrency(item.remaining_balance)}</span></button>)}</div> : <div style={{ padding: '14px 0', color: '#786D62', fontSize: 13 }}>No active vouchers available to redeem.</div>}
       </section>
       {voucher && <section style={cardStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}><div><h3 style={{ margin: 0, color: '#302820' }}>{voucher.title}</h3><div style={{ marginTop: 5, color: '#8C6228', fontWeight: 800 }}>{voucher.voucher_code}</div><div style={{ marginTop: 5, color: '#786D62', fontSize: 12 }}>Issued by {voucher.issuing_branch_name} · valid until {formatDate(voucher.expiry_date)}</div></div><StatusPill status={voucher.status} /></div>
@@ -396,17 +371,16 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
       {isMaster && view !== 'create' && <label style={{ ...labelStyle, minWidth: 210 }}>Branch report filter<select value={filterBranch} onChange={event => setFilterBranch(event.target.value)} style={fieldStyle}><option value="all">All branches</option>{branches.map(branch => <option key={branch.location_id} value={branch.location_id}>{branch.name} · {branch.type}</option>)}</select></label>}
     </div>
     {(error || notice) && <div role={error ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 11, borderRadius: 9, background: error ? '#FEF2F2' : '#F0FDF4', color: error ? '#991B1B' : '#166534', fontSize: 13 }}><AlertCircle size={16} />{error || notice}<button type="button" onClick={() => { setError(''); setNotice(''); }} style={{ marginLeft: 'auto', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}><X size={14} /></button></div>}
-    <div role="tablist" aria-label="Gift voucher sections" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([id, label, Icon]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setError(''); setNotice(''); }} style={{ ...outlineButton, background: view === id ? '#FAF6EE' : '#FFFFFF', borderColor: view === id ? '#B88B4A' : '#E7D8C4' }}><Icon size={15} />{label}</button>)}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><div role="tablist" aria-label="Gift voucher sections" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([id, label, Icon]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setError(''); setNotice(''); }} style={{ ...outlineButton, background: view === id ? '#FAF6EE' : '#FFFFFF', borderColor: view === id ? '#B88B4A' : '#E7D8C4' }}><Icon size={15} />{label}</button>)}</div><button type="button" style={{ ...primaryButton, marginLeft: 'auto' }} onClick={() => { setView('create'); setError(''); setNotice(''); }}><Plus size={15} />Create voucher</button></div>
 
     {view === 'dashboard' && <div style={{ display: 'grid', gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10 }}>{[
-        ['Vouchers created', summary.total_created || 0], ['Sold', summary.total_sold || 0], ['Sales value', formatCurrency(summary.sales_value || 0)], ['Active', summary.active || 0], ['Partially redeemed', summary.partially_redeemed || 0], ['Fully redeemed', summary.fully_redeemed || 0], ['Expired', summary.expired || 0], ['Outstanding', formatCurrency(summary.outstanding_balance || 0)], ['Redeemed value', formatCurrency(summary.redeemed_value || 0)]
+        ['Active', summary.active || 0], ['Partially redeemed', summary.partially_redeemed || 0], ['Fully redeemed', summary.fully_redeemed || 0], ['Expired', summary.expired || 0], ['Redeemed value', formatCurrency(summary.redeemed_value || 0)]
       ].map(([label, value]) => <Metric key={label} label={label} value={value} />)}</div>
-      <section style={cardStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><h3 style={{ margin: 0, color: '#302820' }}>Recent vouchers</h3><button type="button" style={primaryButton} onClick={() => setView('create')}><Plus size={15} /> Create voucher</button></div><VoucherTable vouchers={vouchers.slice(0, 8)} busy={busy} onOpen={openDetails} onConfirm={confirmPayment} onMutate={mutateVoucher} isMaster={isMaster} activeLocation={activeLocation} /></section>
-      {isMaster && <section style={cardStyle}><h3 style={{ margin: '0 0 10px', color: '#302820' }}>Branch-wise totals</h3><div style={{ overflowX: 'auto' }}><table style={tableStyle}><thead><tr><th>Branch</th><th>Vouchers issued</th><th>Sales value</th><th>Redeemed value</th></tr></thead><tbody>{report.branches?.map(branch => <tr key={branch.location_id}><td>{branch.name}</td><td>{branch.vouchers_issued}</td><td>{formatCurrency(branch.sales_value)}</td><td>{formatCurrency(branch.redeemed_value)}</td></tr>)}</tbody></table></div></section>}
+      <section style={cardStyle}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><h3 style={{ margin: 0, color: '#302820' }}>Recent vouchers</h3></div><VoucherTable vouchers={vouchers.slice(0, 8)} busy={busy} onOpen={openDetails} onConfirm={confirmPayment} onMutate={mutateVoucher} isMaster={isMaster} activeLocation={activeLocation} /></section>
     </div>}
 
-    {view === 'vouchers' && <section style={cardStyle}><div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', marginBottom: 12 }}><label style={{ ...labelStyle, flex: '1 1 220px' }}>Search<input style={fieldStyle} value={search} onChange={event => setSearch(event.target.value)} placeholder="Code, title, purchaser or recipient" /></label><label style={{ ...labelStyle, width: 190 }}>Status<select style={fieldStyle} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{Object.keys(statusColors).map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label><button type="button" style={{ ...outlineButton, alignSelf: 'end' }} onClick={loadRows}><RefreshCw size={14} /> Refresh</button><button type="button" style={{ ...primaryButton, alignSelf: 'end' }} onClick={() => setView('create')}><Plus size={15} /> Create voucher</button></div><VoucherTable vouchers={filteredVouchers} busy={busy} onOpen={openDetails} onConfirm={confirmPayment} onMutate={mutateVoucher} isMaster={isMaster} activeLocation={activeLocation} /></section>}
+    {view === 'vouchers' && <section style={cardStyle}><div style={{ display: 'flex', gap: 9, flexWrap: 'wrap', marginBottom: 12 }}><label style={{ ...labelStyle, flex: '1 1 220px' }}>Search<input style={fieldStyle} value={search} onChange={event => setSearch(event.target.value)} placeholder="Code, title, purchaser or recipient" /></label><label style={{ ...labelStyle, width: 190 }}>Status<select style={fieldStyle} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{Object.keys(statusColors).map(status => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label><button type="button" style={{ ...outlineButton, alignSelf: 'end' }} onClick={loadRows}><RefreshCw size={14} /> Refresh</button></div><VoucherTable vouchers={filteredVouchers} busy={busy} onOpen={openDetails} onConfirm={confirmPayment} onMutate={mutateVoucher} isMaster={isMaster} activeLocation={activeLocation} /></section>}
     {view === 'create' && renderForm()}
     {view === 'redeem' && renderRedeem()}
     {view === 'details' && <><button type="button" style={{ ...outlineButton, justifySelf: 'start' }} onClick={() => setView('vouchers')}>← Back to vouchers</button>{renderDetails()}</>}

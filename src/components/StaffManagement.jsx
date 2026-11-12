@@ -1049,7 +1049,7 @@ export default function StaffManagement({ branding, currentUser, activeLocation,
                   <label style={fieldLabel}>State *<input required value={stateName} onChange={e => setStateName(e.target.value)} placeholder="State" style={fieldInput} /></label>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
-                  <label style={fieldLabel}>Phone number *<input required value={phone} onChange={e => setPhone(e.target.value)} placeholder="+91 98201 11223" style={fieldInput} /></label>
+                  <label style={fieldLabel}>Phone number *<input required type="tel" inputMode="numeric" maxLength={10} value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit phone number" style={fieldInput} /></label>
                   <label style={fieldLabel}>Email *<input required type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" style={fieldInput} /></label>
                 </div>
               </div>

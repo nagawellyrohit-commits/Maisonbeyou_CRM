@@ -23,6 +23,10 @@ const normalizePhone = value => {
   if (digits.length === 10) digits = `91${digits}`;
   return digits.length >= 11 && digits.length <= 15 ? `+${digits}` : '';
 };
+const nameInitials = value => {
+  const parts = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[A-Za-z0-9]+/g) || [];
+  return `${parts[0]?.[0] || 'X'}${parts.length > 1 ? parts[parts.length - 1][0] : ''}`.toUpperCase();
+};
 
 function initializeGiftVoucherTables(db) {
   db.exec(`
@@ -71,6 +75,11 @@ function initializeGiftVoucherTables(db) {
       card_pdf_path TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS GIFT_VOUCHER_CODE_ALIASES (
+      alias_code TEXT PRIMARY KEY,
+      voucher_id INTEGER NOT NULL REFERENCES GIFT_VOUCHERS(voucher_id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS IDX_GIFT_VOUCHERS_ISSUING_LOCATION ON GIFT_VOUCHERS(issuing_location_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS IDX_GIFT_VOUCHERS_STATUS ON GIFT_VOUCHERS(status, expiry_date);
@@ -198,12 +207,11 @@ async function makePdfBuffer(voucher, qrBuffer, logoBuffer) {
   doc.font('Helvetica-Bold').fontSize(28).fillColor('#302820').text(voucher.title, 52, 153, { width: 520, height: 68 });
   doc.font('Helvetica').fontSize(13).fillColor('#786D62').text(voucher.voucher_type === 'amount' ? `Gift value · INR ${Number(voucher.original_value).toLocaleString('en-IN')}` : `Service voucher · ${Number(voucher.service_redemptions_allowed)} use(s)`, 52, 232);
   doc.font('Helvetica-Bold').fontSize(18).fillColor('#A97735').text(voucher.voucher_code, 52, 280, { characterSpacing: 1.2 });
-  doc.font('Helvetica').fontSize(11).fillColor('#51463D').text(`For: ${voucher.recipient_name || 'Someone special'}`, 52, 320);
-  doc.text(`From: ${voucher.purchaser_name || 'Maison Beyou'}`, 52, 341);
-  doc.text(`Issued: ${voucher.issue_date}     Valid until: ${voucher.expiry_date}`, 52, 362);
+  doc.font('Helvetica').fontSize(11).fillColor('#51463D').text(`Name: ${voucher.purchaser_name || 'Maison Beyou'}`, 52, 320);
+  doc.text(`Issued: ${voucher.issue_date}     Valid until: ${voucher.expiry_date}`, 52, 341);
   const serviceList = voucher.eligible_services?.map(service => service.service_name).join(', ') || 'All participating services';
-  doc.text(`Eligible services: ${serviceList}`, 52, 389, { width: 540, height: 36 });
-  if (voucher.gift_message) doc.font('Helvetica-Oblique').fontSize(11).fillColor('#72501F').text(`“${voucher.gift_message.slice(0, 180)}”`, 52, 437, { width: 520, height: 28 });
+  doc.text(`Eligible services: ${serviceList}`, 52, 367, { width: 540, height: 36 });
+  if (voucher.gift_message) doc.font('Helvetica-Oblique').fontSize(11).fillColor('#72501F').text(`“${voucher.gift_message.slice(0, 180)}”`, 52, 415, { width: 520, height: 28 });
   doc.image(qrBuffer, 642, 151, { fit: [150, 150] });
   doc.font('Helvetica').fontSize(9).fillColor('#786D62').text('Scan or enter this code at any participating branch', 604, 312, { width: 224, align: 'center' });
   doc.text('Voucher must be active and unexpired. Eligible services and balance are verified centrally.', 608, 410, { width: 210, align: 'center', height: 46 });
@@ -219,7 +227,7 @@ async function generateVoucherCard(voucher, db) {
   const title = escapeHtml(voucher.title);
   const voucherValue = voucher.voucher_type === 'amount' ? `INR ${Number(voucher.original_value).toLocaleString('en-IN')}` : `${Number(voucher.service_redemptions_allowed)} service use(s)`;
   const servicesText = voucher.eligible_services?.map(service => service.service_name).join(' · ') || 'All participating services';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FBF7F0"/><stop offset="1" stop-color="#EFE3D0"/></linearGradient></defs><rect width="1400" height="900" rx="34" fill="url(#bg)"/><rect x="24" y="24" width="1352" height="852" rx="28" fill="none" stroke="#C89555" stroke-width="3"/>${logo}<text x="92" y="240" fill="#9D6A2E" font-size="26" font-family="Arial" font-weight="700" letter-spacing="6">A GIFT FOR YOU</text><text x="92" y="322" fill="#302820" font-size="58" font-family="Arial" font-weight="700">${title.slice(0, 48)}</text><text x="92" y="395" fill="#786D62" font-size="31" font-family="Arial">${escapeHtml(voucherValue)}</text><text x="92" y="510" fill="#51463D" font-size="25" font-family="Arial">For: ${escapeHtml(voucher.recipient_name || 'Someone special')}</text><text x="92" y="558" fill="#51463D" font-size="25" font-family="Arial">From: ${escapeHtml(voucher.purchaser_name || 'Maison Beyou')}</text><text x="92" y="625" fill="#A97735" font-size="40" font-family="Arial" font-weight="700" letter-spacing="2">${escapeHtml(voucher.voucher_code)}</text><text x="92" y="680" fill="#786D62" font-size="21" font-family="Arial">Valid until ${escapeHtml(voucher.expiry_date)}</text><text x="92" y="742" fill="#72501F" font-size="18" font-family="Arial">${escapeHtml(servicesText.slice(0, 90))}</text><text x="92" y="800" fill="#786D62" font-size="16" font-family="Arial">Present this QR or code at any participating Maison Beyou branch.</text><image href="data:image/png;base64,${qrBuffer.toString('base64')}" x="970" y="280" width="310" height="310"/><text x="970" y="630" fill="#786D62" font-size="18" font-family="Arial" text-anchor="middle">Scan to verify voucher</text></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#FBF7F0"/><stop offset="1" stop-color="#EFE3D0"/></linearGradient></defs><rect width="1400" height="900" rx="34" fill="url(#bg)"/><rect x="24" y="24" width="1352" height="852" rx="28" fill="none" stroke="#C89555" stroke-width="3"/>${logo}<text x="92" y="260" fill="#302820" font-size="58" font-family="Arial" font-weight="700">${title.slice(0, 48)}</text><text x="92" y="330" fill="#786D62" font-size="31" font-family="Arial">${escapeHtml(voucherValue)}</text><text x="92" y="445" fill="#51463D" font-size="25" font-family="Arial">Name: ${escapeHtml(voucher.purchaser_name || 'Maison Beyou')}</text><text x="92" y="525" fill="#A97735" font-size="40" font-family="Arial" font-weight="700" letter-spacing="2">${escapeHtml(voucher.voucher_code)}</text><text x="92" y="585" fill="#786D62" font-size="21" font-family="Arial">Valid until ${escapeHtml(voucher.expiry_date)}</text><text x="92" y="660" fill="#72501F" font-size="18" font-family="Arial">${escapeHtml(servicesText.slice(0, 90))}</text><text x="92" y="730" fill="#786D62" font-size="16" font-family="Arial">Present this QR or code at any participating Maison Beyou branch.</text><image href="data:image/png;base64,${qrBuffer.toString('base64')}" x="970" y="280" width="310" height="310"/><text x="970" y="630" fill="#786D62" font-size="18" font-family="Arial" text-anchor="middle">Scan to verify voucher</text></svg>`;
   const fileStem = voucher.voucher_code.toLowerCase();
   const imagePath = path.join(cardDir, `${fileStem}.png`);
   const pdfPath = path.join(cardDir, `${fileStem}.pdf`);
@@ -487,7 +495,7 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
     }
   });
 
-  app.get('/api/gift-vouchers', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+  app.get('/api/gift-vouchers', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
     try {
       const locationFilter = req.user.role === 'master_admin' ? (req.query.location_id ? Number(req.query.location_id) : null) : Number(req.locationId);
       const clauses = [];
@@ -520,14 +528,30 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
     }
   });
 
-  app.get('/api/gift-vouchers/lookup/:code', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  app.get('/api/gift-vouchers/lookup/:code', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), async (req, res) => {
     try {
       const code = toText(req.params.code).toUpperCase();
-      const row = db.prepare(`SELECT v.*, l.name AS issuing_branch_name FROM GIFT_VOUCHERS v JOIN LOCATIONS l ON l.location_id = v.issuing_location_id WHERE upper(v.voucher_code) = ?`).get(code);
+      const row = db.prepare(`SELECT v.*, l.name AS issuing_branch_name FROM GIFT_VOUCHERS v JOIN LOCATIONS l ON l.location_id = v.issuing_location_id WHERE upper(v.voucher_code) = ? OR EXISTS (SELECT 1 FROM GIFT_VOUCHER_CODE_ALIASES a WHERE a.voucher_id = v.voucher_id AND upper(a.alias_code) = ?)`).get(code, code);
       if (!row) return res.status(404).json({ error: 'Gift voucher not found.' });
-      const voucher = parseVoucher(row);
+      let voucher = parseVoucher(row);
       voucher.status = statusForVoucher(row);
       const isIssuer = req.user.role === 'master_admin' || Number(req.locationId) === Number(row.issuing_location_id);
+      if (req.query.refresh_card === '1' && isIssuer && voucher.payment_status === 'paid' && voucher.status === 'active') {
+        const needsCompactCode = !String(voucher.voucher_code).startsWith('MBU-V01-');
+        if (needsCompactCode) {
+          const oldCode = voucher.voucher_code;
+          const compactCode = `MBU-V01-${nameInitials(voucher.purchaser_name)}${String(voucher.voucher_id).padStart(3, '0')}`;
+          db.transaction(() => {
+            db.prepare('INSERT OR IGNORE INTO GIFT_VOUCHER_CODE_ALIASES (alias_code, voucher_id) VALUES (?, ?)').run(oldCode, voucher.voucher_id);
+            db.prepare('UPDATE GIFT_VOUCHERS SET voucher_code = ?, updated_at = CURRENT_TIMESTAMP WHERE voucher_id = ?').run(compactCode, voucher.voucher_id);
+          })();
+          voucher = parseVoucher(getVoucherById(row.voucher_id));
+          voucher.status = statusForVoucher(voucher);
+          await generateVoucherCard(voucher, db);
+          voucher = parseVoucher(getVoucherById(row.voucher_id));
+          voucher.status = statusForVoucher(voucher);
+        }
+      }
       const redemptions = db.prepare(`SELECT r.*, l.name AS redeeming_branch_name, u.name AS redeeming_user_name FROM GIFT_VOUCHER_REDEMPTIONS r JOIN LOCATIONS l ON l.location_id = r.redeeming_location_id LEFT JOIN USERS u ON u.user_id = r.redeeming_user_id WHERE r.voucher_id = ?${isIssuer ? '' : ' AND r.redeeming_location_id = ?'} ORDER BY r.redemption_id DESC`)
         .all(...(isIssuer ? [row.voucher_id] : [row.voucher_id, req.locationId])).map(item => ({ ...item, services: json(item.services_json) }));
       const deliveryHistory = isIssuer ? db.prepare(`SELECT delivery_id, channel, recipient_kind, recipient, status, provider, provider_reference, error, attempts, sent_at, updated_at FROM GIFT_VOUCHER_DELIVERIES WHERE voucher_id = ? ORDER BY delivery_id DESC`).all(row.voucher_id) : [];
@@ -577,17 +601,21 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
       if (expiryMillis / 86400000 > Number(settings.max_validity_days)) return res.status(400).json({ error: `Voucher validity cannot exceed ${settings.max_validity_days} days.` });
       const purchaserEmail = toText(req.body?.purchaser_email).toLowerCase();
       const recipientEmail = toText(req.body?.recipient_email).toLowerCase();
+      const purchaserName = toText(req.body?.purchaser_name);
+      const purchaserPhoneDigits = String(req.body?.purchaser_phone || '').replace(/\D/g, '');
+      if (!purchaserName) return res.status(400).json({ error: 'Enter the purchaser name.' });
+      if (purchaserPhoneDigits.length !== 10) return res.status(400).json({ error: 'Enter a valid 10-digit purchaser mobile number.' });
+      if (!purchaserEmail || !validEmail(purchaserEmail)) return res.status(400).json({ error: 'Enter a valid purchaser email address.' });
       if (!validEmail(purchaserEmail) || !validEmail(recipientEmail)) return res.status(400).json({ error: 'Enter valid purchaser and recipient email addresses.' });
-      if (settings.require_recipient_contact && !normalizePhone(req.body?.recipient_phone) && !recipientEmail) return res.status(400).json({ error: 'A recipient mobile number or email is required by the global voucher policy.' });
       const eligibilityMode = toText(req.body?.eligibility_mode || 'selected');
       if (!['selected', 'all', 'exclude', 'unrestricted'].includes(eligibilityMode)) return res.status(400).json({ error: 'Choose a valid service eligibility mode.' });
-      if (eligibilityMode === 'unrestricted' && (req.user.role !== 'master_admin' || !settings.allow_unrestricted)) return res.status(403).json({ error: 'Unrestricted service vouchers are limited to authorised Master Admin users.' });
+      if (voucherType === 'service' && eligibilityMode === 'unrestricted' && (req.user.role !== 'master_admin' || !settings.allow_unrestricted)) return res.status(403).json({ error: 'Unrestricted service vouchers are limited to authorised Master Admin users.' });
 
       const categoryIds = [...new Set((Array.isArray(req.body?.category_ids) ? req.body.category_ids : []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
       const serviceIds = [...new Set((Array.isArray(req.body?.service_ids) ? req.body.service_ids : []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
       let categorySnapshot = [];
       let serviceSnapshot = [];
-      if (eligibilityMode !== 'unrestricted') {
+      if (voucherType === 'service' && eligibilityMode !== 'unrestricted') {
         if (!categoryIds.length) return res.status(400).json({ error: 'Select at least one category before choosing services.' });
         const placeholders = categoryIds.map(() => '?').join(',');
         categorySnapshot = db.prepare(`SELECT category_id, category_name FROM SERVICE_CATEGORIES WHERE location_id = ? AND active = 1 AND category_id IN (${placeholders}) ORDER BY display_order, category_id`).all(requestedLocation, ...categoryIds);
@@ -601,13 +629,12 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
         serviceSnapshot = eligibleRows.map(service => ({ service_id: service.service_id, service_name: service.service_name, category_name: service.category_name, price: Number(service.price) || 0 }));
       }
       const usesAllowed = voucherType === 'service' ? Math.max(1, Math.min(100, Math.floor(Number(req.body?.service_redemptions_allowed) || 1))) : 1;
-      const requestedDraft = req.body?.status === 'draft';
-      const paymentStatus = req.body?.payment_status === 'paid' && !requestedDraft ? 'paid' : 'pending';
-      const initialStatus = requestedDraft ? 'draft' : paymentStatus === 'paid' ? 'active' : 'pending_payment';
-      const code = `MBV-${randomBytes(10).toString('hex').toUpperCase()}`;
+      const paymentStatus = 'paid';
+      const initialStatus = 'active';
+      let code = '';
       const purchaserPhone = normalizePhone(req.body?.purchaser_phone);
       const recipientPhone = normalizePhone(req.body?.recipient_phone);
-      if (req.body?.purchaser_phone && !purchaserPhone) return res.status(400).json({ error: 'Enter a valid purchaser mobile number.' });
+      if (!purchaserPhone) return res.status(400).json({ error: 'Enter a valid purchaser mobile number.' });
       if (req.body?.recipient_phone && !recipientPhone) return res.status(400).json({ error: 'Enter a valid recipient mobile number.' });
       if (req.body?.send_whatsapp && !recipientPhone) return res.status(400).json({ error: 'Enter the recipient mobile number before requesting WhatsApp delivery.' });
       if (req.body?.send_email && !recipientEmail) return res.status(400).json({ error: 'Enter the recipient email before requesting email delivery.' });
@@ -620,11 +647,13 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
           purchaser_name, purchaser_phone, purchaser_email, recipient_name, recipient_phone, recipient_email, gift_message, payment_status, status,
           payment_method, notes, send_whatsapp, send_email, send_purchaser_copy)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(code, requestedLocation, req.user.user_id, voucherType, title, eligibilityMode, JSON.stringify(categorySnapshot), JSON.stringify(serviceSnapshot), value,
-            paymentStatus === 'paid' ? value : 0, usesAllowed, issueDate, expiryDate, toText(req.body?.purchaser_name), purchaserPhone || null, purchaserEmail || null,
+          .run(`MBU-TEMP-${randomBytes(8).toString('hex').toUpperCase()}`, requestedLocation, req.user.user_id, voucherType, title, eligibilityMode, JSON.stringify(categorySnapshot), JSON.stringify(serviceSnapshot), value,
+            paymentStatus === 'paid' ? value : 0, usesAllowed, issueDate, expiryDate, purchaserName, purchaserPhone, purchaserEmail,
             toText(req.body?.recipient_name), recipientPhone || null, recipientEmail || null, toText(req.body?.gift_message), paymentStatus, initialStatus,
             toText(req.body?.payment_method) || null, toText(req.body?.notes), req.body?.send_whatsapp ? 1 : 0, req.body?.send_email ? 1 : 0, req.body?.send_purchaser_copy ? 1 : 0);
         const voucherId = Number(result.lastInsertRowid);
+        code = `MBU-V01-${nameInitials(purchaserName)}${String(voucherId).padStart(3, '0')}`;
+        db.prepare('UPDATE GIFT_VOUCHERS SET voucher_code = ? WHERE voucher_id = ?').run(code, voucherId);
         const paymentAmount = paymentStatus === 'paid' ? value : 0;
         db.prepare('INSERT INTO GIFT_VOUCHER_PAYMENTS (voucher_id, amount, payment_method, payment_reference, payment_status, recorded_by) VALUES (?, ?, ?, ?, ?, ?)')
           .run(voucherId, paymentAmount, toText(req.body?.payment_method) || null, toText(req.body?.payment_reference) || null, paymentStatus, req.user.user_id);
@@ -690,7 +719,7 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
       const reference = toText(req.body?.transaction_ref) || `GVR-${randomBytes(12).toString('hex').toUpperCase()}`;
       const amountRequested = money(req.body?.amount);
       const redeemTransaction = db.transaction(() => {
-        const voucher = db.prepare('SELECT * FROM GIFT_VOUCHERS WHERE upper(voucher_code) = ?').get(code);
+        const voucher = db.prepare('SELECT * FROM GIFT_VOUCHERS WHERE upper(voucher_code) = ? OR voucher_id = (SELECT voucher_id FROM GIFT_VOUCHER_CODE_ALIASES WHERE upper(alias_code) = ?)').get(code, code);
         if (!voucher) throw Object.assign(new Error('Gift voucher not found.'), { statusCode: 404 });
         let status = statusForVoucher(voucher);
         if (status === 'expired') {
@@ -701,7 +730,7 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
         const eligible = json(voucher.service_snapshot_json);
         const eligibleNames = new Set(eligible.map(service => service.service_name.toLocaleLowerCase()));
         for (const item of requestedServices) {
-          if (voucher.eligibility_mode !== 'unrestricted' && !eligibleNames.has(item.service_name.toLocaleLowerCase())) {
+          if (voucher.voucher_type === 'service' && voucher.eligibility_mode !== 'unrestricted' && !eligibleNames.has(item.service_name.toLocaleLowerCase())) {
             throw Object.assign(new Error(`${item.service_name} is not eligible for this voucher.`), { statusCode: 400 });
           }
         }

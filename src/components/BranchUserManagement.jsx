@@ -221,7 +221,7 @@ export default function BranchUserManagement({ activeLocation, branding }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 10 }}>
               <label style={labelStyle}>Account access<select value={form.role} onChange={e => setForm(current => ({ ...current, role: e.target.value, name: '', phone: '', email: '', permissions: e.target.value === 'reception' ? ['dashboard', 'visits', 'clients'] : ['visitor_intake'] }))} style={{ ...inputStyle, cursor: 'pointer' }}><option value="reception">Manager</option><option value="visitor">Visitor</option></select></label>
               <label style={labelStyle}>Full name *<input required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} style={inputStyle} /></label>
-              <label style={labelStyle}>Mobile number *<input required type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inputStyle} /></label>
+              <label style={labelStyle}>Mobile number *<input required type="tel" inputMode="numeric" maxLength={10} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} style={inputStyle} /></label>
               <label style={labelStyle}>Email address *<input required type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={inputStyle} /></label>
             </div>
 

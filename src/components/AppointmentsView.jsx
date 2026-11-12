@@ -241,6 +241,7 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
   const timelineHalfHours = (timelineEnd * 60 - timelineStart) / 30;
   const halfHourHeight = 56;
   const laneWidth = 320;
+  const scheduleColumns = scheduleLanes.length ? scheduleLanes : [null];
 
   const renderAppointment = appointment => {
     const date = String(appointment.visit_date).slice(0, 10);
@@ -298,16 +299,17 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
     </div>
 
     {error && <div role="alert" style={{ marginBottom: 16, padding: '11px 14px', borderRadius: 9, color: '#9B1C1C', background: '#FEF2F2', border: '1px solid #FECACA', fontSize: 13 }}>{error}</div>}
-    {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#81766B' }}>Loading appointments…</div> : appointments.length === 0 ? <div style={{ padding: 42, textAlign: 'center', border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFEFC', color: '#81766B' }}>No appointments have been booked for this branch yet.</div> : viewMode === 'calendar' ? <section aria-label={`Appointment schedule for ${formatDate(scheduleDate)}`} style={{ border: '1px solid #E9DCCB', borderRadius: 16, background: '#FFFFFF', overflow: 'hidden', boxShadow: '0 10px 30px rgba(77,54,29,.045)' }}>
+    {loading ? <div style={{ padding: 32, textAlign: 'center', color: '#81766B' }}>Loading appointments…</div> : viewMode === 'calendar' ? <section aria-label={`Appointment schedule for ${formatDate(scheduleDate)}`} style={{ border: '1px solid #E9DCCB', borderRadius: 16, background: '#FFFFFF', overflow: 'hidden', boxShadow: '0 10px 30px rgba(77,54,29,.045)' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '17px 20px', borderBottom: '1px solid #F0E7DC', background: '#FFFEFC' }}>
         <div><div style={{ color: '#332A23', fontWeight: 750 }}>Daily schedule</div><div style={{ marginTop: 4, color: '#81766B', fontSize: 12 }}>{formatDate(scheduleDate)} · {scheduleAppointments.length} appointment{scheduleAppointments.length === 1 ? '' : 's'}</div></div>
         <span style={{ padding: '6px 10px', borderRadius: 999, background: '#F7F0E5', color: '#8C6228', fontSize: 11, fontWeight: 700 }}>30 minute timeline</span>
       </header>
-      {scheduleAppointments.length === 0 ? <div style={{ padding: 44, textAlign: 'center', color: '#81766B' }}>No appointments scheduled for this day.</div> : <div style={{ maxHeight: '72vh', overflow: 'auto', padding: '0 16px 20px' }}>
-        <div style={{ position: 'relative', width: Math.max(420, 120 + scheduleLanes.length * laneWidth), height: timelineHalfHours * halfHourHeight + 42, minWidth: '100%' }}>
-          <div style={{ position: 'sticky', zIndex: 5, top: 0, left: 0, display: 'grid', gridTemplateColumns: `120px repeat(${scheduleLanes.length}, ${laneWidth}px)`, height: 42, width: 'max-content', minWidth: '100%', borderBottom: '1px solid #E9DCCB', background: '#FFFEFC' }}>
+      <div style={{ maxHeight: '72vh', overflow: 'auto', padding: '0 16px 20px' }}>
+        {scheduleAppointments.length === 0 && <div style={{ margin: '16px 0 0', padding: '11px 14px', borderRadius: 9, background: '#FAF6F0', color: '#81766B', fontSize: 13 }}>No appointments scheduled for this day.</div>}
+        <div style={{ position: 'relative', width: Math.max(420, 120 + scheduleColumns.length * laneWidth), height: timelineHalfHours * halfHourHeight + 42, minWidth: '100%' }}>
+          <div style={{ position: 'sticky', zIndex: 5, top: 0, left: 0, display: 'grid', gridTemplateColumns: `120px repeat(${scheduleColumns.length}, ${laneWidth}px)`, height: 42, width: 'max-content', minWidth: '100%', borderBottom: '1px solid #E9DCCB', background: '#FFFEFC' }}>
             <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 8, color: '#81766B', fontSize: 11, fontWeight: 700 }}>TIME</div>
-            {scheduleLanes.map((_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid #E9DCCB', color: '#4B4037', fontSize: 12, fontWeight: 750 }}>Appointments {index + 1}</div>)}
+            {scheduleColumns.map((_, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, borderLeft: '1px solid #E9DCCB', color: '#4B4037', fontSize: 12, fontWeight: 750 }}>Appointments {index + 1}</div>)}
           </div>
           <div style={{ position: 'absolute', top: 42, left: 0, width: '100%', height: timelineHalfHours * halfHourHeight, backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${halfHourHeight - 1}px, #E9DCCB ${halfHourHeight - 1}px, #E9DCCB ${halfHourHeight}px)`, backgroundColor: '#FFFEFC' }} />
           {Array.from({ length: timelineHalfHours }, (_, index) => {
@@ -315,7 +317,7 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
             const isHour = minutes % 60 === 0;
             return <div key={minutes} style={{ position: 'absolute', zIndex: 2, left: 0, top: 42 + index * halfHourHeight + 3, width: 120, height: 19, paddingLeft: 8, boxSizing: 'border-box', borderRight: '1px solid #E9DCCB', background: '#FFFEFC', color: isHour ? '#81766B' : '#A3988B', fontSize: isHour ? 11 : 10, fontWeight: isHour ? 650 : 500 }}>{new Date(2000, 0, 1, Math.floor(minutes / 60), minutes % 60).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}</div>;
           })}
-          {scheduleLanes.map((_, index) => <div key={index} style={{ position: 'absolute', top: 42, left: 120 + index * laneWidth, width: laneWidth, height: timelineHalfHours * halfHourHeight, borderLeft: '1px solid #E9DCCB', background: index % 2 ? 'rgba(247,240,229,.18)' : 'transparent' }} />)}
+          {scheduleColumns.map((_, index) => <div key={index} style={{ position: 'absolute', top: 42, left: 120 + index * laneWidth, width: laneWidth, height: timelineHalfHours * halfHourHeight, borderLeft: '1px solid #E9DCCB', background: index % 2 ? 'rgba(247,240,229,.18)' : 'transparent' }} />)}
           {scheduledBlocks.map(({ appointment, start, duration, lane }, index) => {
             const top = 42 + Math.max(0, (start - timelineStart) / 30) * halfHourHeight + 4;
             const height = halfHourHeight - 8;
@@ -356,8 +358,8 @@ export default function AppointmentsView({ onBookAppointment, onBack, onOpenPaym
             </div>;
           })}
         </div>
-      </div>}
-    </section> : <section style={{ border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFFFF', overflow: 'hidden' }}>
+      </div>
+    </section> : appointments.length === 0 ? <div style={{ padding: 42, textAlign: 'center', border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFEFC', color: '#81766B' }}>No appointments have been booked for this branch yet.</div> : <section style={{ border: '1px solid #E9DCCB', borderRadius: 14, background: '#FFFFFF', overflow: 'hidden' }}>
       <header style={{ padding: '14px 18px', background: selectedListGroup === 'missed' ? '#F3F4F6' : '#FAF6F0', color: selectedListGroup === 'missed' ? '#6B7280' : '#4B4037', fontSize: 14, fontWeight: 750 }}>{selectedListGroup === 'missed' ? `Missed appointments · ${overdue.length}` : `Upcoming appointments · ${upcoming.length}`}</header>
       {selectedListGroup === 'missed'
         ? (overdue.length ? overdue.map(renderAppointment) : <div style={{ padding: 25, color: '#81766B', textAlign: 'center' }}>No missed appointments.</div>)

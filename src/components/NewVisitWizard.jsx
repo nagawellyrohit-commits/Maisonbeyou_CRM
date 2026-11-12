@@ -2714,7 +2714,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
               <input required autoFocus value={clientName} onChange={event => setClientName(event.target.value)} placeholder="Enter full name" style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
             </label>
             <label style={{ display: 'grid', gap: 10, color: '#57534E', fontSize: 13, fontWeight: 700 }}><span>Phone number <span style={{ color: '#B42318' }}>*</span></span>
-              <input required type="tel" inputMode="numeric" value={clientPhone} onChange={event => setClientPhone(event.target.value.replace(/[^\d+\s()-]/g, ''))} placeholder="10-digit phone number" style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
+              <input required type="tel" inputMode="numeric" maxLength={10} value={clientPhone} onChange={event => setClientPhone(event.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit phone number" style={{ width: '100%', boxSizing: 'border-box', padding: '13px 14px', border: '1px solid #D6D3D1', borderRadius: 8, fontSize: 14 }} />
             </label>
             <fieldset style={{ display: 'grid', gap: 16, gridColumn: '1 / -1', margin: '2px 0 0', padding: 0, border: 0 }}>
               <legend style={{ marginBottom: 2, color: '#57534E', fontSize: 13, fontWeight: 700 }}>Services <span style={{ color: '#81766B', fontWeight: 400 }}>(optional)</span></legend>

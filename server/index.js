@@ -3690,6 +3690,175 @@ app.post('/api/kyc/upload', authenticateToken, authorizeRoles('master_admin', 'a
 });
 
 // ==================== DASHBOARD ROUTES ====================
+function getIndiaBusinessDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(new Date()).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function isValidBusinessDate(value) {
+  const date = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function getPreviousCashClose(locationId, businessDate) {
+  return db.prepare(`SELECT business_date, closing_cash FROM DAILY_CASH_CLOSINGS
+    WHERE location_id = ? AND business_date < ? AND closed_at IS NOT NULL ORDER BY business_date DESC LIMIT 1`).get(locationId, businessDate) || null;
+}
+
+function getCashCollectedForDate(locationId, businessDate) {
+  const result = db.prepare(`SELECT COALESCE(SUM(amount_paid), 0) AS cash_received FROM VISITS
+    WHERE location_id = ? AND date(visit_date) = date(?) AND amount_paid > 0 AND LOWER(COALESCE(payment_method, '')) LIKE '%cash%'`).get(locationId, businessDate);
+  return Number(result?.cash_received) || 0;
+}
+
+function getDayCashLocationId(req, body = false) {
+  if (req.user.role === 'master_admin') return Number(body ? req.body?.location_id : req.query.location_id) || 0;
+  return Number(req.locationId || req.user.location_id) || 0;
+}
+
+app.get('/api/day-cash', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const locationId = getDayCashLocationId(req);
+    const businessDate = String(req.query.date || getIndiaBusinessDate());
+    if (!locationId || !isValidBusinessDate(businessDate) || businessDate > getIndiaBusinessDate()) return res.status(400).json({ error: 'Choose a valid branch business date.' });
+    const location = db.prepare('SELECT location_id, name, type FROM LOCATIONS WHERE location_id = ?').get(locationId);
+    if (!location) return res.status(404).json({ error: 'Branch or franchise not found.' });
+    const closing = db.prepare('SELECT * FROM DAILY_CASH_CLOSINGS WHERE location_id = ? AND business_date = ?').get(locationId, businessDate) || null;
+    const previous = getPreviousCashClose(locationId, businessDate);
+    const cashReceived = getCashCollectedForDate(locationId, businessDate);
+    res.json({
+      location, business_date: businessDate,
+      status: closing?.closed_at ? 'closed' : closing?.opened_at ? 'open' : 'needs_opening',
+      previous_close_date: previous?.business_date || null,
+      previous_closing_cash: previous ? Number(previous.closing_cash) || 0 : 0,
+      opening_expected_cash: closing ? Number(closing.opening_expected_cash) || 0 : previous ? Number(previous.closing_cash) || 0 : 0,
+      opening_counted_cash: closing?.opening_counted_cash == null ? null : Number(closing.opening_counted_cash),
+      opening_variance: Number(closing?.opening_variance) || 0,
+      opening_notes: closing?.opening_notes || '', cash_received: cashReceived,
+      handover_amount: closing?.handover_amount == null ? null : Number(closing.handover_amount),
+      closing_cash: closing?.closing_cash == null ? null : Number(closing.closing_cash),
+      closing_variance: closing?.closing_variance == null ? null : Number(closing.closing_variance),
+      closing_notes: closing?.closing_notes || '', opened_at: closing?.opened_at || null, closed_at: closing?.closed_at || null
+    });
+  } catch (error) {
+    console.error('Daily cash status error:', error);
+    res.status(500).json({ error: 'Could not load the day cash status.' });
+  }
+});
+
+app.post('/api/day-cash/open', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const locationId = getDayCashLocationId(req, true);
+    const businessDate = String(req.body?.business_date || getIndiaBusinessDate());
+    const countedCash = Number(req.body?.opening_counted_cash);
+    if (!locationId || !isValidBusinessDate(businessDate) || businessDate > getIndiaBusinessDate() || !Number.isFinite(countedCash) || countedCash < 0) return res.status(400).json({ error: 'Enter a valid business date and opening cash count.' });
+    if (!db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(404).json({ error: 'Branch or franchise not found.' });
+    const previous = getPreviousCashClose(locationId, businessDate);
+    const expectedCash = previous ? Number(previous.closing_cash) || 0 : 0;
+    const variance = countedCash - expectedCash;
+    const notes = String(req.body?.opening_notes || '').trim();
+    if (Math.abs(variance) >= 0.01 && !notes) return res.status(400).json({ error: 'Add a note explaining the difference from the previous closing cash.' });
+    const result = db.prepare(`INSERT INTO DAILY_CASH_CLOSINGS
+      (location_id, business_date, opening_expected_cash, opening_counted_cash, opening_variance, opening_notes, opened_by, opened_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT(location_id, business_date) DO NOTHING`)
+      .run(locationId, businessDate, expectedCash, Math.round(countedCash * 100) / 100, Math.round(variance * 100) / 100, notes, req.user.user_id);
+    if (!result.changes) return res.status(409).json({ error: 'Opening cash has already been confirmed or the day has already been closed.' });
+    recordAuditLog({ userId: req.user.user_id, action: 'DAY_CASH_OPENED', targetType: 'DAILY_CASH_CLOSING', targetId: result.lastInsertRowid, locationId, details: { business_date: businessDate, expected_cash: expectedCash, counted_cash: countedCash, variance }, ipAddress: req.ip || req.connection?.remoteAddress });
+    res.status(201).json({ success: true, opening_expected_cash: expectedCash, opening_counted_cash: countedCash, opening_variance: variance });
+  } catch (error) {
+    console.error('Daily cash opening error:', error);
+    res.status(500).json({ error: 'Could not confirm opening cash.' });
+  }
+});
+
+app.post('/api/day-cash/close', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const locationId = getDayCashLocationId(req, true);
+    const businessDate = String(req.body?.business_date || getIndiaBusinessDate());
+    const handoverAmount = Number(req.body?.handover_amount);
+    const closingCash = Number(req.body?.closing_cash);
+    if (!locationId || !isValidBusinessDate(businessDate) || businessDate > getIndiaBusinessDate() || !Number.isFinite(handoverAmount) || handoverAmount < 0 || !Number.isFinite(closingCash) || closingCash < 0) return res.status(400).json({ error: 'Enter valid handover and closing cash amounts.' });
+    const closing = db.prepare('SELECT * FROM DAILY_CASH_CLOSINGS WHERE location_id = ? AND business_date = ?').get(locationId, businessDate);
+    if (!closing?.opened_at) return res.status(409).json({ error: 'Confirm the opening cash count before closing the day.' });
+    if (closing.closed_at) return res.status(409).json({ error: 'This day has already been closed.' });
+    const cashReceived = getCashCollectedForDate(locationId, businessDate);
+    const expectedAtClose = (Number(closing.opening_counted_cash) || 0) + cashReceived;
+    const variance = expectedAtClose - handoverAmount - closingCash;
+    const notes = String(req.body?.closing_notes || '').trim();
+    if (Math.abs(variance) >= 0.01 && !notes) return res.status(400).json({ error: 'Add a note explaining the difference in the closing cash total.' });
+    const result = db.prepare(`UPDATE DAILY_CASH_CLOSINGS SET cash_received = ?, handover_amount = ?, closing_cash = ?, closing_variance = ?, closing_notes = ?, closed_by = ?, closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE cash_closing_id = ? AND closed_at IS NULL`)
+      .run(Math.round(cashReceived * 100) / 100, Math.round(handoverAmount * 100) / 100, Math.round(closingCash * 100) / 100, Math.round(variance * 100) / 100, notes, req.user.user_id, closing.cash_closing_id);
+    if (!result.changes) return res.status(409).json({ error: 'This day has already been closed.' });
+    recordAuditLog({ userId: req.user.user_id, action: 'DAY_CASH_CLOSED', targetType: 'DAILY_CASH_CLOSING', targetId: closing.cash_closing_id, locationId, details: { business_date: businessDate, opening_cash: closing.opening_counted_cash, cash_received: cashReceived, handover_amount: handoverAmount, closing_cash: closingCash, variance }, ipAddress: req.ip || req.connection?.remoteAddress });
+    res.json({ success: true, cash_received: cashReceived, expected_at_close: expectedAtClose, handover_amount: handoverAmount, closing_cash: closingCash, closing_variance: variance });
+  } catch (error) {
+    console.error('Daily cash closing error:', error);
+    res.status(500).json({ error: 'Could not close the day.' });
+  }
+});
+
+function getStoreTargetPeriod(periodType, periodKey) {
+  const key = String(periodKey || '').trim();
+  if (periodType === 'daily' && /^\d{4}-\d{2}-\d{2}$/.test(key)) {
+    const date = new Date(`${key}T00:00:00.000Z`);
+    if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === key) return { start: key, end: key };
+  }
+  if (periodType === 'monthly' && /^\d{4}-(0[1-9]|1[0-2])$/.test(key)) {
+    const [year, month] = key.split('-').map(Number);
+    const end = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    return { start: `${key}-01`, end };
+  }
+  if (periodType === 'yearly' && /^\d{4}$/.test(key)) return { start: `${key}-01-01`, end: `${key}-12-31` };
+  return null;
+}
+
+function getStoreTargetLocationId(req) {
+  if (req.user.role === 'master_admin') return Number(req.query.location_id || req.body?.location_id || 0);
+  return Number(req.locationId || req.user.location_id || 0);
+}
+
+app.get('/api/store-targets', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const locationId = getStoreTargetLocationId(req);
+    const periodType = String(req.query.period_type || 'monthly');
+    const periodKey = String(req.query.period_key || '');
+    const period = getStoreTargetPeriod(periodType, periodKey);
+    if (!locationId || !period) return res.status(400).json({ error: 'Choose a branch, target period, and valid period date.' });
+    const location = db.prepare('SELECT location_id, name, type FROM LOCATIONS WHERE location_id = ?').get(locationId);
+    if (!location) return res.status(404).json({ error: 'Branch or franchise not found.' });
+    const target = db.prepare('SELECT target_amount FROM LOCATION_STORE_TARGETS WHERE location_id = ? AND period_type = ? AND period_key = ?').get(locationId, periodType, periodKey);
+    const actual = db.prepare(`SELECT COALESCE(SUM(amount_paid), 0) AS actual_amount FROM VISITS WHERE location_id = ? AND date(visit_date) BETWEEN date(?) AND date(?)`).get(locationId, period.start, period.end);
+    res.json({ location, period_type: periodType, period_key: periodKey, period_start: period.start, period_end: period.end, target_amount: Number(target?.target_amount) || 0, actual_amount: Number(actual?.actual_amount) || 0 });
+  } catch (error) {
+    console.error('Store target load error:', error);
+    res.status(500).json({ error: 'Could not load the store target.' });
+  }
+});
+
+app.put('/api/store-targets', authenticateToken, authorizeRoles('admin', 'reception', 'master_admin'), (req, res) => {
+  try {
+    const locationId = req.user.role === 'master_admin' ? Number(req.body?.location_id || 0) : Number(req.locationId || req.user.location_id || 0);
+    const periodType = String(req.body?.period_type || '');
+    const periodKey = String(req.body?.period_key || '');
+    const period = getStoreTargetPeriod(periodType, periodKey);
+    const targetAmount = Number(req.body?.target_amount);
+    if (!locationId || !period || !Number.isFinite(targetAmount) || targetAmount < 0 || targetAmount > 1000000000) return res.status(400).json({ error: 'Enter a valid branch target and period.' });
+    const location = db.prepare('SELECT location_id, name, type FROM LOCATIONS WHERE location_id = ?').get(locationId);
+    if (!location) return res.status(404).json({ error: 'Branch or franchise not found.' });
+    db.prepare(`INSERT INTO LOCATION_STORE_TARGETS (location_id, period_type, period_key, target_amount, updated_by)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(location_id, period_type, period_key) DO UPDATE SET target_amount = excluded.target_amount, updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP`)
+      .run(locationId, periodType, periodKey, Math.round(targetAmount * 100) / 100, req.user.user_id);
+    recordAuditLog({ userId: req.user.user_id, action: 'STORE_TARGET_UPDATED', targetType: 'LOCATION_STORE_TARGET', targetId: locationId, locationId, details: { period_type: periodType, period_key: periodKey, target_amount: targetAmount }, ipAddress: req.ip || req.connection?.remoteAddress });
+    res.json({ success: true, location, period_type: periodType, period_key: periodKey, period_start: period.start, period_end: period.end, target_amount: Math.round(targetAmount * 100) / 100 });
+  } catch (error) {
+    console.error('Store target save error:', error);
+    res.status(500).json({ error: 'Could not save the store target.' });
+  }
+});
+
 app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'reception'), (req, res) => {
   try {
     const now = new Date();
@@ -6413,7 +6582,7 @@ app.get('/api/admin/team-departments', authenticateToken, authorizeRoles('admin'
   try {
     const locationId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
     if (!locationId || !db.prepare('SELECT 1 FROM LOCATIONS WHERE location_id = ?').get(locationId)) return res.status(400).json({ error: 'Choose a branch to load its departments.' });
-    const departments = db.prepare('SELECT department_id, department_name FROM TEAM_DEPARTMENTS WHERE location_id = ? AND active = 1 ORDER BY department_name COLLATE NOCASE').all(locationId);
+    const departments = db.prepare('SELECT department_id, department_name FROM TEAM_DEPARTMENTS WHERE location_id = ? AND active = 1 ORDER BY department_id').all(locationId);
     res.json({ departments });
   } catch (error) {
     console.error('Team departments error:', error);
@@ -6603,7 +6772,7 @@ app.get('/api/admin/team-hierarchy', authenticateToken, authorizeRoles('admin', 
   try {
     const targetLocId = req.user.role === 'master_admin' ? Number(req.query.location_id) : Number(req.locationId);
     if (!targetLocId) return res.status(400).json({ error: 'Choose a branch before loading its reporting hierarchy.' });
-    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.location_id = ? AND h.active = 1 AND d.active = 1 ORDER BY d.department_name COLLATE NOCASE, designation.option_name COLLATE NOCASE, role.option_name COLLATE NOCASE`).all(targetLocId).map(serializeTeamHierarchyPosition);
+    const hierarchy = db.prepare(`${teamHierarchySelect} WHERE h.location_id = ? AND h.active = 1 AND d.active = 1 ORDER BY d.department_id, designation.option_name COLLATE NOCASE, role.option_name COLLATE NOCASE`).all(targetLocId).map(serializeTeamHierarchyPosition);
     res.json({ hierarchy });
   } catch (error) {
     console.error('Team hierarchy error:', error);

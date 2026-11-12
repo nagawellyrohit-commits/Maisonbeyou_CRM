@@ -5,7 +5,7 @@ import {
   Users, UserPlus, UserCheck, Sparkles, IndianRupee, AlertCircle,
   ArrowLeft, ArrowRight, Clock, Plus, Receipt, Eye, CheckCircle2, LayoutDashboard,
   Menu, ChevronDown, Scissors, Award, BarChart3, X, ShieldCheck, RotateCw, Copy, Check, LogOut, Palette, Gift,
-  Edit2, FileText, Crown, Settings
+  Edit2, FileText, Crown, Settings, Target
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatDate, formatPhone } from '../utils/api';
 import ClientsList from './ClientsList';
@@ -15,6 +15,8 @@ import MembershipManagement from './MembershipManagement';
 import BusinessHoursManagement from './BusinessHoursManagement';
 import LoyaltyManagement from './LoyaltyManagement';
 import GiftVoucherManagement from './GiftVoucherManagement';
+import StoreTargetManagement from './StoreTargetManagement';
+import DayCashClosing from './DayCashClosing';
 import ReportsView from './ReportsView';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import BranchUserManagement from './BranchUserManagement';
@@ -119,7 +121,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [data, setData] = useState({ summary: {}, visits: [] });
   const [error, setError] = useState('');
 
-  const initialSection = hasModuleAccess('visits') ? 'visits'
+  const initialSection = dashboardUser?.role === 'reception' ? 'day-cash'
+    : hasModuleAccess('visits') ? 'visits'
     : ['clients', 'services', 'team', 'membership', 'gift_vouchers', 'reports', 'user_management'].find(key => hasModuleAccess(key)) || 'visits';
   // In-dashboard sub-module section switcher.
   const [activeSection, setActiveSection] = useState(initialSection);
@@ -676,6 +679,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     { id: 'appointments', label: 'Appointments', icon: CalendarDays, show: hasModuleAccess('visits') || hasModuleAccess('visitor_intake') },
                     { id: 'visits', label: dashboardViewRole === 'manager' || dashboardUser?.role === 'reception' ? 'Manager Dashboard' : 'Dashboard', icon: LayoutDashboard, show: hasModuleAccess('dashboard') || hasModuleAccess('visits') },
                     { id: 'branch_details', label: 'Branch Details', icon: Building2, show: isAdmin && Boolean(activeLocation?.location_id) },
+                    { id: 'store-targets', label: 'Store target', icon: Target, show: Boolean(activeLocation?.location_id) && (isAdmin || hasModuleAccess('dashboard') || hasModuleAccess('visits')) },
+                    { id: 'day-cash', label: 'Day closing', icon: Receipt, show: Boolean(activeLocation?.location_id) && dashboardUser?.role === 'reception' },
                     { id: 'team-master', label: 'Master', icon: Settings, show: isAdmin && hasModuleAccess('team') },
                     { id: 'clients', label: 'Clients', icon: Users, show: hasModuleAccess('clients') },
                     { id: 'services', label: 'Services', icon: Scissors, show: !isAdmin && hasModuleAccess('services') },
@@ -920,7 +925,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       </div>
 
       {/* Today's Summary Grid (Section 3 Requirement) */}
-      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && activeSection !== 'gift-vouchers' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
+      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && activeSection !== 'gift-vouchers' && activeSection !== 'store-targets' && activeSection !== 'day-cash' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1654,6 +1659,18 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         </div>
       )}
 
+      {activeSection === 'store-targets' && activeLocation?.location_id && (isAdmin || hasModuleAccess('dashboard') || hasModuleAccess('visits')) && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
+          <StoreTargetManagement activeLocation={activeLocation} />
+        </div>
+      )}
+
+      {activeSection === 'day-cash' && activeLocation?.location_id && dashboardUser?.role === 'reception' && (
+        <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
+          <DayCashClosing activeLocation={activeLocation} />
+        </div>
+      )}
+
       {/* Reports Section (Rendered inside Dashboard Section 3) */}
       {activeSection === 'reports' && hasModuleAccess('reports') && (
         <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
@@ -2265,17 +2282,18 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
             return (
               <div className="card animate-fade-in" style={{
-                maxWidth: '560px',
+                maxWidth: '600px',
                 width: '100%',
                 maxHeight: '90vh',
                 overflowY: 'auto',
                 background: '#FFFFFF',
-                borderRadius: '20px',
-                padding: '24px 28px',
-                boxShadow: '0 24px 70px rgba(38, 29, 20, 0.22)',
+                border: '1px solid #EFE5D8',
+                borderRadius: '22px',
+                padding: '28px 30px',
+                boxShadow: '0 28px 80px rgba(38, 29, 20, 0.24)',
                 boxSizing: 'border-box'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '18px', marginBottom: '24px' }}>
                   <div>
                     <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.16em', color: '#A97735', fontWeight: '800', marginBottom: '6px' }}>
                       Reception Payment Desk
@@ -2305,7 +2323,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   border: '1px solid #E8D6B9',
                   borderRadius: '14px',
                   padding: '15px 18px',
-                  marginBottom: '16px',
+                  marginBottom: '22px',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center'
@@ -2334,9 +2352,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
 
                 {billServiceItems.length > 0 && (
-                  <div style={{ marginBottom: '20px', padding: '15px 18px', border: '1px solid #EEE5DA', borderRadius: '14px', background: '#FFFEFC' }}>
-                    <div style={{ marginBottom: 10, color: '#8B6334', fontSize: 10, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase' }}>Appointment bill</div>
-                    {billServiceItems.map((service, index) => <div key={service.visit_service_id || `${service.service_id}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '7px 0', color: '#51463D', fontSize: 13 }}><span>{service.service_name}</span><span style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{formatCurrency(service.price)}</span></div>)}
+                  <div style={{ marginBottom: '24px', padding: '18px 20px', border: '1px solid #EEE5DA', borderRadius: '16px', background: '#FFFEFC' }}>
+                    <div style={{ marginBottom: 14, color: '#8B6334', fontSize: 10, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase' }}>Appointment bill</div>
+                    {billServiceItems.map((service, index) => <div key={service.visit_service_id || `${service.service_id}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '9px 0', color: '#51463D', fontSize: 13 }}><span>{service.service_name}</span><span style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>{formatCurrency(service.price)}</span></div>)}
                     <div style={{ display: 'grid', gap: 8, marginTop: 9, paddingTop: 12, borderTop: '1px solid #F0E9E0', color: '#7A6E63', fontSize: 12.5 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Subtotal</span><span>{formatCurrency(paymentModalVisit.subtotal || 0)}</span></div>
                       {Number(paymentModalVisit.discount_amount) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Discount</span><span>-{formatCurrency(paymentModalVisit.discount_amount)}</span></div>}
@@ -2841,7 +2859,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     )}
 
                     {/* Payment Method Selector (UPI, Cash, Card) */}
-                    <div style={{ marginBottom: '18px' }}>
+                    <div style={{ marginBottom: '24px' }}>
                       <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#51463D', marginBottom: '8px' }}>
                         Select Manual Payment Method:
                       </label>
@@ -2856,7 +2874,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                             type="button"
                             onClick={() => setPaymentForm(prev => ({ ...prev, payment_method: m.id }))}
                             style={{
-                              padding: '12px 8px',
+                              padding: '14px 8px',
                               borderRadius: '11px',
                               border: paymentForm.payment_method === m.id ? '1.5px solid #B88B4A' : '1px solid #E9E1D8',
                               background: paymentForm.payment_method === m.id ? '#FBF6EE' : '#FFFFFF',
@@ -2879,7 +2897,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     </div>
 
                     {/* Amount Paid Input */}
-                    <div style={{ marginBottom: '18px' }}>
+                    <div style={{ marginBottom: '24px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
                         <label style={{ fontSize: '12px', fontWeight: '700', color: '#51463D' }}>
                           Amount Collected Manually (₹)
@@ -2900,7 +2918,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.max(0, parseFloat(e.target.value) || 0) }))}
                         style={{
                           width: '100%',
-                          padding: '12px 15px',
+                          padding: '14px 16px',
                           borderRadius: '11px',
                           border: '1px solid #E4DACE',
                           fontSize: '16px',
@@ -2915,7 +2933,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
                     {/* Card Slip Ref if Card */}
                     {paymentForm.payment_method === 'Card' && (
-                      <div style={{ marginBottom: '14px' }}>
+                      <div style={{ marginBottom: '20px' }}>
                         <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>
                           Card Slip / Auth Ref (Optional)
                         </label>
@@ -2937,7 +2955,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     )}
 
                     {/* Notes */}
-                    <div style={{ marginBottom: '12px' }}>
+                    <div style={{ marginBottom: '20px' }}>
                       <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '4px' }}>
                         Receptionist Settlement Notes (Optional)
                       </label>
@@ -2960,7 +2978,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 )}
                 {/* Settlement Summary Footer Banner */}
                 <div style={{
-                  marginTop: '16px',
+                  marginTop: '22px',
                   padding: '12px 15px',
                   borderRadius: '12px',
                   background: isFullySettled ? '#F2F8F3' : '#FAF7F2',
@@ -2993,7 +3011,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 </div>
 
                 {/* Modal Actions */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', marginTop: '18px', paddingTop: '15px', borderTop: '1px solid #F0E9E0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #F0E9E0' }}>
                   <div>
                     {!pendingUpgradePlan && (
                       <button

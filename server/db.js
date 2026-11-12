@@ -80,6 +80,42 @@ export function initDatabase() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS LOCATION_STORE_TARGETS (
+      target_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER NOT NULL REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,
+      period_type TEXT NOT NULL CHECK(period_type IN ('daily', 'monthly', 'yearly')),
+      period_key TEXT NOT NULL,
+      target_amount REAL NOT NULL DEFAULT 0 CHECK(target_amount >= 0),
+      updated_by INTEGER REFERENCES USERS(user_id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(location_id, period_type, period_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS DAILY_CASH_CLOSINGS (
+      cash_closing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      location_id INTEGER NOT NULL REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,
+      business_date TEXT NOT NULL,
+      opening_expected_cash REAL NOT NULL DEFAULT 0,
+      opening_counted_cash REAL,
+      opening_variance REAL NOT NULL DEFAULT 0,
+      opening_notes TEXT,
+      opened_by INTEGER REFERENCES USERS(user_id),
+      opened_at DATETIME,
+      cash_received REAL NOT NULL DEFAULT 0,
+      handover_amount REAL,
+      closing_cash REAL,
+      closing_variance REAL,
+      closing_notes TEXT,
+      closed_by INTEGER REFERENCES USERS(user_id),
+      closed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(location_id, business_date)
+    );
+    CREATE INDEX IF NOT EXISTS IDX_DAILY_CASH_CLOSINGS_LOCATION_DATE
+      ON DAILY_CASH_CLOSINGS(location_id, business_date DESC);
+
     CREATE TABLE IF NOT EXISTS LOCATION_KYC (
       kyc_id INTEGER PRIMARY KEY AUTOINCREMENT,
       location_id INTEGER NOT NULL UNIQUE REFERENCES LOCATIONS(location_id) ON DELETE CASCADE,

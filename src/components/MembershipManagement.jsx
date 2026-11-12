@@ -1726,7 +1726,9 @@ export default function MembershipManagement({ onOpenClient, activeLocation, cur
                       <input
                         type="text"
                         value={newClientPhone}
-                        onChange={(e) => setNewClientPhone(e.target.value)}
+                        inputMode="numeric"
+                        maxLength={10}
+                        onChange={(e) => setNewClientPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                         placeholder="Phone Number"
                         style={{
                           padding: '8px 10px',

@@ -1566,7 +1566,9 @@ export default function BranchFranchiseKYCModal({
                 <input
                   type="tel"
                   value={officePhone}
-                  onChange={(e) => setOfficePhone(e.target.value)}
+                  inputMode="numeric"
+                  maxLength={10}
+                  onChange={(e) => setOfficePhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
                   placeholder="Branch office contact number"
                   style={{
                     width: '100%',
