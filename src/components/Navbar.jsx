@@ -5,7 +5,7 @@ import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
-export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, onNavigateDashboardSection, branding }) {
+export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onEditClientDetails, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, onNavigateDashboardSection, branding }) {
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [showDashboardConfirm, setShowDashboardConfirm] = useState(false);
   const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
@@ -15,6 +15,8 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   const [cartPrivilegeIds, setCartPrivilegeIds] = useState([]);
   const [livePrivileges, setLivePrivileges] = useState(null);
   const [activeClientAppointment, setActiveClientAppointment] = useState(null);
+  const [clientRewards, setClientRewards] = useState(null);
+  const [clientGiftVouchers, setClientGiftVouchers] = useState([]);
   const switchMenuRef = useRef(null);
   const clientMenuRef = useRef(null);
   const membershipPrivilegeRequestRef = useRef(0);
@@ -87,9 +89,42 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   }, [activeVisitClient?.client_id, currentUser?.role]);
 
   useEffect(() => {
+    const clientId = activeVisitClient?.client_id;
+    if (!clientId) {
+      setClientGiftVouchers([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setClientGiftVouchers([]);
+    apiRequest(`/gift-vouchers/client/${clientId}`, {
+      headers: { 'x-verified-client-token': sessionStorage.getItem('concierge_verified_client_token') || '' }
+    })
+      .then(result => { if (!cancelled) setClientGiftVouchers(result.vouchers || []); })
+      .catch(() => { if (!cancelled) setClientGiftVouchers([]); });
+    return () => { cancelled = true; };
+  }, [activeVisitClient?.client_id, currentUser?.role]);
+
+  useEffect(() => {
+    const clientId = activeVisitClient?.client_id;
+    if (!clientId) {
+      setClientRewards(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setClientRewards(null);
+    apiRequest(`/clients/${clientId}`)
+      .then(result => { if (!cancelled) setClientRewards({ loyalty: result.client?.loyalty, wallet: result.client?.wallet }); })
+      .catch(() => { if (!cancelled) setClientRewards({ error: true }); });
+    return () => { cancelled = true; };
+  }, [activeVisitClient?.client_id, currentUser?.role]);
+
+  useEffect(() => {
     const handleVisitUpdate = () => {
       if (activeVisitClient?.client_id) {
         fetchLivePrivileges(activeVisitClient.client_id, activeVisitClient.membershipTier || activeVisitClient.membership_tier);
+        apiRequest(`/clients/${activeVisitClient.client_id}`)
+          .then(result => setClientRewards({ loyalty: result.client?.loyalty, wallet: result.client?.wallet }))
+          .catch(() => setClientRewards({ error: true }));
       }
     };
     window.addEventListener('visit_created', handleVisitUpdate);
@@ -968,7 +1003,15 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
               {/* Hamburger Menu Icon ☰ (Image 4 & Image 5) */}
               <button
                 type="button"
-                onClick={() => setIsClientMenuOpen(prev => !prev)}
+                onClick={() => {
+                  const shouldOpen = !isClientMenuOpen;
+                  setIsClientMenuOpen(shouldOpen);
+                  if (shouldOpen && activeVisitClient?.client_id) {
+                    apiRequest(`/gift-vouchers/client/${activeVisitClient.client_id}`, {
+                      headers: { 'x-verified-client-token': sessionStorage.getItem('concierge_verified_client_token') || '' }
+                    }).then(result => setClientGiftVouchers(result.vouchers || [])).catch(() => setClientGiftVouchers([]));
+                  }
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1114,6 +1157,19 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     );
                   })()}
 
+                  {activeVisitClient?.client_id && onEditClientDetails && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsClientMenuOpen(false);
+                        onEditClientDetails?.(activeVisitClient.client_id);
+                      }}
+                      style={{ width: '100%', marginTop: -4, marginBottom: 12, padding: '8px 10px', border: '1px solid #D8BD91', borderRadius: 7, background: '#FFFFFF', color: '#9F7335', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      Edit Client Details
+                    </button>
+                  )}
+
                   {activeClientAppointment && (
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, marginBottom: 14, padding: '10px 12px', border: '1px solid #E4C995', borderRadius: 9, background: '#FBF7EF', color: '#5D4525' }}>
                       <CalendarDays size={16} color="#A9793C" style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1143,10 +1199,34 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
                     {renderRichMembershipStatus(activeVisitClient)}
                   </div>
 
+                  {activeVisitClient?.client_id && <div style={{ marginBottom: '14px', padding: '11px 12px', border: '1px solid #E7D8C4', borderRadius: 9, background: '#FFFCF7' }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800', marginBottom: '7px' }}>2. Loyalty & Wallet</div>
+                    {clientRewards?.error
+                      ? <div style={{ color: '#9A3412', fontSize: 12 }}>Could not load your points right now.</div>
+                      : <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#51463D', fontSize: 12 }}><span>Loyalty points (not ₹)</span><strong>{clientRewards ? Number(clientRewards.loyalty?.balance || 0).toLocaleString('en-IN') : 'Loading…'}</strong></div>
+                        {clientRewards?.loyalty && Number(clientRewards.loyalty.balance) > 0 && <div style={{ marginTop: 4, color: '#786D62', fontSize: 10.5 }}>{Number(clientRewards.loyalty.balance).toLocaleString('en-IN')} points ≈ {formatCurrency((Number(clientRewards.loyalty.balance) / (Number(clientRewards.loyalty.settings?.redemption_points) || 100)) * (Number(clientRewards.loyalty.settings?.redemption_value) || 50))} wallet credit at current rate</div>}
+                        {Number(clientRewards?.wallet?.balance || 0) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, color: '#51463D', fontSize: 12 }}><span>Wallet</span><strong>{formatCurrency(clientRewards.wallet.balance)}</strong></div>}
+                      </>}
+                  </div>}
+
+                  {clientGiftVouchers.length > 0 && <div style={{ marginBottom: '14px', padding: '11px 12px', border: '1px solid #E7D8C4', borderRadius: 9, background: '#FFFCF7' }}>
+                    <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#B88B4A', fontWeight: '800', marginBottom: '7px' }}>3. Gift Voucher</div>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {clientGiftVouchers.map(voucher => <div key={voucher.voucher_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, color: '#51463D', fontSize: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <strong style={{ display: 'block' }}>{voucher.title}</strong>
+                          <span style={{ display: 'block', marginTop: 2, color: '#786D62', fontSize: 10.5 }}>Code: {voucher.voucher_code}</span>
+                        </div>
+                        <strong style={{ flexShrink: 0, color: '#8C6228' }}>{voucher.voucher_type === 'amount' ? formatCurrency(voucher.remaining_balance) : 'Service gift'}</strong>
+                      </div>)}
+                    </div>
+                  </div>}
+
                   {/* OPTION 2: Log Out Client */}
                   <div>
                     <div style={{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.12em', color: '#DC2626', fontWeight: '800', marginBottom: '6px' }}>
-                      2. Client Session
+                      {clientGiftVouchers.length > 0 ? '4' : '3'}. Client Session
                     </div>
                     <button
                       type="button"

@@ -188,10 +188,12 @@ const formatAppointmentDuration = minutes => {
 const formatAppointmentMinuteTime = minutes => new Date(Date.UTC(2000, 0, 1, Math.floor(minutes / 60), minutes % 60))
   .toLocaleTimeString('en-IN', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit', hour12: true });
 
-export default function NewVisitWizard({ preSelectedClient, initialType, appointmentMode = false, onCancel, onComplete, onClientChange, onCartChange, currentUser, selectedLocation, branding, onPreviewBranding, onSaveBranding }) {
+export default function NewVisitWizard({ preSelectedClient, initialType, resumeVisit = null, appointmentMode = false, editClientMode = false, onCancel, onComplete, onClientChange, onClientEdited, onCartChange, currentUser, selectedLocation, branding, onPreviewBranding, onSaveBranding }) {
   // Wizard Steps:
   // 'client-type' -> 'client-info' (new) | 'client-search' (regular) -> 'repeat-prompt' -> 'membership-plans' -> 'categories' -> 'sub-services' -> 'selected-services' -> 'appointment-slot' (appointments) -> 'billing-payment' -> 'confirmation'
   const [step, setStep] = useState(() => {
+    if (editClientMode && preSelectedClient) return 'client-info';
+    if (resumeVisit) return 'confirmation';
     if (appointmentMode && !preSelectedClient) return 'appointment-client';
     if (preSelectedClient) {
       const isMember = Boolean(
@@ -211,6 +213,8 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
   // Client State
   const [clientType, setClientType] = useState(() => {
+    if (editClientMode && preSelectedClient) return 'new';
+    if (resumeVisit) return 'regular';
     if (appointmentMode && !preSelectedClient) return 'new';
     if (preSelectedClient) return 'regular';
     if (initialType === 'new') return 'new';
@@ -398,9 +402,12 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   }, [appointmentMode, visitDate, selectedAppointmentSlot, appointmentClockTick]);
 
   // Regular Client Selection
-  const [selectedRegularClient, setSelectedRegularClient] = useState(preSelectedClient || null);
+  const [selectedRegularClient, setSelectedRegularClient] = useState(resumeVisit?.client || preSelectedClient || null);
   const [clientHistory, setClientHistory] = useState(null); // { last_visit, previous_services, ... }
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [visitorVouchers, setVisitorVouchers] = useState([]);
+  const [selectedVisitorVoucher, setSelectedVisitorVoucher] = useState('');
+  const [requestLoyaltyRedemption, setRequestLoyaltyRedemption] = useState(false);
 
   // Search State for Regular Client
   const [searchQuery, setSearchQuery] = useState('');
@@ -574,7 +581,16 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
   // Selected Services Cart
   // Array of { temp_id, service_id, service_name, price, staff_id }
-  const [selectedServices, setSelectedServices] = useState([]);
+  const [selectedServices, setSelectedServices] = useState(() => (resumeVisit?.services || []).map((service, index) => ({
+    temp_id: `resume_${resumeVisit.visit_id}_${index}`,
+    service_id: service.service_id,
+    service_name: service.service_name_snapshot,
+    price: Number(service.price_snapshot) || 0,
+    list_price: Number(service.retail_price_snapshot ?? service.price_snapshot) || 0,
+    staff_id: service.staff_id || null,
+    is_privilege: Boolean(service.is_privilege),
+    privilege_id: service.privilege_id || null
+  })));
 
   // Billing & Payment State
   const [discountType, setDiscountType] = useState('fixed'); // 'fixed' | 'percentage'
@@ -589,8 +605,9 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
   const [membershipCreditAmount, setMembershipCreditAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [completedVisitResult, setCompletedVisitResult] = useState(null);
-  const [isPaymentReceived, setIsPaymentReceived] = useState(false);
+  const [completedVisitResult, setCompletedVisitResult] = useState(resumeVisit ? { visit: resumeVisit } : null);
+  const [isPaymentReceived, setIsPaymentReceived] = useState(resumeVisit?.payment_status === 'Paid');
+  const [editingVisitId, setEditingVisitId] = useState(resumeVisit?.visit_id || null);
 
   // Membership State
   const [selectedMembershipPlan, setSelectedMembershipPlan] = useState(null);
@@ -926,7 +943,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
   // Synchronize when preSelectedClient or initialType changes from props
   useEffect(() => {
-    if (preSelectedClient) {
+    if (editClientMode && preSelectedClient) {
+      setStep('client-info');
+      setClientType('new');
+    } else if (preSelectedClient) {
       setSelectedRegularClient(preSelectedClient);
       setClientType('regular');
       const isMember = Boolean(
@@ -949,7 +969,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       setClientType('regular');
       setStep('client-search');
     }
-  }, [preSelectedClient, initialType]);
+  }, [preSelectedClient, initialType, editClientMode]);
 
   // Load Catalog Categories & Staff Members on mount
   useEffect(() => {
@@ -1402,6 +1422,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
       if (data.verificationToken) {
         sessionStorage.setItem('concierge_verified_client_token', data.verificationToken);
+        window.dispatchEvent(new Event('visitor_client_verified'));
       }
 
       setTimeout(() => {
@@ -1434,6 +1455,20 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
         });
     }
   }, [selectedRegularClient]);
+
+  useEffect(() => {
+    const clientId = selectedRegularClient?.client_id;
+    if (currentUser?.role !== 'visitor' || !clientId) {
+      setVisitorVouchers([]);
+      setSelectedVisitorVoucher('');
+      return;
+    }
+    let cancelled = false;
+    apiRequest(`/gift-vouchers/client/${clientId}`, { headers: { 'x-verified-client-token': sessionStorage.getItem('concierge_verified_client_token') || '' } })
+      .then(result => { if (!cancelled) setVisitorVouchers(result.vouchers || []); })
+      .catch(() => { if (!cancelled) setVisitorVouchers([]); });
+    return () => { cancelled = true; };
+  }, [currentUser?.role, selectedRegularClient?.client_id]);
 
   // Staff assignment is handled by the reception concierge, not pre-assigned
 
@@ -1991,6 +2026,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       }
 
       const payload = {
+        ...(currentUser?.role === 'visitor' && editingVisitId ? { update_visit_id: editingVisitId } : {}),
         location_id: selectedLocation?.location_id || currentUser?.location_id || undefined,
         client_type: clientType,
         client_id: clientType === 'regular' ? selectedRegularClient?.client_id : null,
@@ -2093,7 +2129,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
           activeMembership ? `[MEMBERSHIP PURCHASED / PAY AT RECEPTION: ${activeMembership.plan.name} (${activeMembership.plan.priceFormatted || formatCurrency(activeMembership.price)})]` : '',
           (!activeMembership && membershipCreditMode === 'full') ? `[MEMBERSHIP SETTLEMENT: Auto Credits Applied]` : ((!activeMembership && membershipCreditMode === 'partial') ? `[MEMBERSHIP SETTLEMENT: ₹${membershipCreditAmount} from Credits]` : ''),
           (!activeMembership && selectedVisitorBenefit) ? `[MEMBER BENEFIT REQUESTED: ${selectedVisitorBenefit}]` : ((!activeMembership && useMembershipBenefits) ? '[MEMBERSHIP BENEFIT: Client requested to use membership amount / avail membership benefits at Reception]' : ''),
-          selectedServices.some(s => s.is_privilege) ? `[MEMBERSHIP PRIVILEGES: ${selectedServices.filter(s => s.is_privilege).map(s => s.service_name).join(', ')}]` : ''
+          selectedServices.some(s => s.is_privilege) ? `[MEMBERSHIP PRIVILEGES: ${selectedServices.filter(s => s.is_privilege).map(s => s.service_name).join(', ')}]` : '',
+          clientType === 'regular' && selectedRegularClient?.client_id && requestLoyaltyRedemption ? `[LOYALTY REDEMPTION REQUESTED: ${Number((clientHistory?.client || selectedRegularClient)?.loyalty?.balance ?? (clientHistory?.client || selectedRegularClient)?.loyalty_points ?? 0).toLocaleString('en-IN')} points to wallet; verify and redeem at Reception]` : '',
+          currentUser?.role === 'visitor' && selectedVisitorVoucher ? (() => { const voucher = visitorVouchers.find(item => String(item.voucher_id) === selectedVisitorVoucher); return voucher ? `[GIFT VOUCHER PRESENTED: id=${voucher.voucher_id}; ${voucher.voucher_code} · ${voucher.title}; verify and redeem at Reception]` : ''; })() : '',
+          clientType === 'regular' && selectedRegularClient?.client_id && Number((clientHistory?.client || selectedRegularClient)?.wallet?.balance || 0) > 0 ? `[WALLET BALANCE TO CHECK AT RECEPTION: ${formatCurrency((clientHistory?.client || selectedRegularClient).wallet.balance)}]` : ''
         ].filter(Boolean).join(' | ')
       };
 
@@ -2103,6 +2142,13 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       });
 
       setCompletedVisitResult(res);
+      if (currentUser?.role === 'visitor' && res?.visit?.visit_id) {
+        setEditingVisitId(res.visit.visit_id);
+        if (res.visit.client_id) {
+          setClientType('regular');
+          setSelectedRegularClient(res.visit.client || { client_id: res.visit.client_id });
+        }
+      }
       // For zero-payable visits or paid visits, immediately set payment received
       if (payload.payment_status === 'Paid' || res?.visit?.payment_status === 'Paid') {
         setIsPaymentReceived(true);
@@ -2270,37 +2316,44 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
       alert('Please enter State (compulsory)');
       return;
     }
-    if (phoneCheckMessage?.exists) {
+    if (!editClientMode && phoneCheckMessage?.exists) {
       alert('Client profile already exists with this phone number. Please use Regular Client.');
       return;
     }
 
     try {
       setIsSubmittingClient(true);
-      const res = await apiRequest('/clients', {
-        method: 'POST',
+      const clientPayload = {
+        name: clientName.trim(),
+        surname: clientSurname.trim(),
+        gender: clientGender,
+        marital_status: clientMaritalStatus,
+        dob: clientDob,
+        anniversary_date: clientMaritalStatus === 'Married' ? clientAnniversaryDate : '',
+        address_line1: clientAddress1.trim(),
+        address_line2: clientAddress2.trim(),
+        pincode: cleanPin,
+        city: clientCity.trim(),
+        state: clientState.trim(),
+        phone: cleanDigits,
+        email: (primaryLoginEmail || clientEmail).trim(),
+        primary_login_phone: primaryLoginPhone,
+        primary_login_email: primaryLoginEmail,
+        mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
+        email_ids: clientEmails.filter(e => e.trim().length > 0)
+      };
+      const res = await apiRequest(editClientMode ? `/clients/${preSelectedClient.client_id}` : '/clients', {
+        method: editClientMode ? 'PUT' : 'POST',
         body: JSON.stringify({
-          name: clientName.trim(),
-          surname: clientSurname.trim(),
-          gender: clientGender,
-          marital_status: clientMaritalStatus,
-          dob: clientDob,
-          anniversary_date: clientMaritalStatus === 'Married' ? clientAnniversaryDate : '',
-          address_line1: clientAddress1.trim(),
-          address_line2: clientAddress2.trim(),
-          pincode: cleanPin,
-          city: clientCity.trim(),
-          state: clientState.trim(),
-          phone: cleanDigits,
-          email: (primaryLoginEmail || clientEmail).trim(),
-          primary_login_phone: primaryLoginPhone,
-          primary_login_email: primaryLoginEmail,
-          mobile_numbers: clientMobiles.filter(m => m.trim().length >= 10),
-          email_ids: clientEmails.filter(e => e.trim().length > 0),
-          location_id: selectedLocation?.location_id || currentUser?.location_id || undefined,
-          notes: ''
+          ...clientPayload,
+          ...(!editClientMode ? { location_id: selectedLocation?.location_id || currentUser?.location_id || undefined, notes: '' } : {})
         })
       });
+
+      if (editClientMode && res?.client) {
+        onClientEdited?.(res.client);
+        return;
+      }
 
       if (res?.client) {
         setRegisteredClient(res.client);
@@ -3008,12 +3061,12 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
     const cleanDigits = (primaryLoginPhone || clientPhone || '').replace(/\D/g, '');
     const isMobileValid = cleanDigits.length >= 10;
     const isEmailValid = Boolean(primaryLoginEmail || (clientEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())));
-    const isDuplicate = phoneCheckMessage?.exists;
+    const isDuplicate = !editClientMode && phoneCheckMessage?.exists;
 
     return (
       <div className="animate-fade-in client-info-form-wrapper" style={{ width: '100%', margin: '20px auto 40px auto', boxSizing: 'border-box' }}>
         <button
-          onClick={() => setStep('client-type')}
+          onClick={() => editClientMode ? onCancel?.() : setStep('client-type')}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '18px', background: 'transparent', border: 'none', cursor: 'pointer' }}
         >
           <ArrowLeft size={16} />
@@ -3022,7 +3075,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
 
         <div className="card" style={{ padding: 'clamp(28px, 4vw, 40px) clamp(24px, 4vw, 44px)', width: '100%', boxSizing: 'border-box' }}>
           <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: '28px', fontWeight: '500', color: '#1C1917', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '14px' }}>
-            WE’D LOVE TO KNOW YOU BETTER
+            {editClientMode ? 'EDIT YOUR CLIENT DETAILS' : 'WE’D LOVE TO KNOW YOU BETTER'}
           </h2>
           <div style={{ width: '42px', height: '2px', background: '#C59A58', borderRadius: '2px', marginBottom: '32px' }} />
 
@@ -3657,10 +3710,10 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                   }}
                 >
                   {isSubmittingClient ? (
-                    <span>Submitting Client Dossier...</span>
+                    <span>{editClientMode ? 'Saving Client Details...' : 'Submitting Client Dossier...'}</span>
                   ) : (
                     <>
-                      <span>Submit</span>
+                    <span>{editClientMode ? 'Save Details' : 'Submit'}</span>
                       <ArrowRight size={18} />
                     </>
                   )}
@@ -7122,6 +7175,34 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
               {/* Horizontal line separating items from calculations */}
               <div style={{ borderBottom: '1px solid #ECEAE5', margin: '14px 0 20px 0' }} />
 
+              {clientType === 'regular' && selectedRegularClient?.client_id && (() => {
+                const clientBenefits = clientHistory?.client || selectedRegularClient;
+                const pointBalance = Number(clientBenefits?.loyalty?.balance ?? clientBenefits?.loyalty_points ?? 0);
+                const loyaltySettings = clientBenefits?.loyalty?.settings || {};
+                const pointMinimum = Number(loyaltySettings.minimum_redemption_points || 0);
+                const pointsPerReward = Number(loyaltySettings.redemption_points) || 100;
+                const valuePerReward = Number(loyaltySettings.redemption_value) || 50;
+                const loyaltyCreditValue = Math.round((pointBalance / pointsPerReward * valuePerReward) * 100) / 100;
+                if (pointBalance <= 0 || pointBalance < pointMinimum) return null;
+                return <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 18px', color: '#6B625A', fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={requestLoyaltyRedemption} onChange={event => setRequestLoyaltyRedemption(event.target.checked)} style={{ width: 14, height: 14, margin: 0, accentColor: '#A97735' }} />
+                  <span>Request redemption of {pointBalance.toLocaleString('en-IN')} points for <strong>{formatCurrency(loyaltyCreditValue)} wallet credit</strong> at reception</span>
+                </label>;
+              })()}
+
+              {currentUser?.role === 'visitor' && visitorVouchers.length > 0 && (
+                <div style={{ margin: '0 0 18px', padding: '10px 12px', border: '1px solid #E8D6B9', borderRadius: 10, background: '#FFFCF7' }}>
+                  <label htmlFor="visitor-gift-voucher" style={{ display: 'block', marginBottom: 6, color: '#6B625A', fontSize: 13, fontWeight: 600 }}>Gift voucher</label>
+                  <select id="visitor-gift-voucher" value={selectedVisitorVoucher} onChange={event => setSelectedVisitorVoucher(event.target.value)} style={{ width: '100%', padding: '9px 10px', border: '1px solid #E4DACE', borderRadius: 7, background: '#FFFFFF', color: '#51463D' }}>
+                    <option value="">Do not use a gift voucher</option>
+                    {visitorVouchers.map(voucher => <option key={voucher.voucher_id} value={String(voucher.voucher_id)}>
+                      {voucher.title} · {voucher.voucher_code}{voucher.voucher_type === 'amount' ? ` · ${formatCurrency(voucher.remaining_balance)} remaining` : ' · Service voucher'}
+                    </option>)}
+                  </select>
+                  <div style={{ marginTop: 5, color: '#82766B', fontSize: 11 }}>Reception will verify and apply the selected voucher during payment.</div>
+                </div>
+              )}
+
               {/* Pricing Breakdown: Right Aligned */}
               <div style={{ width: '100%', maxWidth: '470px', marginLeft: 'auto', display: 'flex', flexDirection: 'column' }}>
                 {/* GROSS TOTAL (A) */}
@@ -7325,6 +7406,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                       setStep('appointment-slot');
                       return;
                     }
+                    if (isSubmitting || completedVisitResult) return;
                     setStep('confirmation');
                     if (!completedVisitResult && !isSubmitting) {
                       try {
@@ -7334,7 +7416,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                       }
                     }
                   }}
-                  disabled={selectedServices.length === 0 && !activeMembership}
+                  disabled={(selectedServices.length === 0 && !activeMembership) || isSubmitting || Boolean(completedVisitResult)}
                   style={{
                     borderRadius: '9999px',
                     background: 'linear-gradient(135deg, #B58452 0%, #A2723F 100%)',
@@ -7345,13 +7427,13 @@ export default function NewVisitWizard({ preSelectedClient, initialType, appoint
                     textTransform: 'uppercase',
                     letterSpacing: '0.06em',
                     border: 'none',
-                    cursor: (selectedServices.length === 0 && !activeMembership) ? 'not-allowed' : 'pointer',
+                    cursor: ((selectedServices.length === 0 && !activeMembership) || isSubmitting || Boolean(completedVisitResult)) ? 'not-allowed' : 'pointer',
                     boxShadow: '0 4px 14px rgba(181, 132, 82, 0.3)',
-                    opacity: (selectedServices.length === 0 && !activeMembership) ? 0.5 : 1,
+                    opacity: ((selectedServices.length === 0 && !activeMembership) || isSubmitting || Boolean(completedVisitResult)) ? 0.5 : 1,
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  {appointmentMode ? 'CONTINUE TO SLOT BOOKING' : 'PROCEED TO CHECKOUT'}
+                  {appointmentMode ? 'CONTINUE TO SLOT BOOKING' : (isSubmitting ? 'SENDING…' : 'PROCEED TO CHECKOUT')}
                 </button>
               </div>
             </div>

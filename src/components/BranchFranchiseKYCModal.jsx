@@ -1040,13 +1040,10 @@ export default function BranchFranchiseKYCModal({
         errors[`${prefix}pan_doc`] = `PAN Card document upload is required for ${s.role_type} #${idx + 1}`;
       }
 
-      // Aadhaar Card No. and Document Upload (strictly compulsory for all stakeholder roles & firms)
+      // Aadhaar number remains required; the supporting document upload is optional.
       const cleanAadhaar = (s.aadhaar_number || '').replace(/\D/g, '');
       if (!cleanAadhaar || cleanAadhaar.length !== 12) {
         errors[`${prefix}aadhaar`] = `Valid 12-digit Aadhaar Number is required for ${s.role_type} #${idx + 1}`;
-      }
-      if (!s.aadhaar_doc) {
-        errors[`${prefix}aadhaar_doc`] = `Aadhaar Card document upload is required for ${s.role_type} #${idx + 1}`;
       }
 
       // Optional DIN validation: If provided, must be 8 digits
@@ -2460,7 +2457,7 @@ export default function BranchFranchiseKYCModal({
 
                         <div>
                           <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                            Upload {sh.role_type} Aadhaar Card <span style={{ color: '#DC2626' }}>*</span>
+                            Upload {sh.role_type} Aadhaar Card <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>(Optional)</span>
                           </label>
 
                           {/* Hidden file input for Aadhaar */}

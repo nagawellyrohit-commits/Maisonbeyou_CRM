@@ -6,6 +6,8 @@ import logoImg from '../assets/logo.png';
 export default function ReceiptModal({ visitId, onClose }) {
   const [visit, setVisit] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sendingChannel, setSendingChannel] = useState('');
+  const [deliveryFeedback, setDeliveryFeedback] = useState(null);
 
   useEffect(() => {
     async function fetchReceipt() {
@@ -26,6 +28,22 @@ export default function ReceiptModal({ visitId, onClose }) {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleSendInvoice = async channel => {
+    setSendingChannel(channel);
+    setDeliveryFeedback(null);
+    try {
+      const result = await apiRequest(`/visits/${visitId}/send-invoice`, {
+        method: 'POST',
+        body: JSON.stringify({ channel })
+      });
+      setDeliveryFeedback({ type: 'success', message: result.message || 'Invoice sent successfully.' });
+    } catch (error) {
+      setDeliveryFeedback({ type: 'error', message: error.message || 'Could not send the invoice.' });
+    } finally {
+      setSendingChannel('');
+    }
   };
 
   if (!visitId) return null;
@@ -258,18 +276,17 @@ export default function ReceiptModal({ visitId, onClose }) {
             <div className="no-print" style={{
               marginTop: '16px',
               display: 'flex',
+              flexDirection: 'column',
               gap: '10px'
             }}>
+              {deliveryFeedback && <div role="status" style={{ padding: '9px 11px', borderRadius: 8, fontSize: 12, lineHeight: 1.4, color: deliveryFeedback.type === 'success' ? '#166534' : '#B91C1C', background: deliveryFeedback.type === 'success' ? '#F0FDF4' : '#FEF2F2', border: `1px solid ${deliveryFeedback.type === 'success' ? '#BBF7D0' : '#FECACA'}` }}>
+                {deliveryFeedback.message}
+              </div>}
+              <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 type="button"
-                onClick={() => {
-                  const phone = visit.client_phone?.replace(/\D/g, '') || '';
-                  const fullPhone = phone.startsWith('91') ? phone : `91${phone}`;
-                  const name = [visit.client_name, visit.client_surname].filter(Boolean).join(' ');
-                  const regNo = visit.client_reg_no || '';
-                  const msg = `Dear ${name},\n\nThank you for visiting Maison BeYou Aesthetic Studio!\n\n✨ Registration No: *${regNo}*\nInvoice: *INV-MBY-${String(visit.visit_id).padStart(5, '0')}*\nTotal Paid: *${formatCurrency(visit.amount_paid)}*\n\nWe look forward to curating your next aesthetic privilege.`;
-                  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
-                }}
+                onClick={() => handleSendInvoice('whatsapp')}
+                disabled={Boolean(sendingChannel)}
                 style={{
                   flex: 1,
                   padding: '9px 12px',
@@ -283,23 +300,18 @@ export default function ReceiptModal({ visitId, onClose }) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  cursor: 'pointer'
+                  cursor: sendingChannel ? 'wait' : 'pointer',
+                  opacity: sendingChannel ? 0.7 : 1
                 }}
               >
                 <MessageCircle size={15} />
-                WhatsApp Thank You
+                {sendingChannel === 'whatsapp' ? 'Sending…' : 'Send Invoice on WhatsApp'}
               </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  const email = visit.client_email || '';
-                  const name = [visit.client_name, visit.client_surname].filter(Boolean).join(' ');
-                  const regNo = visit.client_reg_no || '';
-                  const subject = `Thank you for visiting Maison BeYou | Invoice INV-MBY-${String(visit.visit_id).padStart(5, '0')}`;
-                  const body = `Dear ${name},\n\nThank you for your visit to Maison BeYou Aesthetic & Beauty Studio!\n\nRegistration No: ${regNo}\nInvoice Number: INV-MBY-${String(visit.visit_id).padStart(5, '0')}\nTotal: ${formatCurrency(visit.total_amount)}\nAmount Paid: ${formatCurrency(visit.amount_paid)}\n\nWarm regards,\nMaison BeYou Concierge`;
-                  window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                }}
+                onClick={() => handleSendInvoice('email')}
+                disabled={Boolean(sendingChannel)}
                 style={{
                   flex: 1,
                   padding: '9px 12px',
@@ -313,12 +325,14 @@ export default function ReceiptModal({ visitId, onClose }) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  cursor: 'pointer'
+                  cursor: sendingChannel ? 'wait' : 'pointer',
+                  opacity: sendingChannel ? 0.7 : 1
                 }}
               >
                 <Mail size={15} />
-                Email Mailer
+                {sendingChannel === 'email' ? 'Sending…' : 'Send Invoice by Email'}
               </button>
+              </div>
             </div>
           </div>
         )}

@@ -248,7 +248,7 @@ function isVoucherAdmin(req, voucher) {
   return req.user.role === 'master_admin' || Number(req.locationId) === Number(voucher.issuing_location_id);
 }
 
-export function registerGiftVoucherRoutes({ app, db, authenticateToken, authorizeRoles, recordAuditLog, deliverNotification }) {
+export function registerGiftVoucherRoutes({ app, db, jwt, jwtSecret, authenticateToken, authorizeRoles, recordAuditLog, deliverNotification }) {
   initializeGiftVoucherTables(db);
 
   const audit = (voucherId, userId, locationId, action, details = {}) => {
@@ -436,6 +436,50 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
     res.json({ settings: readGiftVoucherSettings(db) });
   });
 
+  app.get('/api/gift-vouchers/client/:clientId', authenticateToken, authorizeRoles('admin', 'reception', 'visitor', 'master_admin'), (req, res) => {
+    try {
+      const clientId = Number(req.params.clientId);
+      const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(clientId);
+      if (!client || (req.user.role !== 'master_admin' && Number(client.location_id) !== Number(req.locationId))) {
+        return res.status(404).json({ error: 'Client not found.' });
+      }
+      if (req.user.role === 'visitor') {
+        let verifiedClient;
+        try { verifiedClient = jwt.verify(req.get('x-verified-client-token') || '', jwtSecret); } catch {}
+        const clientPhones = [client.phone, client.primary_login_phone].map(normalizePhone).filter(Boolean);
+        const clientEmails = [client.email, client.primary_login_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+        const accountMatchesClient = Number(req.user.client_id) === clientId ||
+          (normalizePhone(req.user.phone) && clientPhones.includes(normalizePhone(req.user.phone))) ||
+          (String(req.user.email || '').trim() && clientEmails.includes(String(req.user.email).trim().toLowerCase()));
+        if ((!verifiedClient?.verified || Number(verifiedClient.client_id) !== clientId) && !accountMatchesClient) {
+          return res.status(403).json({ error: 'Verify this client before viewing gift vouchers.' });
+        }
+      }
+      const phones = [...new Set([client.phone, client.primary_login_phone].map(normalizePhone).filter(Boolean))];
+      const emails = [...new Set([client.email, client.primary_login_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean))];
+      if (!phones.length && !emails.length) return res.json({ vouchers: [] });
+      const clauses = [phones.length ? `v.recipient_phone IN (${phones.map(() => '?').join(',')})` : '', emails.length ? `lower(COALESCE(v.recipient_email, '')) IN (${emails.map(() => '?').join(',')})` : ''].filter(Boolean);
+      const params = [...phones, ...emails];
+      const rows = db.prepare(`SELECT v.*, l.name AS issuing_branch_name FROM GIFT_VOUCHERS v
+        JOIN LOCATIONS l ON l.location_id = v.issuing_location_id
+        WHERE (${clauses.join(' OR ')}) AND v.payment_status = 'paid'
+        ORDER BY v.created_at DESC`).all(...params);
+      const vouchers = rows.map(row => {
+        const voucher = parseVoucher(row);
+        return { voucher_id: voucher.voucher_id, voucher_code: voucher.voucher_code, title: voucher.title,
+          voucher_type: voucher.voucher_type, eligibility_mode: voucher.eligibility_mode,
+          eligible_services: voucher.eligible_services, service_redemptions_allowed: voucher.service_redemptions_allowed,
+          service_redemptions_used: voucher.service_redemptions_used, original_value: voucher.original_value,
+          remaining_balance: voucher.remaining_balance, expiry_date: voucher.expiry_date,
+          status: statusForVoucher(voucher), issuing_branch_name: row.issuing_branch_name };
+      }).filter(voucher => ['active', 'partially_redeemed'].includes(voucher.status));
+      res.json({ vouchers });
+    } catch (error) {
+      console.error('Client gift voucher lookup error:', error);
+      res.status(500).json({ error: 'Could not load client gift vouchers.' });
+    }
+  });
+
   app.put('/api/gift-vouchers/settings', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
     try {
       const defaultValidity = Math.min(3650, Math.max(1, Math.floor(Number(req.body?.default_validity_days) || 365)));
@@ -578,6 +622,36 @@ export function registerGiftVoucherRoutes({ app, db, authenticateToken, authoriz
     } catch (error) {
       console.error('Gift voucher details error:', error);
       res.status(500).json({ error: 'Could not retrieve gift voucher details.' });
+    }
+  });
+
+  app.put('/api/gift-vouchers/:id/recipient', authenticateToken, authorizeRoles('admin', 'master_admin'), (req, res) => {
+    try {
+      const voucher = getVoucherById(Number(req.params.id));
+      if (!voucher || !canManage(req, voucher)) return res.status(404).json({ error: 'Gift voucher not found in your permitted branch.' });
+      if (voucher.payment_status !== 'paid' || !['active', 'partially_redeemed'].includes(statusForVoucher(voucher))) {
+        return res.status(409).json({ error: 'Only active, unused gift vouchers can be assigned to a client.' });
+      }
+      if (Number(db.prepare('SELECT COUNT(*) AS count FROM GIFT_VOUCHER_REDEMPTIONS WHERE voucher_id = ?').get(voucher.voucher_id)?.count) > 0) {
+        return res.status(409).json({ error: 'A voucher with redemption history cannot be reassigned.' });
+      }
+      const client = db.prepare('SELECT client_id, location_id, name, surname, phone, primary_login_phone, email, primary_login_email FROM CLIENTS WHERE client_id = ?')
+        .get(Number(req.body?.client_id));
+      if (!client || (req.user.role !== 'master_admin' && Number(client.location_id) !== Number(req.locationId))) {
+        return res.status(404).json({ error: 'Client not found in your permitted branch.' });
+      }
+      const recipientPhone = normalizePhone(client.primary_login_phone || client.phone);
+      const recipientEmail = toText(client.primary_login_email || client.email).toLowerCase();
+      if (!recipientPhone && !(recipientEmail && validEmail(recipientEmail))) return res.status(400).json({ error: 'This client has no valid phone or email contact for voucher ownership.' });
+      const recipientName = [client.name, client.surname].filter(Boolean).join(' ').trim();
+      db.prepare(`UPDATE GIFT_VOUCHERS SET recipient_name = ?, recipient_phone = ?, recipient_email = ?, updated_at = CURRENT_TIMESTAMP WHERE voucher_id = ?`)
+        .run(recipientName || null, recipientPhone || null, recipientEmail && validEmail(recipientEmail) ? recipientEmail : null, voucher.voucher_id);
+      audit(voucher.voucher_id, req.user.user_id, req.locationId, 'assigned_to_client', { client_id: client.client_id, recipient_name: recipientName });
+      const updatedVoucher = parseVoucher(getVoucherById(voucher.voucher_id));
+      res.json({ success: true, voucher: { ...updatedVoucher, status: statusForVoucher(updatedVoucher) } });
+    } catch (error) {
+      console.error('Assign gift voucher recipient error:', error);
+      res.status(500).json({ error: 'Could not assign this voucher to the selected client.' });
     }
   });
 

@@ -348,7 +348,7 @@ export function initDatabase() {
       total_amount REAL NOT NULL,
       amount_paid REAL NOT NULL,
       balance REAL NOT NULL,
-      payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
+      payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Wallet', 'Gift Voucher', 'Other')),
       payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending', 'Cancelled')),
       upi_ref TEXT,
       created_by INTEGER REFERENCES USERS(user_id),
@@ -862,7 +862,7 @@ export function initDatabase() {
   // Safe migration to support Membership payments and cancelled appointments in VISITS.
   try {
     const visitSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='VISITS'").get()?.sql || '';
-    if (visitSql && (!visitSql.includes("'Membership'") || !visitSql.includes("'Cancelled'"))) {
+    if (visitSql && (!visitSql.includes("'Membership'") || !visitSql.includes("'Wallet'") || !visitSql.includes("'Gift Voucher'") || !visitSql.includes("'Cancelled'"))) {
       db.exec(`
         PRAGMA foreign_keys = OFF;
         CREATE TABLE VISITS_new (
@@ -877,7 +877,7 @@ export function initDatabase() {
           total_amount REAL NOT NULL,
           amount_paid REAL NOT NULL,
           balance REAL NOT NULL,
-          payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Other')),
+          payment_method TEXT CHECK(payment_method IN ('Cash', 'UPI', 'Card', 'Membership', 'Wallet', 'Gift Voucher', 'Other')),
           payment_status TEXT NOT NULL CHECK(payment_status IN ('Paid', 'Partially Paid', 'Pending', 'Cancelled')),
           upi_ref TEXT,
           created_by INTEGER REFERENCES USERS(user_id),

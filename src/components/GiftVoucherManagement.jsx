@@ -86,6 +86,9 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
   const [redemptionAmount, setRedemptionAmount] = useState('');
   const [redemptionRef, setRedemptionRef] = useState('');
   const [globalSettingsDraft, setGlobalSettingsDraft] = useState(settings);
+  const [recipientClientQuery, setRecipientClientQuery] = useState('');
+  const [recipientClientMatches, setRecipientClientMatches] = useState([]);
+  const [selectedRecipientClient, setSelectedRecipientClient] = useState(null);
 
   const [form, setForm] = useState({
     voucher_type: 'amount', title: 'Maison Beyou Gift Voucher', original_value: '1000',
@@ -140,6 +143,17 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
   useEffect(() => { loadPolicy(); loadBranches(); }, [loadPolicy, loadBranches]);
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { loadCatalog(isMaster ? selectedBranch : activeLocation?.location_id); }, [loadCatalog, isMaster, selectedBranch, activeLocation?.location_id]);
+  useEffect(() => {
+    const query = recipientClientQuery.trim();
+    if (query.length < 2) { setRecipientClientMatches([]); return undefined; }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      apiRequest(`/clients/search?q=${encodeURIComponent(query)}`)
+        .then(result => { if (!cancelled) setRecipientClientMatches(result.clients || []); })
+        .catch(() => { if (!cancelled) setRecipientClientMatches([]); });
+    }, 220);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [recipientClientQuery]);
 
   const activeCategories = useMemo(() => catalog.categories || [], [catalog.categories]);
   const selectedCategories = useMemo(() => activeCategories.filter(category => selectedCategoryIds.includes(Number(category.category_id))), [activeCategories, selectedCategoryIds]);
@@ -152,6 +166,35 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
   }, [form.eligibility_mode, serviceOptions, selectedServiceIds]);
 
   const updateForm = (key, value) => setForm(current => ({ ...current, [key]: value }));
+  const selectRecipientClient = client => {
+    if (!client) return;
+    const recipientPhone = client.primary_login_phone || client.phone || '';
+    const recipientEmail = client.primary_login_email || client.email || client.email_ids?.[0] || '';
+    setSelectedRecipientClient(client);
+    setRecipientClientQuery(`${client.name || ''}${recipientPhone ? ` · ${recipientPhone}` : ''}`);
+    setRecipientClientMatches([]);
+    setForm(current => ({
+      ...current,
+      recipient_name: [client.name, client.surname].filter(Boolean).join(' '),
+      recipient_phone: recipientPhone,
+      recipient_email: recipientEmail
+    }));
+  };
+
+  const assignVoucherToClient = async (voucher = voucherDetails?.voucher) => {
+    if (!voucher || !selectedRecipientClient?.client_id) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await apiRequest(`/gift-vouchers/${voucher.voucher_id}/recipient`, {
+        method: 'PUT', body: JSON.stringify({ client_id: selectedRecipientClient.client_id })
+      });
+      setVoucherDetails(current => current ? { ...current, voucher: result.voucher } : current);
+      setNotice(`Voucher ${result.voucher.voucher_code} is now assigned to ${result.voucher.recipient_name}.`);
+      setSelectedRecipientClient(null); setRecipientClientQuery('');
+      await loadRows();
+    } catch (requestError) { setError(requestError.message || 'Could not assign voucher to this client.'); }
+    finally { setBusy(false); }
+  };
   const toggleCategory = categoryId => {
     const id = Number(categoryId);
     setSelectedCategoryIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
@@ -181,6 +224,7 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
       setView('details');
       setNotice(`Voucher ${result.voucher.voucher_code} created and activated. It is ready to redeem.`);
       setForm(current => ({ ...current, title: 'Maison Beyou Gift Voucher', purchaser_name: '', purchaser_phone: '', purchaser_email: '', recipient_name: '', recipient_phone: '', recipient_email: '', gift_message: '', payment_status: 'paid', payment_method: '', payment_reference: '', notes: '', send_whatsapp: false, send_email: false, send_purchaser_copy: false }));
+      setSelectedRecipientClient(null); setRecipientClientQuery(''); setRecipientClientMatches([]);
       setSelectedCategoryIds([]); setSelectedServiceIds([]);
       await loadRows();
     } catch (requestError) { setError(requestError.message || 'Could not create voucher.'); }
@@ -262,6 +306,18 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     ['dashboard', 'Overview', BarChart3], ['vouchers', 'Vouchers', Gift]
   ];
 
+  const renderRecipientClientPicker = () => <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 7 }}>
+    <label style={labelStyle}>Assign voucher to a client (optional)
+      <input style={fieldStyle} value={recipientClientQuery} onChange={event => { setRecipientClientQuery(event.target.value); setSelectedRecipientClient(null); }} placeholder="Search client name or phone" />
+    </label>
+    {recipientClientMatches.length > 0 && <div style={{ display: 'grid', gap: 5, maxHeight: 190, overflowY: 'auto', padding: 6, border: '1px solid #E7D8C4', borderRadius: 9, background: '#FFFFFF' }}>
+      {recipientClientMatches.map(client => <button key={client.client_id} type="button" onClick={() => selectRecipientClient(client)} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, padding: '8px 9px', border: '1px solid #F0E9E0', borderRadius: 7, background: '#FFFCF7', color: '#51463D', textAlign: 'left', cursor: 'pointer' }}>
+        <strong>{[client.name, client.surname].filter(Boolean).join(' ')}</strong><span>{client.primary_login_phone || client.phone || 'No phone'}</span>
+      </button>)}
+    </div>}
+    {selectedRecipientClient && <div style={{ color: '#267341', fontSize: 11.5 }}>Assigned to {[selectedRecipientClient.name, selectedRecipientClient.surname].filter(Boolean).join(' ')}. Their contact details will link this voucher to their profile and Visitor cart.</div>}
+  </div>;
+
   const renderForm = () => <form onSubmit={handleCreate} style={{ display: 'grid', gap: 14 }}>
     {isMaster && <section style={cardStyle}><label style={labelStyle}>Issuing branch<select required value={selectedBranch} onChange={event => setSelectedBranch(event.target.value)} style={fieldStyle}><option value="">Select branch</option>{branches.map(branch => <option key={branch.location_id} value={branch.location_id}>{branch.name} · {branch.type}</option>)}</select></label></section>}
     <section style={cardStyle}>
@@ -300,6 +356,10 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
         <label style={labelStyle}>Purchaser name *<input style={fieldStyle} required value={form.purchaser_name} onChange={event => updateForm('purchaser_name', event.target.value)} /></label>
         <label style={labelStyle}>Purchaser mobile *<input style={fieldStyle} required type="tel" inputMode="numeric" pattern="[0-9]{10}" title="Enter a 10-digit mobile number" maxLength={10} value={form.purchaser_phone} onChange={event => updateForm('purchaser_phone', event.target.value.replace(/\D/g, '').slice(0, 10))} /></label>
         <label style={labelStyle}>Purchaser email *<input style={fieldStyle} required type="email" value={form.purchaser_email} onChange={event => updateForm('purchaser_email', event.target.value)} /></label>
+        {renderRecipientClientPicker()}
+        <label style={labelStyle}>Recipient name<input style={fieldStyle} value={form.recipient_name} onChange={event => { setSelectedRecipientClient(null); updateForm('recipient_name', event.target.value); }} /></label>
+        <label style={labelStyle}>Recipient mobile<input style={fieldStyle} type="tel" value={form.recipient_phone} onChange={event => { setSelectedRecipientClient(null); updateForm('recipient_phone', event.target.value); }} /></label>
+        <label style={labelStyle}>Recipient email<input style={fieldStyle} type="email" value={form.recipient_email} onChange={event => { setSelectedRecipientClient(null); updateForm('recipient_email', event.target.value); }} /></label>
         <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Personal gift message<textarea style={{ ...fieldStyle, resize: 'vertical' }} rows={3} maxLength={350} value={form.gift_message} onChange={event => updateForm('gift_message', event.target.value)} /></label>
         <label style={{ ...labelStyle, gridColumn: '1 / -1' }}>Internal notes<textarea style={{ ...fieldStyle, resize: 'vertical' }} rows={2} value={form.notes} onChange={event => updateForm('notes', event.target.value)} /></label>
       </div>
@@ -330,6 +390,11 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
         {voucher.recipient_name && <div style={{ color: '#786D62', fontSize: 12 }}><strong>Recipient:</strong> {voucher.recipient_name}</div>}
         {voucher.purchaser_name && <div style={{ color: '#786D62', fontSize: 12 }}><strong>Purchaser:</strong> {voucher.purchaser_name}</div>}
       </section>
+      {!voucher.recipient_phone && !voucher.recipient_email && ['active', 'partially_redeemed'].includes(voucher.status) && (isMaster || currentUser?.role === 'admin') && <section style={{ ...cardStyle, display: 'grid', gap: 10 }}>
+        <div><strong style={{ color: '#72501F' }}>This voucher is not assigned to a client</strong><div style={{ marginTop: 4, color: '#786D62', fontSize: 12 }}>It will not appear in a client profile or Visitor cart until you assign it.</div></div>
+        {renderRecipientClientPicker()}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" style={primaryButton} disabled={busy || !selectedRecipientClient} onClick={() => assignVoucherToClient(voucher)}>Assign to selected client</button></div>
+      </section>}
       {voucher.status === 'pending_payment' && (isMaster || voucher.issuing_location_id === activeLocation?.location_id) && <section style={{ ...cardStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}><div><strong style={{ color: '#72501F' }}>Payment is pending</strong><div style={{ marginTop: 3, color: '#786D62', fontSize: 12 }}>Confirm received payment to activate the voucher and generate/deliver its card.</div></div><button type="button" style={primaryButton} disabled={busy} onClick={() => confirmPayment(voucher)}><CheckCircle2 size={15} /> Confirm payment & activate</button></section>}
       {voucher.status === 'pending_payment' && (isMaster || voucher.issuing_location_id === activeLocation?.location_id) && <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" style={{ ...outlineButton, color: '#B42318', borderColor: '#FECACA' }} disabled={busy} onClick={() => mutateVoucher(voucher, 'cancel')}>Cancel voucher</button></div>}
       {['active', 'partially_redeemed'].includes(voucher.status) && (isMaster || voucher.issuing_location_id === activeLocation?.location_id) && <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" style={{ ...outlineButton, color: '#B42318', borderColor: '#FECACA' }} disabled={busy} onClick={() => mutateVoucher(voucher, 'refund')}>Refund unused voucher</button></div>}

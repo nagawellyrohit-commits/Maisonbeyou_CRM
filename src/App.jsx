@@ -49,12 +49,15 @@ export default function App() {
   const [wizardResetKey, setWizardResetKey] = useState(0);
   const [showAppointmentBooking, setShowAppointmentBooking] = useState(false);
   const [requestedPaymentVisit, setRequestedPaymentVisit] = useState(null);
+  const [pendingVisitorVisit, setPendingVisitorVisit] = useState(null);
+  const [visitorIdentityVersion, setVisitorIdentityVersion] = useState(0);
   const [requestedDashboardSection, setRequestedDashboardSection] = useState(null);
   
   // Navigation contextual state
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [clientProfileSource, setClientProfileSource] = useState('dashboard');
   const [preSelectedVisitClient, setPreSelectedVisitClient] = useState(null);
+  const [editingVisitorClientProfile, setEditingVisitorClientProfile] = useState(false);
   const [initialVisitType, setInitialVisitType] = useState(() => new URLSearchParams(window.location.search).get('type') || null);
   const [receiptVisitId, setReceiptVisitId] = useState(null);
   const [activeVisitClient, setActiveVisitClient] = useState(() => {
@@ -100,6 +103,7 @@ export default function App() {
     setStoredLocation(null);
     setCurrentUser(null);
     setSelectedLocation(null);
+    setPendingVisitorVisit(null);
     setMasterAdminView('locations'); // Back to studio list
   };
 
@@ -218,6 +222,39 @@ export default function App() {
     return () => window.removeEventListener('auth_change', handleAuthChange);
   }, []);
 
+  useEffect(() => {
+    const handleVisitorIdentityVerified = () => setVisitorIdentityVersion(version => version + 1);
+    window.addEventListener('visitor_client_verified', handleVisitorIdentityVerified);
+    return () => window.removeEventListener('visitor_client_verified', handleVisitorIdentityVerified);
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.role !== 'visitor' || !selectedLocation?.location_id) {
+      setPendingVisitorVisit(null);
+      return;
+    }
+    let cancelled = false;
+    apiRequest('/visitor/pending-visit', {
+      headers: { 'x-verified-client-token': sessionStorage.getItem('concierge_verified_client_token') || '' }
+    })
+      .then(result => {
+        if (cancelled) return;
+        const visit = result?.visit || null;
+        setPendingVisitorVisit(visit);
+        if (visit) {
+          setActiveTab('new-visit');
+          setWizardResetKey(key => key + 1);
+        }
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setPendingVisitorVisit(null);
+          console.error('Could not restore visitor pending visit:', error);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [currentUser?.user_id, currentUser?.role, selectedLocation?.location_id, visitorIdentityVersion]);
+
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
 
   const userHasAnyDashboardModule = currentUser && ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => canAccessModule(currentUser, module));
@@ -268,6 +305,7 @@ export default function App() {
           masterPortalBranding={activeMasterPortalBranding}
           onLoginSuccess={(user, location) => {
             setCurrentUser(user);
+            setPendingVisitorVisit(null);
             setActiveVisitClient(null);
             setPreSelectedVisitClient(null);
             setInitialVisitType(null);
@@ -360,6 +398,17 @@ export default function App() {
         currentUser={currentUser}
         setCurrentUser={setCurrentUser}
         activeVisitClient={activeVisitClient}
+        onEditClientDetails={async (clientId) => {
+          try {
+            const result = await apiRequest(`/clients/${clientId}`);
+            if (!result?.client) throw new Error('Could not load this client profile.');
+            setPreSelectedVisitClient(result.client);
+            setEditingVisitorClientProfile(true);
+            setActiveTab('new-visit');
+          } catch (error) {
+            window.alert(error.message || 'Could not open client details.');
+          }
+        }}
         cartCount={cartInfo.count}
         cartVisible={cartInfo.visible}
         onOpenCart={cartInfo.openCart}
@@ -430,9 +479,11 @@ export default function App() {
 
         {(canAccessModule(currentUser, 'visitor_intake') || canAccessModule(currentUser, 'visits')) && (activeTab === 'new-visit' || (activeTab === 'appointments' && showAppointmentBooking)) && (
           <NewVisitWizard
-            key={`${wizardResetKey}_${activeTab}_${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
+            key={`${wizardResetKey}_${activeTab}_${pendingVisitorVisit?.visit_id || ''}_${editingVisitorClientProfile ? 'edit-client_' : ''}${preSelectedVisitClient ? `client_${preSelectedVisitClient.client_id}` : `flow_${initialVisitType || 'choose'}`}`}
             appointmentMode={activeTab === 'appointments' && showAppointmentBooking}
+            resumeVisit={currentUser?.role === 'visitor' ? pendingVisitorVisit : null}
             preSelectedClient={preSelectedVisitClient}
+            editClientMode={editingVisitorClientProfile}
             initialType={initialVisitType}
             currentUser={currentUser}
             selectedLocation={selectedLocation}
@@ -440,8 +491,17 @@ export default function App() {
             onPreviewBranding={setBrandingPreview}
             onSaveBranding={saveBranchBranding}
             onClientChange={(client) => setActiveVisitClient(client)}
+            onClientEdited={(client) => {
+              setPreSelectedVisitClient(client);
+              setActiveVisitClient(current => ({ ...current, ...client, client_id: client.client_id }));
+              setEditingVisitorClientProfile(false);
+            }}
             onCartChange={setCartInfo}
             onCancel={() => {
+              if (editingVisitorClientProfile) {
+                setEditingVisitorClientProfile(false);
+                return;
+              }
               setActiveVisitClient(null);
               setPreSelectedVisitClient(null);
               setInitialVisitType(null);
@@ -456,6 +516,7 @@ export default function App() {
               }
             }}
             onComplete={(visitId) => {
+              if (currentUser?.role === 'visitor') setPendingVisitorVisit(null);
               setActiveVisitClient(null);
               setPreSelectedVisitClient(null);
               setInitialVisitType(null);

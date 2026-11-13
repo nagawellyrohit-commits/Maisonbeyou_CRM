@@ -1,0 +1,91 @@
+[
+  {
+    "name": "maison_beyou_branch_access",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, your branch {{2}} ({{3}}) is registered with Maison BeYou. Your {{4}} login is ready. Sign in with your registered mobile number and OTP.",
+        "example": { "body_text": [["Asha Mehta", "Maison BeYou Andheri", "MB-B-MUM-001", "Proprietor"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_admin_access",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, your Branch Admin access for {{2}} ({{3}}) is ready. Sign in using your registered mobile number and OTP.",
+        "example": { "body_text": [["Asha Mehta", "Maison BeYou Andheri", "MB-B-MUM-001"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_branch_user_access",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, your {{2}} access for {{3}} ({{4}}) is ready. Sign in with your registered mobile number and OTP.",
+        "example": { "body_text": [["Rohit Shah", "Manager", "Maison BeYou Andheri", "MB-B-MUM-001"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_client_welcome",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Welcome to Maison BeYou, {{1}}. Your client registration number is {{2}}. Please sign in to the Visitor Portal for {{3}}, choose your services for today, and submit your request.",
+        "example": { "body_text": [["Rohit Shah", "MB-REG-00123", "Maison BeYou Andheri"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_appointment_confirmed",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} at {{4}}. Services: {{5}}. Your specialist: {{6}}. We look forward to welcoming you.",
+        "example": { "body_text": [["Rohit Shah", "Maison BeYou Andheri", "18 Nov 2026", "2:30 PM", "Standard Blowdry", "Neha"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_payment_received",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, we received {{2}} for invoice {{3}} at {{4}}. Services: {{5}}. Thank you for choosing Maison BeYou.",
+        "example": { "body_text": [["Rohit Shah", "INR 1,416.00", "INV-MBY-00123", "Maison BeYou Andheri", "Standard Blowdry"]] }
+      }
+    ]
+  },
+  {
+    "name": "maison_beyou_invoice_delivery",
+    "language": "en",
+    "category": "UTILITY",
+    "components": [
+      {
+        "type": "HEADER",
+        "format": "DOCUMENT",
+        "example": { "header_handle": ["<UPLOAD-INVOICE-PDF-EXAMPLE> "] }
+      },
+      {
+        "type": "BODY",
+        "text": "Hi {{1}}, your Maison BeYou invoice {{2}} is attached. Total: {{3}}. Amount paid: {{4}}. Branch: {{5}}. Services: {{6}}. Thank you for choosing Maison BeYou.",
+        "example": { "body_text": [["Rohit Shah", "INV-MBY-00123", "INR 1,416.00", "INR 1,416.00", "Maison BeYou Andheri", "Standard Blowdry"]] }
+      }
+    ]
+  }
+]

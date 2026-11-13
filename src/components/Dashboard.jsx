@@ -160,6 +160,8 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   const [isSavingServiceTime, setIsSavingServiceTime] = useState(false);
 
   const [paymentModalVisit, setPaymentModalVisit] = useState(null);
+  const [isLoadingLoyaltySettlement, setIsLoadingLoyaltySettlement] = useState(false);
+  const paymentLoyaltyLookupRef = useRef(0);
   const [viewUpiModalVisit, setViewUpiModalVisit] = useState(null);
   const [paymentForm, setPaymentForm] = useState({
     amount_paid: 0,
@@ -352,7 +354,13 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
   };
 
   const openPaymentModal = (visit) => {
-    setPaymentModalVisit(visit);
+    const loyaltyLookupId = ++paymentLoyaltyLookupRef.current;
+    const requestedPoints = String(visit?.notes || '').match(/\[LOYALTY REDEMPTION REQUESTED:\s*([\d,]+)\s*points to wallet/i);
+    const loyaltyAlreadySettled = /\[LOYALTY REDEMPTION SETTLED:/i.test(String(visit?.notes || ''));
+    const loyaltyRequestPoints = loyaltyAlreadySettled ? 0 : Number(String(requestedPoints?.[1] || '').replace(/,/g, '')) || 0;
+    const requestedVoucherId = String(String(visit?.notes || '').match(/\[GIFT VOUCHER PRESENTED:\s*id=(\d+)/i)?.[1] || '');
+    setPaymentModalVisit({ ...visit, loyalty_request_points: loyaltyRequestPoints });
+    setIsLoadingLoyaltySettlement(Boolean(visit?.client_id));
     setIsEditingPerkInModal(false);
     setIsSelectingUpgradeMembership(false);
     setPendingUpgradePlan(null);
@@ -397,18 +405,88 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       else if (visit.payment_method === 'UPI') initialMethod = 'UPI';
     }
 
-    const remainingForManual = Math.max(0, visit.total_amount - previouslyPaid - initialCredit);
-
     setPaymentForm({
-      amount_paid: remainingForManual,
+      amount_paid: 0,
       payment_method: initialMethod,
       notes: visit.notes || (initialCredit > 0 ? '[MEMBERSHIP SETTLEMENT: Auto Credits Applied]' : ''),
       card_ref: '',
       membership_amount_used: initialCredit,
       membership_benefit_used: visit.membership_benefit_used || '',
       benefit_used_date: visit.benefit_used_date || (visit.visit_date || new Date().toISOString().slice(0, 10)),
-      benefit_status: visit.benefit_status || 'Available'
+      benefit_status: visit.benefit_status || 'Available',
+      gift_voucher_selected_id: requestedVoucherId,
+      gift_voucher_selected: false
     });
+
+    if (visit?.client_id) {
+      Promise.all([
+        apiRequest(`/clients/${visit.client_id}`),
+        apiRequest(`/gift-vouchers/client/${visit.client_id}`).catch(() => ({ vouchers: [], error: true }))
+      ])
+        .then(([result, voucherResult]) => {
+          if (paymentLoyaltyLookupRef.current !== loyaltyLookupId) return;
+          const loyalty = result.client?.loyalty;
+          const loyaltyBalance = Number(loyalty?.balance) || 0;
+          const settings = loyalty?.settings || {};
+          const minimumPoints = Number(settings.minimum_redemption_points) || 0;
+          const redemptionEnabled = Boolean(settings.enabled) && Number(settings.redemption_value) > 0 && loyaltyBalance >= minimumPoints && loyaltyBalance > 0;
+          const redeemPoints = loyaltyRequestPoints > 0 && redemptionEnabled && loyaltyBalance >= loyaltyRequestPoints
+            ? loyaltyRequestPoints : 0;
+          const walletCredit = redeemPoints > 0
+            ? Math.round((redeemPoints / (Number(settings.redemption_points) || 100) * (Number(settings.redemption_value) || 50)) * 100) / 100
+            : 0;
+          const billRemainingAfterMembership = Math.max(0, Number(visit.total_amount || 0) - previouslyPaid - initialCredit);
+          const walletApplied = Math.min(walletCredit, billRemainingAfterMembership);
+          const requestedVoucher = (voucherResult.vouchers || []).find(voucher => String(voucher.voucher_id) === requestedVoucherId);
+          const requestedVoucherDue = Math.max(0, billRemainingAfterMembership - walletApplied);
+          const requestedVoucherServices = Array.isArray(visit.service_items) ? visit.service_items : (visit.services || []);
+          const requestedEligibleService = requestedVoucher?.voucher_type === 'service'
+            ? requestedVoucherServices.find(service => requestedVoucher.eligibility_mode === 'unrestricted' || (requestedVoucher.eligible_services || []).some(eligible => String(eligible.service_name || '').toLowerCase() === String(service.service_name || service.service_name_snapshot || '').toLowerCase()))
+            : null;
+          const requestedVoucherUsesLeft = Math.max(0, Number(requestedVoucher?.service_redemptions_allowed || 0) - Number(requestedVoucher?.service_redemptions_used || 0));
+          const requestedServiceValue = requestedVoucherUsesLeft > 0
+            ? (requestedVoucherUsesLeft === 1 ? Number(requestedVoucher.remaining_balance || 0) : Number(requestedVoucher.original_value || 0) / Number(requestedVoucher.service_redemptions_allowed || 1))
+            : 0;
+          const requestedVoucherApplied = requestedVoucher
+            ? Math.min(Number(requestedVoucher.remaining_balance || 0), requestedVoucherDue,
+                requestedVoucher.voucher_type === 'service' ? requestedServiceValue : Number(requestedVoucher.remaining_balance || 0),
+                requestedVoucher.voucher_type === 'service' ? Number(requestedEligibleService?.price ?? requestedEligibleService?.price_snapshot ?? 0) : Number.POSITIVE_INFINITY)
+            : 0;
+          const walletBalance = Math.max(0, Number(result.client?.wallet?.balance) || 0);
+          setPaymentModalVisit(current => current?.visit_id === visit.visit_id
+            ? {
+                ...current,
+                loyalty_request_points: loyaltyRequestPoints,
+                loyalty_available_points: loyaltyBalance,
+                loyalty_minimum_points: minimumPoints,
+                loyalty_redemption_points: Number(settings.redemption_points) || 100,
+                loyalty_redemption_value: Number(settings.redemption_value) || 0,
+                loyalty_program_enabled: Boolean(settings.enabled),
+                loyalty_already_settled: loyaltyAlreadySettled,
+                wallet_available_balance: walletBalance,
+                gift_vouchers: voucherResult.vouchers || [],
+                gift_voucher_load_error: Boolean(voucherResult.error)
+              }
+            : current);
+          setPaymentForm(current => ({
+            ...current,
+            loyalty_points_to_redeem: redeemPoints,
+            loyalty_wallet_credit: walletCredit,
+            loyalty_wallet_applied: walletApplied,
+            loyalty_redeem_selected: redeemPoints > 0,
+            wallet_balance_applied: 0,
+            gift_voucher_selected: requestedVoucherApplied > 0,
+            gift_voucher_applied: requestedVoucherApplied,
+            amount_paid: 0
+          }));
+        })
+        .catch(error => {
+          if (paymentLoyaltyLookupRef.current !== loyaltyLookupId) return;
+          console.error('Could not load loyalty and wallet balances for payment settlement:', error);
+          setPaymentModalVisit(current => current?.visit_id === visit.visit_id ? { ...current, loyalty_load_error: true } : current);
+        })
+        .finally(() => { if (paymentLoyaltyLookupRef.current === loyaltyLookupId) setIsLoadingLoyaltySettlement(false); });
+    }
   };
 
   useEffect(() => {
@@ -435,13 +513,22 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       const effectiveTotalBill = baseBill + upgradePrice;
 
       const manualAmountEntered = parseFloat(paymentForm.amount_paid) || 0;
-      const manualAmount = (Number(paymentModalVisit.amount_paid) || 0) + manualAmountEntered;
+      const loyaltyPointsToRedeem = Number(paymentForm.loyalty_points_to_redeem) || 0;
+      const loyaltyWalletApplied = Number(paymentForm.loyalty_wallet_applied) || 0;
+      const existingWalletApplied = Number(paymentForm.wallet_balance_applied) || 0;
+      const giftVoucherApplied = Number(paymentForm.gift_voucher_applied) || 0;
+      const selectedGiftVoucher = (paymentModalVisit.gift_vouchers || []).find(voucher => String(voucher.voucher_id) === String(paymentForm.gift_voucher_selected_id));
+      const manualAmount = (Number(paymentModalVisit.amount_paid) || 0) + manualAmountEntered + loyaltyWalletApplied + existingWalletApplied + giftVoucherApplied;
       const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
       const totalSettled = manualAmount + creditUsed;
       const method = paymentForm.payment_method || 'Cash';
+      const settlementNotes = String(paymentForm.notes || '').replace(/\[LOYALTY REDEMPTION REQUESTED:[^\]]*\]/ig, '').trim();
 
       const notes = [
-        paymentForm.notes,
+        settlementNotes,
+        loyaltyPointsToRedeem > 0 ? `[LOYALTY REDEMPTION SETTLED: ${loyaltyPointsToRedeem.toLocaleString('en-IN')} points; ${formatCurrency(Number(paymentForm.loyalty_wallet_credit) || 0)} wallet credit; ${formatCurrency(loyaltyWalletApplied)} applied to this bill]` : '',
+        existingWalletApplied > 0 ? `[CLIENT WALLET APPLIED: ${formatCurrency(existingWalletApplied)} to this bill]` : '',
+        giftVoucherApplied > 0 ? `[GIFT VOUCHER REDEEMED: ${selectedGiftVoucher?.voucher_code || ''} · ${formatCurrency(giftVoucherApplied)} applied to this visit]` : '',
         paymentForm.card_ref ? `Card Slip Ref: ${paymentForm.card_ref}` : '',
         pendingUpgradePlan ? `[MEMBERSHIP UPGRADE AT RECEPTION: ${pendingUpgradePlan.name} (${formatCurrency(pendingUpgradePlan.price)})]` : ''
       ].filter(Boolean).join(' • ');
@@ -451,7 +538,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       const autoBenefitStatus = (hasBenefitUsed || creditUsed > 0) ? 'Partially used' : 'Available';
 
       const finalStatus = totalSettled >= effectiveTotalBill ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
-      const finalMethod = (creditUsed > 0 && manualAmount > 0) ? `${method} + Member Credit` : (creditUsed > 0 ? 'Membership' : method);
+      // VISITS stores one payment method. Record the manual tender when present;
+      // non-cash credits and vouchers are tracked separately in their ledgers/notes.
+      const finalMethod = manualAmountEntered > 0
+        ? method
+        : creditUsed > 0
+          ? 'Membership'
+          : (loyaltyWalletApplied > 0 || existingWalletApplied > 0)
+            ? 'Wallet'
+            : giftVoucherApplied > 0
+              ? 'Gift Voucher'
+              : method;
 
       const patchPayload = {
         amount_paid: manualAmount,
@@ -459,6 +556,11 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         payment_status: finalStatus,
         notes: notes || undefined,
         membership_amount_used: creditUsed,
+        loyalty_points_redeemed: loyaltyPointsToRedeem,
+        wallet_amount_used: loyaltyWalletApplied,
+        existing_wallet_amount_used: existingWalletApplied,
+        gift_voucher_id: paymentForm.gift_voucher_selected ? Number(paymentForm.gift_voucher_selected_id) : null,
+        gift_voucher_amount_applied: giftVoucherApplied,
         membership_benefit_used: hasBenefitUsed ? benefitText : '',
         benefit_used_date: paymentForm.benefit_used_date || undefined,
         benefit_status: autoBenefitStatus
@@ -2149,7 +2251,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           const newTotal = paymentModalVisit.total_amount + plan.price;
                           setPaymentForm(prev => ({
                             ...prev,
-                            amount_paid: Math.max(0, newTotal - (Number(paymentModalVisit.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0))
+                            amount_paid: Math.min(Number(prev.amount_paid) || 0, Math.max(0, newTotal - (Number(paymentModalVisit.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0) - (Number(prev.loyalty_wallet_applied) || 0) - (Number(prev.wallet_balance_applied) || 0) - (Number(prev.gift_voucher_applied) || 0)))
                           }));
                         }}
                         style={{
@@ -2212,18 +2314,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
               : (isExistingMember ? defaultTierCost : 0);
 
             const creditUsed = parseFloat(paymentForm.membership_amount_used) || 0;
+            const loyaltyPointsToRedeem = Number(paymentForm.loyalty_points_to_redeem) || 0;
+            const loyaltyWalletCredit = Number(paymentForm.loyalty_wallet_credit) || 0;
+            const loyaltyWalletApplied = Number(paymentForm.loyalty_wallet_applied) || 0;
+            const walletBalanceApplied = Number(paymentForm.wallet_balance_applied) || 0;
+            const walletBalanceSelected = Boolean(paymentForm.wallet_balance_selected);
             const manualAmount = parseFloat(paymentForm.amount_paid) || 0;
             const baseBill = parseFloat(paymentModalVisit?.total_amount) || 0;
             const upgradeCost = pendingUpgradePlan ? (parseFloat(pendingUpgradePlan.price) || 0) : 0;
             const totalBill = baseBill + upgradeCost;
             const previouslyPaid = Number(paymentModalVisit?.amount_paid) || 0;
             const billRemainingBeforeCredit = Math.max(0, totalBill - previouslyPaid);
-            const remainingAfterCredit = Math.max(0, billRemainingBeforeCredit - creditUsed);
-            const balanceDueAfterSelection = Math.max(0, remainingAfterCredit - manualAmount);
-            const totalSettled = previouslyPaid + creditUsed + manualAmount;
-            const isFullySettled = totalSettled >= totalBill;
-            const settlementStatusLabel = isFullySettled ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
-            const settlementStatusClass = settlementStatusLabel === 'Paid' ? 'badge-paid' : settlementStatusLabel === 'Partially Paid' ? 'badge-partial' : 'badge-pending';
             const currentlyReservedCredits = ['Pending', 'Partially Paid'].includes(paymentModalVisit?.payment_status)
               ? (Number(paymentModalVisit?.membership_amount_used) || 0)
               : 0;
@@ -2239,6 +2340,32 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   service_name: service.service_name || service.service_name_snapshot,
                   price: service.price ?? service.price_snapshot
                 })) : []);
+            const visitCanUseClientBalance = !['paid', 'cancelled'].includes(String(paymentModalVisit?.payment_status || '').toLowerCase());
+            const availableGiftVouchers = (paymentModalVisit?.gift_vouchers || []).filter(voucher => {
+              if (!visitCanUseClientBalance || paymentModalVisit?.gift_voucher_already_settled) return false;
+              if (voucher.voucher_type !== 'service') return Number(voucher.remaining_balance) > 0;
+              const eligibleNames = (voucher.eligible_services || []).map(service => String(service.service_name || '').toLowerCase());
+              return billServiceItems.some(service => voucher.eligibility_mode === 'unrestricted' || eligibleNames.includes(String(service.service_name || '').toLowerCase()));
+            });
+            const giftVoucherSelected = Boolean(paymentForm.gift_voucher_selected);
+            const giftVoucherApplied = giftVoucherSelected ? Number(paymentForm.gift_voucher_applied) || 0 : 0;
+            const remainingAfterCredit = Math.max(0, billRemainingBeforeCredit - creditUsed - loyaltyWalletApplied - walletBalanceApplied - giftVoucherApplied);
+            const balanceDueAfterSelection = Math.max(0, remainingAfterCredit - manualAmount);
+            const totalSettled = previouslyPaid + creditUsed + loyaltyWalletApplied + walletBalanceApplied + giftVoucherApplied + manualAmount;
+            const isFullySettled = totalSettled >= totalBill;
+            const settlementStatusLabel = isFullySettled ? 'Paid' : (totalSettled > 0 ? 'Partially Paid' : 'Pending');
+            const settlementStatusClass = settlementStatusLabel === 'Paid' ? 'badge-paid' : settlementStatusLabel === 'Partially Paid' ? 'badge-partial' : 'badge-pending';
+            const getGiftVoucherAmount = (voucher, maxDue) => {
+              const balance = Math.max(0, Number(voucher?.remaining_balance) || 0);
+              if (voucher?.voucher_type !== 'service') return Math.min(balance, Math.max(0, maxDue));
+              const usesAllowed = Number(voucher.service_redemptions_allowed) || 1;
+              const usesLeft = Math.max(0, usesAllowed - (Number(voucher.service_redemptions_used) || 0));
+              const eligibleNames = (voucher.eligible_services || []).map(service => String(service.service_name || '').toLowerCase());
+              const matchingService = billServiceItems.find(service => voucher.eligibility_mode === 'unrestricted' || eligibleNames.includes(String(service.service_name || '').toLowerCase()));
+              if (!matchingService || usesLeft <= 0) return 0;
+              const serviceValue = usesLeft === 1 ? balance : (Number(voucher.original_value) || 0) / usesAllowed;
+              return Math.min(balance, Number(matchingService.price) || 0, serviceValue, Math.max(0, maxDue));
+            };
 
             let tierPerks = [];
             if (rawClientTier.toLowerCase().includes('lumiere')) {
@@ -2279,6 +2406,52 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
             }
 
             const hasBenefitSelected = paymentForm.membership_benefit_used && paymentForm.membership_benefit_used.trim() !== '' && paymentForm.membership_benefit_used !== 'None';
+            const availableLoyaltyPoints = Number(paymentModalVisit?.loyalty_available_points) || 0;
+            const availableWalletBalance = Number(paymentModalVisit?.wallet_available_balance) || 0;
+            const pointsToOffer = loyaltyPointsToRedeem > 0 ? loyaltyPointsToRedeem : availableLoyaltyPoints;
+            const loyaltyMinimumPoints = Number(paymentModalVisit?.loyalty_minimum_points) || 0;
+            const canRedeemLoyalty = Boolean(paymentModalVisit?.loyalty_program_enabled) &&
+              visitCanUseClientBalance &&
+              !paymentModalVisit?.loyalty_already_settled &&
+              availableLoyaltyPoints > 0 && availableLoyaltyPoints >= loyaltyMinimumPoints &&
+              Number(paymentModalVisit?.loyalty_redemption_value) > 0;
+            const canUseWallet = visitCanUseClientBalance && availableWalletBalance > 0;
+
+            const toggleLoyaltyRedemption = checked => {
+              const selectedPoints = checked
+                ? Math.min(availableLoyaltyPoints, Number(paymentModalVisit?.loyalty_request_points) || availableLoyaltyPoints)
+                : 0;
+              const conversionPoints = Number(paymentModalVisit?.loyalty_redemption_points) || 100;
+              const conversionValue = Number(paymentModalVisit?.loyalty_redemption_value) || 0;
+              const walletCredit = checked ? Math.round((selectedPoints / conversionPoints * conversionValue) * 100) / 100 : 0;
+              setPaymentForm(previous => {
+                const currentWalletApplied = Number(previous.wallet_balance_applied) || 0;
+                const remainingForWalletCredit = Math.max(0, billRemainingBeforeCredit - (Number(previous.membership_amount_used) || 0) - currentWalletApplied - (Number(previous.gift_voucher_applied) || 0));
+                const walletApplied = Math.min(walletCredit, remainingForWalletCredit);
+                return {
+                  ...previous,
+                  loyalty_redeem_selected: checked,
+                  loyalty_points_to_redeem: selectedPoints,
+                  loyalty_wallet_credit: walletCredit,
+                  loyalty_wallet_applied: walletApplied,
+                  amount_paid: Math.min(Number(previous.amount_paid) || 0, Math.max(0, billRemainingBeforeCredit - (Number(previous.membership_amount_used) || 0) - currentWalletApplied - walletApplied - (Number(previous.gift_voucher_applied) || 0)))
+                };
+              });
+            };
+
+            const toggleWalletBalance = checked => {
+              setPaymentForm(previous => {
+                const pointsWalletApplied = Number(previous.loyalty_wallet_applied) || 0;
+                const remainingForWallet = Math.max(0, billRemainingBeforeCredit - (Number(previous.membership_amount_used) || 0) - pointsWalletApplied - (Number(previous.gift_voucher_applied) || 0));
+                const walletApplied = checked ? Math.min(availableWalletBalance, remainingForWallet) : 0;
+                return {
+                  ...previous,
+                  wallet_balance_selected: checked,
+                  wallet_balance_applied: walletApplied,
+                  amount_paid: Math.min(Number(previous.amount_paid) || 0, Math.max(0, billRemainingBeforeCredit - (Number(previous.membership_amount_used) || 0) - pointsWalletApplied - walletApplied - (Number(previous.gift_voucher_applied) || 0)))
+                };
+              });
+            };
 
             return (
               <div className="card animate-fade-in" style={{
@@ -2302,7 +2475,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       Payment Settlement • {paymentModalVisit?.client_name || 'Client'}
                     </h3>
                     <p style={{ fontSize: '13px', lineHeight: 1.5, color: '#82766B', margin: 0, maxWidth: '430px' }}>
-                      Verify membership credits and collect any balance, then click <strong>Approve & Confirm</strong> to mark as Paid.
+                      Verify available credits and gift vouchers, collect any balance, then click <strong>Approve & Confirm</strong> to mark as Paid.
                     </p>
                   </div>
                   <button
@@ -2361,7 +2534,71 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Tax</span><span>{formatCurrency(paymentModalVisit.tax_amount || 0)}</span></div>
                       {Number(paymentModalVisit.amount_paid) > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Already paid</span><span>{formatCurrency(paymentModalVisit.amount_paid)}</span></div>}
                       {creditUsed > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Member credits applied</span><span>-{formatCurrency(creditUsed)}</span></div>}
+                      {isLoadingLoyaltySettlement && <div style={{ color: '#8C6228' }}>Checking eligible loyalty points and wallet balance…</div>}
+                      {loyaltyPointsToRedeem > 0 && <div style={{ display: 'grid', gap: 4, color: '#166534' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}><span>Loyalty redemption · {loyaltyPointsToRedeem.toLocaleString('en-IN')} points</span><span>+{formatCurrency(loyaltyWalletCredit)} wallet credit</span></div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontWeight: 700 }}><span>Applied to this bill</span><span>-{formatCurrency(loyaltyWalletApplied)}</span></div>
+                        {loyaltyWalletCredit > loyaltyWalletApplied && <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 11.5 }}><span>Remaining wallet balance after this bill</span><span>{formatCurrency(loyaltyWalletCredit - loyaltyWalletApplied)}</span></div>}
+                      </div>}
+                      {walletBalanceApplied > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534' }}><span>Existing wallet balance applied</span><span>-{formatCurrency(walletBalanceApplied)}</span></div>}
+                      {giftVoucherApplied > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#166534' }}><span>Gift voucher · {paymentModalVisit?.gift_vouchers?.find(voucher => String(voucher.voucher_id) === String(paymentForm.gift_voucher_selected_id))?.voucher_code}</span><span>-{formatCurrency(giftVoucherApplied)}</span></div>}
+                      {Number(paymentModalVisit.loyalty_request_points) > 0 && loyaltyPointsToRedeem === 0 && <div style={{ color: '#9A3412' }}>{paymentModalVisit.loyalty_load_error ? 'Could not verify the client’s loyalty balance. Please refresh before applying points.' : `Client requested ${Number(paymentModalVisit.loyalty_request_points).toLocaleString('en-IN')} points, but only ${Number(paymentModalVisit.loyalty_available_points || 0).toLocaleString('en-IN')} eligible points are available. Verify before confirming.`}</div>}
+                      {paymentModalVisit.loyalty_load_error && <div style={{ color: '#9A3412' }}>Could not verify loyalty or wallet balances. Refresh before applying either balance.</div>}
                       <div style={{ display: 'flex', justifyContent: 'space-between', color: '#302721', fontWeight: 800 }}><span>Balance due after selected payments</span><span>{formatCurrency(balanceDueAfterSelection)}</span></div>
+                    </div>
+                  </div>
+                )}
+
+                {!isLoadingLoyaltySettlement && !paymentModalVisit?.loyalty_load_error && (canRedeemLoyalty || canUseWallet || availableGiftVouchers.length > 0 || paymentModalVisit?.gift_voucher_load_error) && (
+                  <div style={{ marginBottom: '18px', padding: '14px 16px', border: '1px solid #E8D6B9', borderRadius: '13px', background: '#FFFCF7' }}>
+                    <div style={{ color: '#8B6334', fontSize: 10, fontWeight: 800, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: 10 }}>Client rewards & payments</div>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                      {paymentModalVisit?.gift_voucher_load_error && <div style={{ color: '#9A3412', fontSize: 12 }}>Could not verify gift vouchers. Refresh before confirming payment.</div>}
+                      {canRedeemLoyalty && (
+                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, color: '#51463D', fontSize: 12.5, lineHeight: 1.45, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={loyaltyPointsToRedeem > 0}
+                            onChange={event => toggleLoyaltyRedemption(event.target.checked)}
+                            style={{ marginTop: 2, accentColor: '#A8793C' }}
+                          />
+                          <span>
+                            Redeem <strong>{pointsToOffer.toLocaleString('en-IN')} loyalty points</strong> for <strong>{formatCurrency(Math.round((pointsToOffer / (Number(paymentModalVisit?.loyalty_redemption_points) || 100) * Number(paymentModalVisit?.loyalty_redemption_value || 0)) * 100) / 100)} wallet credit</strong>
+                            <span style={{ display: 'block', color: '#817569', fontSize: 11.5 }}>Apply available credit to this bill; any unused credit stays in the client wallet.</span>
+                          </span>
+                        </label>
+                      )}
+                      {canUseWallet && (
+                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 9, color: '#51463D', fontSize: 12.5, lineHeight: 1.45, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={walletBalanceSelected}
+                            onChange={event => toggleWalletBalance(event.target.checked)}
+                            style={{ marginTop: 2, accentColor: '#A8793C' }}
+                          />
+                          <span>Use existing wallet balance of <strong>{formatCurrency(availableWalletBalance)}</strong> toward this bill</span>
+                        </label>
+                      )}
+                      {availableGiftVouchers.map(voucher => {
+                        const isSelected = giftVoucherSelected && String(paymentForm.gift_voucher_selected_id) === String(voucher.voucher_id);
+                        const voucherValue = isSelected ? giftVoucherApplied : getGiftVoucherAmount(voucher, Math.max(0, billRemainingBeforeCredit - creditUsed - loyaltyWalletApplied - walletBalanceApplied));
+                        return <label key={voucher.voucher_id} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, color: '#51463D', fontSize: 12.5, lineHeight: 1.45, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={isSelected} disabled={voucherValue <= 0} onChange={event => {
+                            const oldApplied = giftVoucherSelected ? Number(paymentForm.gift_voucher_applied) || 0 : 0;
+                            const newApplied = event.target.checked ? getGiftVoucherAmount(voucher, Math.max(0, billRemainingBeforeCredit - creditUsed - loyaltyWalletApplied - walletBalanceApplied)) : 0;
+                            setPaymentForm(previous => ({
+                              ...previous,
+                              gift_voucher_selected: event.target.checked,
+                              gift_voucher_selected_id: event.target.checked ? String(voucher.voucher_id) : '',
+                              gift_voucher_applied: newApplied,
+                              amount_paid: Math.min(Number(previous.amount_paid) || 0, Math.max(0, billRemainingBeforeCredit - creditUsed - loyaltyWalletApplied - walletBalanceApplied - newApplied))
+                            }));
+                          }} style={{ marginTop: 2, accentColor: '#A8793C' }} />
+                          <span><strong>{voucher.title}</strong> · {voucher.voucher_code} ({voucher.voucher_type === 'amount' ? `${formatCurrency(voucher.remaining_balance)} remaining` : 'Eligible service voucher'})
+                            {voucherValue > 0 && <span style={{ display: 'block', color: '#166534', fontSize: 11.5 }}>Apply {formatCurrency(voucherValue)} to this bill</span>}
+                          </span>
+                        </label>;
+                      })}
                     </div>
                   </div>
                 )}
@@ -2414,7 +2651,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                           setPendingUpgradePlan(null);
                           setPaymentForm(prev => ({
                             ...prev,
-                            amount_paid: Math.max(0, baseBill - (Number(paymentModalVisit?.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0))
+                            amount_paid: Math.min(Number(prev.amount_paid) || 0, Math.max(0, baseBill - (Number(paymentModalVisit?.amount_paid) || 0) - (Number(prev.membership_amount_used) || 0) - (Number(prev.loyalty_wallet_applied) || 0) - (Number(prev.wallet_balance_applied) || 0) - (Number(prev.gift_voucher_applied) || 0)))
                           }));
                         }}
                         style={{
@@ -2575,18 +2812,19 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                                 setPaymentForm(prev => ({
                                   ...prev,
                                   membership_amount_used: 0,
-                                  amount_paid: billRemainingBeforeCredit,
+                                  amount_paid: Math.min(Number(prev.amount_paid) || 0, Math.max(0, billRemainingBeforeCredit - (Number(prev.loyalty_wallet_applied) || 0) - (Number(prev.wallet_balance_applied) || 0) - (Number(prev.gift_voucher_applied) || 0))),
                                   payment_method: prev.payment_method === 'Membership' ? 'UPI' : prev.payment_method
                                 }));
                                 setSettlementTab('manual');
                               } else {
                                 // Apply credits
-                                const maxCredit = Math.min(billRemainingBeforeCredit, availableForThisVisit);
-                                const remainingManual = Math.max(0, billRemainingBeforeCredit - maxCredit);
+                                const selectedVoucherAmount = Number(paymentForm.gift_voucher_applied) || 0;
+                                const maxCredit = Math.min(availableForThisVisit, Math.max(0, billRemainingBeforeCredit - loyaltyWalletApplied - walletBalanceApplied - selectedVoucherAmount));
+                                const remainingManual = Math.max(0, billRemainingBeforeCredit - maxCredit - loyaltyWalletApplied - walletBalanceApplied - selectedVoucherAmount);
                                 setPaymentForm(prev => ({
                                   ...prev,
                                   membership_amount_used: maxCredit,
-                                  amount_paid: remainingManual,
+                                  amount_paid: Math.min(Number(prev.amount_paid) || 0, remainingManual),
                                   payment_method: remainingManual === 0 ? 'Membership' : (prev.payment_method || 'UPI'),
                                   notes: prev.notes || '[MEMBERSHIP SETTLEMENT: Auto Credits Applied]'
                                 }));
@@ -2779,7 +3017,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                 )}
 
                 {/* IF 100% COVERED BY MEMBERSHIP CREDITS: ONLY SHOW CREDITS SETTLEMENT */}
-                {isExistingMember && isUsingCredits && remainingAfterCredit === 0 ? (
+                {isExistingMember && isUsingCredits && remainingAfterCredit === 0 && loyaltyWalletApplied === 0 && walletBalanceApplied === 0 ? (
                   <div style={{
                     background: '#F0FDF4',
                     border: '1.5px solid #BBF7D0',
@@ -2809,7 +3047,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                         setPaymentForm(prev => ({
                           ...prev,
                           membership_amount_used: 0,
-                          amount_paid: billRemainingBeforeCredit,
+                          amount_paid: Math.min(Number(prev.amount_paid) || 0, Math.max(0, billRemainingBeforeCredit - (Number(prev.loyalty_wallet_applied) || 0) - (Number(prev.wallet_balance_applied) || 0) - (Number(prev.gift_voucher_applied) || 0))),
                           payment_method: 'UPI'
                         }));
                         setSettlementTab('manual');
@@ -2913,9 +3151,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       <input
                         type="number"
                         min="0"
-                        max={totalBill}
+                        max={remainingAfterCredit}
                         value={paymentForm.amount_paid}
-                        onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.max(0, parseFloat(e.target.value) || 0) }))}
+                        onChange={(e) => setPaymentForm(prev => ({ ...prev, amount_paid: Math.min(remainingAfterCredit, Math.max(0, parseFloat(e.target.value) || 0)) }))}
                         style={{
                           width: '100%',
                           padding: '14px 16px',
@@ -2993,6 +3231,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   <div>
                     <span style={{ color: '#4B5563' }}>Settlement: </span>
                     {creditUsed > 0 && <strong style={{ color: '#166534' }}>💎 {formatCurrency(creditUsed)} + </strong>}
+                    {loyaltyWalletApplied > 0 && <strong style={{ color: '#166534' }}>⭐ {formatCurrency(loyaltyWalletApplied)} loyalty wallet + </strong>}
+                    {walletBalanceApplied > 0 && <strong style={{ color: '#166534' }}>👛 {formatCurrency(walletBalanceApplied)} wallet balance + </strong>}
+                    {giftVoucherApplied > 0 && <strong style={{ color: '#166534' }}>🎁 {formatCurrency(giftVoucherApplied)} gift voucher + </strong>}
                     <strong>💳 {formatCurrency(manualAmount)}</strong>
                     {pendingUpgradePlan && (
                       <span style={{ fontSize: '10.5px', color: '#B88B4A', marginLeft: '6px', fontWeight: '700' }}>
@@ -3050,7 +3291,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                     <button
                       type="button"
                       onClick={handleSavePayment}
-                      disabled={isSavingPayment}
+                      disabled={isSavingPayment || isLoadingLoyaltySettlement}
                       className="btn-primary"
                       style={{
                         padding: '11px 18px',
@@ -3065,7 +3306,9 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                       }}
                     >
                       <CheckCircle2 size={15} />
-                      {isSavingPayment
+                      {isLoadingLoyaltySettlement
+                        ? 'Checking Client Balances...'
+                        : isSavingPayment
                         ? 'Saving...'
                         : (isUsingCredits && manualAmount === 0
                             ? 'Approve & Settle from Credits'

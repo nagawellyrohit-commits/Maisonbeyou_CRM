@@ -9,7 +9,6 @@ import {
   EyeOff, 
   Check, 
   ShieldCheck, 
-  Sparkles, 
   AlertCircle, 
   RotateCw,
   Crown,
@@ -19,6 +18,13 @@ import { setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
 import { brandingCssVariables, DEFAULT_LOCATION_BRANDING } from '../utils/branding';
 import brandLogoImg from '../assets/brand-logo.png';
 import loginBg from '../assets/login-bg.jpg';
+
+function getMsg91Phone(identifier) {
+  const digits = String(identifier || '').replace(/\D/g, '');
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 12 && digits.startsWith('91')) return digits;
+  return null;
+}
 
 async function readApiResponse(res, action) {
   const body = await res.text();
@@ -47,12 +53,10 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
   const [showOtp, setShowOtp] = useState(true);
   const [otpSent, setOtpSent] = useState(false);
   const [otpCooldown, setOtpCooldown] = useState(0);
-  const [maskedContact, setMaskedContact] = useState('');
-  const [resolvedAccountName, setResolvedAccountName] = useState('');
   const [resolvedBranchName, setResolvedBranchName] = useState('');
   const [resolvedRoleLabel, setResolvedRoleLabel] = useState('');
-  const [demoOtp, setDemoOtp] = useState('');
   const [sendingOtp, setSendingOtp] = useState(false);
+  const [msg91Phone, setMsg91Phone] = useState('');
 
   // General states
   const [loading, setLoading] = useState(false);
@@ -60,6 +64,15 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
   const [successMsg, setSuccessMsg] = useState('');
 
   const otpInputRef = useRef(null);
+  const selectedLoginAccount = detectedAccount?.type === 'multiple'
+    ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)
+    : detectedAccount?.user;
+  const getOtpRequestPayload = () => ({
+    identifier: identifier.trim(),
+    role: selectedLoginAccount?.role,
+    location_id: selectedLoginAccount?.location_id,
+    account_user_id: selectedAccountId
+  });
   const selectedDetectedUser = detectedAccount?.type === 'multiple'
     ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)
     : null;
@@ -135,51 +148,66 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
     setSuccessMsg('');
 
     const trimmed = identifier.trim();
-    if (!trimmed) {
-      setError('Please enter your registered mobile number');
+    const phone = getMsg91Phone(trimmed);
+    if (!phone) {
+      setError('Please enter a valid registered Indian mobile number');
+      return;
+    }
+    if (isDetecting) {
+      setError('Please wait while we check the registered account.');
+      return;
+    }
+    if (!detectedAccount?.found) {
+      setError('No active account is registered with this mobile number.');
       return;
     }
 
     setSendingOtp(true);
     try {
-      const payload = {
-        identifier: trimmed,
-        role: detectedAccount?.type === 'multiple'
-          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.role
-          : detectedAccount?.user?.role,
-        location_id: detectedAccount?.type === 'multiple'
-          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.location_id
-          : detectedAccount?.user?.location_id,
-        account_user_id: selectedAccountId
-      };
-
-      const res = await fetch('/api/auth/send-login-otp', {
+      const res = await fetch('/api/auth/otp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(getOtpRequestPayload())
       });
-
       const data = await readApiResponse(res, 'OTP request');
-      if (!res.ok) {
-        throw new Error(data.error || 'No active account found. Please check your mobile number.');
-      }
+      if (!res.ok) throw new Error(data.error || 'Unable to send OTP.');
 
       setOtpSent(true);
-      setMaskedContact(data.maskedContact || '');
-      setResolvedAccountName(data.userName || '');
-      setResolvedBranchName(data.locationName || '');
+      setMsg91Phone(phone);
+      setResolvedBranchName(selectedLoginAccount?.branch_name || detectedAccount.branchName || '');
       setResolvedRoleLabel(
-        data.userRole === 'master_admin' ? 'Maison Master Admin' :
-        data.userRole === 'admin' ? 'Branch Main Admin' :
-        data.userRole === 'reception' ? 'Manager' : 'Visitor'
+        selectedLoginAccount?.role === 'master_admin' ? 'Maison Master Admin' :
+        selectedLoginAccount?.role === 'admin' ? 'Branch Main Admin' :
+        selectedLoginAccount?.role === 'reception' ? 'Manager' : 'Visitor'
       );
-      setDemoOtp(data.demoOtp || '');
       setOtpCooldown(60);
-      setSuccessMsg(data.smsSent
-        ? `Verification code sent to registered mobile: ${data.maskedContact || 'Authorized contact'}`
-        : `SMS delivery is not configured. Use the demo code shown below to continue.`);
+      setSuccessMsg(data.demoOtp
+        ? `Demo OTP: ${data.demoOtp} (valid for 5 minutes)`
+        : `Verification code sent to registered mobile: ${phone.slice(0, 2)}******${phone.slice(-3)}`);
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSendingOtp(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setError('');
+    setSendingOtp(true);
+    try {
+      const res = await fetch('/api/auth/otp/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getOtpRequestPayload())
+      });
+      const data = await readApiResponse(res, 'OTP resend');
+      if (!res.ok) throw new Error(data.error || 'Unable to resend OTP.');
+      setOtpCooldown(60);
+      setSuccessMsg(data.demoOtp
+        ? `Demo OTP: ${data.demoOtp} (valid for 5 minutes)`
+        : `A new verification code was sent to ${msg91Phone.slice(0, 2)}******${msg91Phone.slice(-3)}.`);
+    } catch (err) {
+      setError(err.message || 'Unable to resend OTP. Please try again.');
     } finally {
       setSendingOtp(false);
     }
@@ -196,29 +224,17 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
       return;
     }
 
-    if (!otp.trim()) {
+    if (!otp.trim() || otp.trim().length !== 6) {
       setError('Please enter the 6-digit verification code');
       return;
     }
 
     setLoading(true);
     try {
-      const payload = {
-        identifier: identifier.trim(),
-        otp: otp.trim(),
-        role: detectedAccount?.type === 'multiple'
-          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.role
-          : detectedAccount?.user?.role,
-        location_id: detectedAccount?.type === 'multiple'
-          ? detectedAccount.accounts?.find(account => account.user_id === selectedAccountId)?.location_id
-          : detectedAccount?.user?.location_id,
-        account_user_id: selectedAccountId
-      };
-
-      const res = await fetch('/api/auth/login-otp', {
+      const res = await fetch('/api/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...getOtpRequestPayload(), otp: otp.trim() })
       });
 
       const data = await readApiResponse(res, 'Login verification');
@@ -564,7 +580,7 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                   ) : (
                     <button
                       type="button"
-                      onClick={handleSendOtp}
+                      onClick={handleResendOtp}
                       disabled={sendingOtp}
                       style={{
                         background: 'none',
@@ -630,45 +646,6 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                   </button>
                 </div>
 
-                {/* Demo Auto-Fill Badge */}
-                {demoOtp && (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    background: '#FAF3E3',
-                    border: '1px dashed #DAC493',
-                    padding: '6px 10px',
-                    borderRadius: '8px',
-                    fontSize: '11.5px',
-                    color: '#8C6228',
-                    marginTop: '8px'
-                  }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <Sparkles size={13} color="#B88B4A" />
-                      <span>Demo Code: <strong>{demoOtp}</strong></span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOtp(demoOtp);
-                        setError('');
-                      }}
-                      style={{
-                        background: '#9F7335',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        fontSize: '10.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Auto Fill
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
           )}

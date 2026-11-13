@@ -5,11 +5,14 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
+import PDFDocument from 'pdfkit';
+import nodemailer from 'nodemailer';
 import { PNG } from 'pngjs';
 import { randomBytes, createHash } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import db, { initDatabase, recordAuditLog, generateLocationCode, ensureTeamMasterOptions } from './db.js';
 import { registerGiftVoucherRoutes } from './gift-vouchers.js';
+import { sendMsg91Otp, verifyMsg91Otp, resendMsg91Otp } from './msg91.js';
 import {
   calculateNextDueDate,
   formatSessionMessage,
@@ -430,6 +433,7 @@ export function authenticateToken(req, res, next) {
     const accessProfile = getUserPermissions(dbUser.user_id);
     req.user = {
       ...dbUser,
+      client_id: Number(decodedUser.client_id) || null,
       original_role: decodedUser.original_role || dbUser.role,
       ...accessProfile
     };
@@ -500,9 +504,6 @@ export function authorizeRoles(...allowedRoles) {
 // ==================== AUTH ROUTES ====================
 // In-memory store for OTP reset requests: userId -> { otp, expiresAt, email, phone }
 const passwordResetStore = new Map();
-// In-memory store for OTP login requests: userId -> { otp, expiresAt, identifier }
-const loginOtpStore = new Map();
-
 const DEFAULT_LOCATION_BRANDING = {
   brand_name: '',
   dashboard_back_label: 'Back',
@@ -1216,7 +1217,38 @@ function resolveSelectedLoginAccount(identifier, role, locationId, accountUserId
   const storedDigits = String(user.phone || '').replace(/\D/g, '');
   const phoneMatch = digits.length >= 7 && storedDigits && (digits === storedDigits || digits.endsWith(storedDigits) || storedDigits.endsWith(digits));
   const emailMatch = rawIdentifier.includes('@') && rawIdentifier.toLowerCase() === String(user.email || '').toLowerCase();
-  return phoneMatch || emailMatch ? user : null;
+  const clientLoginMatch = user.role === 'visitor' && Boolean(findClientForLogin(rawIdentifier, user.location_id));
+  return phoneMatch || emailMatch || clientLoginMatch ? user : null;
+}
+
+function normalizeLoginPhone(value) {
+  let phoneDigits = String(value || '').replace(/\D/g, '');
+  if (phoneDigits.startsWith('00')) phoneDigits = phoneDigits.slice(2);
+  if (phoneDigits.startsWith('91') && phoneDigits.length > 10) phoneDigits = phoneDigits.slice(-10);
+  else if (phoneDigits.startsWith('0') && phoneDigits.length > 10) phoneDigits = phoneDigits.slice(1);
+  return phoneDigits;
+}
+
+function findClientForLogin(identifier, locationId = null) {
+  const raw = String(identifier || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  const email = raw.toLowerCase();
+  const rows = locationId
+    ? db.prepare('SELECT * FROM CLIENTS WHERE location_id = ?').all(locationId)
+    : db.prepare('SELECT * FROM CLIENTS').all();
+  const matches = rows.filter(client => {
+    if (raw.includes('@')) {
+      return [client.email, client.primary_login_email].some(value => String(value || '').trim().toLowerCase() === email);
+    }
+    if (digits.length < 7) return false;
+    return [client.phone, client.primary_login_phone].some(value => normalizeLoginPhone(value) === normalizeLoginPhone(raw));
+  });
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function resolveClientIdForLogin(identifier, user) {
+  if (user?.role !== 'visitor' || !user.location_id) return null;
+  return Number(findClientForLogin(identifier, user.location_id)?.client_id) || null;
 }
 
 // Detect account by phone number or identifier (Auto-detection API)
@@ -1252,6 +1284,33 @@ app.post('/api/auth/detect-account', (req, res) => {
             roleSubtitle: 'Executive Control • All Studios & Headquarters',
             branchName: 'Headquarters & Global Network',
             isMasterAdmin: true
+          });
+        }
+      }
+
+      // A client's registered phone should resolve to the visitor account at their own branch,
+      // even when the same number is also used by a staff account at another location.
+      const matchedClient = findClientForLogin(rawInput);
+      if (matchedClient) {
+        const visitorAccounts = db.prepare(`SELECT user_id, name, email, phone, designation, role, location_id
+          FROM USERS WHERE location_id = ? AND role = 'visitor' AND active = 1 ORDER BY user_id`).all(matchedClient.location_id);
+        const clientName = `${matchedClient.name || ''} ${matchedClient.surname || ''}`.trim().toLowerCase();
+        const clientPhone = normalizeLoginPhone(matchedClient.primary_login_phone || matchedClient.phone);
+        const visitorAccount = visitorAccounts.find(account => `${account.name || ''}`.trim().toLowerCase() === clientName)
+          || visitorAccounts.find(account => normalizeLoginPhone(account.phone) === clientPhone)
+          || visitorAccounts[0];
+        if (visitorAccount) {
+          const location = db.prepare('SELECT name, code, city, branding_config FROM LOCATIONS WHERE location_id = ?').get(matchedClient.location_id);
+          return res.json({
+            found: true,
+            type: 'single',
+            user: { ...visitorAccount, name: matchedClient.name, phone: matchedClient.primary_login_phone || matchedClient.phone, email: matchedClient.primary_login_email || matchedClient.email },
+            roleLabel: 'Visitor',
+            roleSubtitle: 'Client Visitor Portal',
+            branchName: location?.name || 'Studio Branch',
+            branchCode: location?.code,
+            branding: location ? parseLocationBranding(location.branding_config, location.name) : null,
+            isMasterAdmin: false
           });
         }
       }
@@ -1361,128 +1420,185 @@ app.post('/api/auth/detect-account', (req, res) => {
   }
 });
 
-// Send OTP for direct Login
-app.post('/api/auth/send-login-otp', async (req, res) => {
+function createLoginSession(identifier, user) {
   try {
-    const { identifier, role, location_id, account_user_id } = req.body;
-    if ((!identifier || !identifier.trim()) && !location_id) {
-      return res.status(400).json({ error: 'Please enter your registered mobile number' });
+    db.prepare(`
+      INSERT INTO AUDIT_LOGS (user_id, action, target_type, target_id, details)
+      VALUES (?, 'LOGIN_OTP', 'USERS', ?, 'User signed in via MSG91 OTP verification')
+    `).run(user.user_id, user.user_id);
+  } catch (error) {}
+
+  const loginClientId = resolveClientIdForLogin(identifier, user);
+  const token = jwt.sign({
+    user_id: user.user_id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    client_id: loginClientId,
+    role: user.role,
+    original_role: user.role,
+    location_id: user.location_id
+  }, JWT_SECRET, { expiresIn: '24h' });
+
+  const location = user.location_id
+    ? db.prepare('SELECT location_id, name, code, type, city, state, status FROM LOCATIONS WHERE location_id = ?').get(user.location_id)
+    : null;
+
+  return {
+    token,
+    user: {
+      user_id: user.user_id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      designation: user.designation,
+      role: user.role,
+      original_role: user.role,
+      location_id: user.location_id,
+      ...getUserPermissions(user.user_id)
+    },
+    location
+  };
+}
+
+const OTP_RATE_WINDOW_MS = 15 * 60 * 1000;
+const otpRateWindows = new Map();
+const otpResendTimes = new Map();
+const demoLoginOtps = new Map();
+const DEMO_LOGIN_OTP_TTL_MS = 5 * 60 * 1000;
+
+function isDemoOtpEnabled() {
+  return String(process.env.OTP_DEMO_MODE || '').toLowerCase() === 'true';
+}
+
+function issueDemoLoginOtp(mobile) {
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  demoLoginOtps.set(mobile, { otp, expiresAt: Date.now() + DEMO_LOGIN_OTP_TTL_MS });
+  return otp;
+}
+
+function normalizeIndianOtpMobile(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  const local = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+  if (!/^[6-9]\d{9}$/.test(local)) return null;
+  return `91${local}`;
+}
+
+function takeOtpRateLimit(req, mobile, action, limit, res) {
+  const now = Date.now();
+  const keys = [`${action}:ip:${req.ip}`, `${action}:mobile:${mobile}`];
+  const current = keys.map(key => {
+    const entry = otpRateWindows.get(key);
+    return { key, entry: entry && now - entry.startedAt < OTP_RATE_WINDOW_MS ? entry : { startedAt: now, count: 0 } };
+  });
+  const blocked = current.find(({ entry }) => entry.count >= limit);
+  if (blocked) {
+    const retryAfter = Math.max(1, Math.ceil((blocked.entry.startedAt + OTP_RATE_WINDOW_MS - now) / 1000));
+    res.set('Retry-After', String(retryAfter));
+    res.status(429).json({ error: 'Too many OTP requests. Please try again later.' });
+    return false;
+  }
+  current.forEach(({ key, entry }) => otpRateWindows.set(key, { ...entry, count: entry.count + 1 }));
+  if (otpRateWindows.size > 5000) {
+    for (const [key, entry] of otpRateWindows) {
+      if (now - entry.startedAt >= OTP_RATE_WINDOW_MS) otpRateWindows.delete(key);
     }
+  }
+  return true;
+}
 
-    const user = resolveSelectedLoginAccount(identifier, role, location_id, account_user_id);
-    if (!user) {
-      return res.status(404).json({ error: 'No active account found with this mobile number. Please check or contact studio support.' });
+function getOtpLoginContext(req, res) {
+  const identifier = String(req.body.identifier || req.body.mobile || '').trim();
+  const mobile = normalizeIndianOtpMobile(identifier);
+  if (!mobile) {
+    res.status(400).json({ error: 'Enter a valid registered Indian mobile number.' });
+    return null;
+  }
+  const { role, location_id, account_user_id } = req.body;
+  const user = resolveSelectedLoginAccount(identifier, role, location_id, account_user_id);
+  if (!user) {
+    res.status(404).json({ error: 'No active account is registered with this mobile number.' });
+    return null;
+  }
+  return { identifier, mobile, user };
+}
+
+app.post('/api/auth/otp/send', async (req, res) => {
+  const context = getOtpLoginContext(req, res);
+  if (!context || !takeOtpRateLimit(req, context.mobile, 'send', 5, res)) return;
+  if (isDemoOtpEnabled()) {
+    const demoOtp = issueDemoLoginOtp(context.mobile);
+    otpResendTimes.set(context.mobile, Date.now());
+    return res.json({ success: true, message: 'Demo OTP generated.', demoOtp });
+  }
+  try {
+    const result = await sendMsg91Otp(context.mobile);
+    if (String(result.type || '').toLowerCase() !== 'success') {
+      return res.status(502).json({ error: 'MSG91 could not send the OTP. Please try again.' });
     }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-
-    loginOtpStore.set(user.user_id, {
-      otp,
-      expiresAt,
-      identifier: (identifier || '').trim()
-    });
-
-    const maskedEmail = user.email ? user.email.replace(/^(.)(.*)(.@.*)$/, (_, a, b, c) => a + '***' + c) : null;
-    const maskedPhone = user.phone ? user.phone.slice(0, 4) + '****' + user.phone.slice(-3) : null;
-
-    let locationName = 'Headquarters & Global Network';
-    if (user.location_id) {
-      const loc = db.prepare('SELECT name FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
-      if (loc) locationName = loc.name;
-    }
-
-    const smsDelivery = await dispatchSmsViaGateway(
-      user.phone,
-      otp,
-      user.name,
-      `Your Maison BeYou login OTP is ${otp}. Valid for 10 minutes. Do not share this code.`
-    );
-
-    res.json({
-      success: true,
-      message: smsDelivery.sent ? 'OTP sent to registered mobile' : 'SMS delivery is not configured; use the demo code',
-      maskedContact: maskedPhone || maskedEmail,
-      smsSent: smsDelivery.sent,
-      demoOtp: smsDelivery.sent ? null : otp,
-      userId: user.user_id,
-      userRole: user.role,
-      userName: user.name,
-      locationId: user.location_id,
-      locationName
-    });
+    otpResendTimes.set(context.mobile, Date.now());
+    return res.json({ success: true, message: 'OTP sent to your registered mobile number.' });
   } catch (error) {
-    console.error('Send login OTP error:', error);
-    res.status(500).json({ error: 'Failed to send login OTP' });
+    if (error.status === 503) return res.status(503).json({ error: error.message });
+    console.error('MSG91 send OTP error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to send OTP.' });
   }
 });
 
-// Verify OTP & Sign In
-app.post('/api/auth/login-otp', (req, res) => {
+app.post('/api/auth/otp/resend', async (req, res) => {
+  const context = getOtpLoginContext(req, res);
+  if (!context || !takeOtpRateLimit(req, context.mobile, 'resend', 3, res)) return;
+  const lastSentAt = otpResendTimes.get(context.mobile) || 0;
+  const waitMs = 60 * 1000 - (Date.now() - lastSentAt);
+  if (!lastSentAt || waitMs > 0) {
+    const waitSeconds = lastSentAt ? Math.ceil(waitMs / 1000) : 60;
+    res.set('Retry-After', String(waitSeconds));
+    return res.status(429).json({ error: `Please wait ${waitSeconds} seconds before requesting another OTP.` });
+  }
+  if (isDemoOtpEnabled()) {
+    const demoOtp = issueDemoLoginOtp(context.mobile);
+    otpResendTimes.set(context.mobile, Date.now());
+    return res.json({ success: true, message: 'Demo OTP generated.', demoOtp });
+  }
   try {
-    const { identifier, otp, role, location_id, account_user_id } = req.body;
-    if (!otp) {
-      return res.status(400).json({ error: 'OTP code is required' });
-    }
-
-    const user = resolveSelectedLoginAccount(identifier, role, location_id, account_user_id);
-    if (!user) {
-      return res.status(404).json({ error: 'Studio account not found' });
-    }
-
-    const otpData = loginOtpStore.get(user.user_id);
-    const isValidOtp = (otpData && otpData.otp === otp.trim() && Date.now() <= otpData.expiresAt) || otp.trim() === '784920';
-
-    if (!isValidOtp) {
-      return res.status(401).json({ error: 'Invalid or expired OTP code. Please request a new code.' });
-    }
-
-    loginOtpStore.delete(user.user_id);
-
-    try {
-      db.prepare(`
-        INSERT INTO AUDIT_LOGS (user_id, action, target_type, target_id, details)
-        VALUES (?, 'LOGIN_OTP', 'USERS', ?, 'User signed in via OTP verification')
-      `).run(user.user_id, user.user_id);
-    } catch (e) {}
-
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        original_role: user.role,
-        location_id: user.location_id
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
-
-    let location = null;
-    if (user.location_id) {
-      location = db.prepare('SELECT location_id, name, code, type, city, state, status FROM LOCATIONS WHERE location_id = ?').get(user.location_id);
-    }
-
-    res.json({
-      token,
-      user: {
-        user_id: user.user_id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        designation: user.designation,
-        role: user.role,
-        original_role: user.role,
-        location_id: user.location_id,
-        ...getUserPermissions(user.user_id)
-      },
-      location
-    });
+    const result = await resendMsg91Otp(context.mobile);
+    otpResendTimes.set(context.mobile, Date.now());
+    return res.json({ success: true, message: 'A new OTP has been sent.' });
   } catch (error) {
-    console.error('OTP login error:', error);
-    res.status(500).json({ error: 'Server error during OTP login' });
+    if (error.status === 503) return res.status(503).json({ error: error.message });
+    console.error('MSG91 resend OTP error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to resend OTP.' });
+  }
+});
+
+app.post('/api/auth/otp/verify', async (req, res) => {
+  const context = getOtpLoginContext(req, res);
+  if (!context || !takeOtpRateLimit(req, context.mobile, 'verify', 10, res)) return;
+  const otp = String(req.body.otp || '').trim();
+  const expectedLength = Number(process.env.MSG91_OTP_LENGTH || 6);
+  if (!new RegExp(`^\\d{${expectedLength}}$`).test(otp)) {
+    return res.status(400).json({ error: `Enter the ${expectedLength}-digit verification code.` });
+  }
+  if (isDemoOtpEnabled()) {
+    const issued = demoLoginOtps.get(context.mobile);
+    if (!issued || issued.otp !== otp || Date.now() > issued.expiresAt) {
+      return res.status(401).json({ error: 'Incorrect or expired demo OTP. Please request a new code.' });
+    }
+    demoLoginOtps.delete(context.mobile);
+    otpResendTimes.delete(context.mobile);
+    return res.json(createLoginSession(context.identifier, context.user));
+  }
+  try {
+    const result = await verifyMsg91Otp(context.mobile, otp);
+    if (!result.httpOk || String(result.type || '').toLowerCase() !== 'success') {
+      return res.status(401).json({ error: 'Incorrect or expired OTP. Please check the code and try again.' });
+    }
+    otpResendTimes.delete(context.mobile);
+    return res.json(createLoginSession(context.identifier, context.user));
+  } catch (error) {
+    if (error.status === 503) return res.status(503).json({ error: error.message });
+    console.error('MSG91 verify OTP error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to verify OTP.' });
   }
 });
 
@@ -1504,12 +1620,14 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(401).json({ error: 'Invalid Login ID / Phone or password' });
     }
 
+    const loginClientId = resolveClientIdForLogin(rawInput, user);
     const token = jwt.sign(
       {
         user_id: user.user_id,
         name: user.name,
         email: user.email,
         phone: user.phone,
+        client_id: loginClientId,
         role: user.role,
         original_role: user.role,
         location_id: user.location_id
@@ -2276,7 +2394,7 @@ app.get('/api/locations/:id', authenticateToken, (req, res) => {
 });
 
 // Create new location with complete KYC - Master Admin only
-app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), async (req, res) => {
   try {
     const {
       name, type, code, status, manager_name, daily_income, return_tier,
@@ -2614,6 +2732,24 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), (r
       const info = stakeholderAdminInsert.run(accountName, accountEmail, accountPhone, designation, bcrypt.hashSync(randomBytes(32).toString('hex'), 10), newLocId);
       provisionedDirectors.push({ user_id: info.lastInsertRowid, name: accountName, email: accountEmail, phone: accountPhone, role_type: designation, role: 'admin', location_id: newLocId });
     }
+
+    // Branch creation must not wait for external email/WhatsApp providers. These
+    // deliveries are recorded in the notification outbox and can complete after
+    // the branch has been returned to the caller.
+    setImmediate(() => {
+      Promise.all(provisionedDirectors.map(owner => dispatchContactNotification({
+        locationId: newLocId,
+        entityType: 'location-owner',
+        entityId: owner.user_id,
+        eventKey: 'branch-access-created',
+        name: owner.name,
+        phone: owner.phone,
+        email: owner.email,
+        subject: `${savedLocation.name} is registered with Maison BeYou`,
+        message: `Hello ${owner.name},\n\n${savedLocation.name} (${savedLocation.code}) is registered as a Maison BeYou ${cleanType}. Your ${owner.role_type} login is ready. Sign in to Maison BeYou using your registered mobile number and verify with the one-time code to access your branch CRM.`,
+        whatsappTemplateParams: [owner.name, savedLocation.name, savedLocation.code, owner.role_type]
+      }))).catch(error => console.error('Branch access notification error:', error));
+    });
 
     // Record audit log
     recordAuditLog({
@@ -2956,7 +3092,7 @@ app.get('/api/locations/:id/admin-users', authenticateToken, (req, res) => {
 });
 
 // Create/Update admin logins for a specific location (Master Admin only)
-app.post('/api/locations/:id/admin-users', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+app.post('/api/locations/:id/admin-users', authenticateToken, authorizeRoles('master_admin'), async (req, res) => {
   try {
     const locId = Number(req.params.id);
     const location = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(locId);
@@ -3049,6 +3185,19 @@ app.post('/api/locations/:id/admin-users', authenticateToken, authorizeRoles('ma
       return res.status(400).json({ error: errors.join(', ') });
     }
 
+    await Promise.all(createdAdmins.map(admin => dispatchContactNotification({
+      locationId: locId,
+      entityType: 'branch-admin',
+      entityId: admin.user_id,
+      eventKey: 'admin-access-created',
+      name: admin.name,
+      phone: admin.phone,
+      email: admin.email,
+      subject: `Your Maison BeYou branch access is ready`,
+      message: `Hello ${admin.name},\n\nYour Branch Admin access for ${location.name} (${location.code}) is ready. Sign in using your registered mobile number and verify with the one-time code to access your branch CRM.`,
+      whatsappTemplateParams: [admin.name, location.name, location.code]
+    })));
+
     res.status(201).json({
       success: true,
       message: `${createdAdmins.length} admin account(s) configured successfully`,
@@ -3115,7 +3264,7 @@ app.get('/api/admin/branch-users', authenticateToken, (req, res) => {
 });
 
 // Branch Admin can create Manager/Visitor accounts only in their own branch.
-app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin', 'admin'), (req, res) => {
+app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_admin', 'admin'), async (req, res) => {
   try {
     const { name, email, phone, role, location_id } = req.body;
     const targetLocId = req.user.role === 'master_admin' ? Number(location_id) : Number(req.locationId);
@@ -3169,6 +3318,18 @@ app.post('/api/admin/branch-users', authenticateToken, authorizeRoles('master_ad
     });
 
     const createdUser = serializeBranchUser(db.prepare('SELECT user_id, name, email, phone, designation, team_role, role, active, location_id, created_at FROM USERS WHERE user_id = ?').get(newUserId));
+    await dispatchContactNotification({
+      locationId: targetLocId,
+      entityType: 'branch-user',
+      entityId: newUserId,
+      eventKey: 'branch-user-access-created',
+      name: cleanName,
+      phone: cleanPhone,
+      email: cleanEmail,
+      subject: `Your ${cleanDesignation} access is ready`,
+      message: `Hello ${cleanName},\n\nYour ${cleanDesignation} access for ${loc.name} (${loc.code}) is ready. Sign in to Maison BeYou using your registered mobile number and verify with the one-time code.${role === 'visitor' ? '\n\nYour Visitor Portal is ready for service selection.' : ''}`,
+      whatsappTemplateParams: [cleanName, cleanDesignation, loc.name, loc.code]
+    });
     res.status(201).json({ success: true, user: createdUser });
   } catch (error) {
     console.error('Create branch user error:', error);
@@ -3891,6 +4052,13 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
       ORDER BY v.visit_id DESC
     `).all(todayLocal, todayUTC, todayLocal, todayUTC, todayLocal, todayUTC, ...locFilterParams);
 
+    const clientsWithPriorVisits = new Set(db.prepare(`
+      SELECT DISTINCT client_id FROM VISITS
+      WHERE location_id = ?
+        AND date(visit_date) < date(?)
+        AND lower(COALESCE(payment_status, '')) != 'cancelled'
+    `).all(targetLocId, todayLocal).map(row => Number(row.client_id)));
+
     let totalRevenue = 0;
     let pendingBalance = 0;
     let newClientsCount = 0;
@@ -3898,6 +4066,8 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
     let membershipRevenue = 0;
     let membershipVisitsCount = 0;
     const clientIdsToday = new Set();
+    const clientIdsClassified = new Set();
+    const clientTypeById = new Map();
 
     for (const v of visitsToday) {
       totalRevenue += (v.amount_paid || 0);
@@ -3914,11 +4084,14 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
         membershipVisitsCount++;
       }
 
-      // If client's first visit is today, consider them new
-      if (v.first_visit_date === todayLocal || v.first_visit_date === todayUTC) {
-        newClientsCount++;
-      } else {
-        regularClientsCount++;
+      // Historical visits take precedence over a stale first_visit_date value.
+      if (!clientIdsClassified.has(v.client_id)) {
+        const isNewClient = !clientsWithPriorVisits.has(Number(v.client_id)) &&
+          (v.first_visit_date === todayLocal || v.first_visit_date === todayUTC);
+        clientTypeById.set(v.client_id, isNewClient);
+        clientIdsClassified.add(v.client_id);
+        if (isNewClient) newClientsCount++;
+        else regularClientsCount++;
       }
     }
 
@@ -3965,7 +4138,7 @@ app.get('/api/dashboard/today', authenticateToken, authorizeRoles('admin', 'rece
 
       return {
         ...v,
-        is_new_client: v.first_visit_date === todayLocal || v.first_visit_date === todayUTC,
+        is_new_client: clientTypeById.get(v.client_id) ?? false,
         services_count: services.length,
         service_names: serviceNames,
         staff_summary: staffNames,
@@ -4035,7 +4208,7 @@ export function computeClientActivity(client) {
 }
 
 // Search clients by phone or name (isolated by active location) with 90-day Active/Inactive status
-app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'reception', 'visitor'), (req, res) => {
+app.get('/api/clients/search', authenticateToken, authorizeRoles('admin', 'reception', 'visitor', 'master_admin'), (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     const statusFilter = (req.query.status || '').trim().toLowerCase(); // 'active', 'inactive', or ''
@@ -5327,12 +5500,13 @@ app.patch('/api/treatment-sessions/:id/status', authenticateToken, authorizeRole
   }
 });
 
-// Update client notes/info (Admin only)
-app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
+// Update client notes/info (Admins, or a visitor editing their own profile)
+app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin', 'reception', 'visitor'), (req, res) => {
   try {
     const {
       name, email, notes, status, surname, gender, marital_status, dob, anniversary_date,
-      phone, mobile_numbers, email_ids, primary_login_phone, primary_login_email
+      phone, mobile_numbers, email_ids, primary_login_phone, primary_login_email,
+      address_line1, address_line2, pincode, city, state
     } = req.body;
     const clientId = req.params.id;
 
@@ -5347,6 +5521,17 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
     }
     if (Number(existingClient.location_id) !== Number(activeLocId)) {
       return res.status(403).json({ error: 'Access denied: Client belongs to another studio location' });
+    }
+
+    if (req.user.role === 'visitor') {
+      const account = db.prepare('SELECT phone, email FROM USERS WHERE user_id = ?').get(req.user.user_id) || {};
+      const normalizePhone = value => String(value || '').replace(/\D/g, '').slice(-10);
+      const accountPhone = normalizePhone(account.phone || req.user.phone);
+      const clientPhones = [existingClient.phone, existingClient.primary_login_phone].map(normalizePhone).filter(Boolean);
+      const accountEmail = String(account.email || req.user.email || '').trim().toLowerCase();
+      const clientEmails = [existingClient.email, existingClient.primary_login_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+      const ownsClient = (accountPhone && clientPhones.includes(accountPhone)) || (accountEmail && clientEmails.includes(accountEmail));
+      if (!ownsClient) return res.status(403).json({ error: 'You can only edit your own client profile.' });
     }
 
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -5389,11 +5574,17 @@ app.put('/api/clients/:id', authenticateToken, authorizeRoles('admin'), (req, re
           email_ids = COALESCE(?, email_ids),
           primary_login_phone = COALESCE(?, primary_login_phone),
           primary_login_email = COALESCE(?, primary_login_email),
+          address_line1 = COALESCE(?, address_line1),
+          address_line2 = COALESCE(?, address_line2),
+          pincode = COALESCE(?, pincode),
+          city = COALESCE(?, city),
+          state = COALESCE(?, state),
           updated_at = CURRENT_TIMESTAMP
       WHERE client_id = ?
     `).run(
-      name, email, notes, status, surname, gender, marital_status, dob, anniversary_date,
-      cleanPhone, mobListJson, emailListJson, cleanPrimaryPhone, cleanPrimaryEmail, clientId
+      name, email, req.user.role === 'admin' ? notes : null, req.user.role === 'admin' ? status : null, surname, gender, marital_status, dob, anniversary_date,
+      cleanPhone, mobListJson, emailListJson, cleanPrimaryPhone, cleanPrimaryEmail,
+      address_line1, address_line2, pincode, city, state, clientId
     );
 
     // Synchronize linked visitor user account in USERS
@@ -5554,7 +5745,7 @@ app.put('/api/clients/:id/membership-validity', authenticateToken, (req, res) =>
 });
 
 // Register New Client directly
-app.post('/api/clients', authenticateToken, (req, res) => {
+app.post('/api/clients', authenticateToken, async (req, res) => {
   try {
     const {
       name,
@@ -5701,6 +5892,20 @@ app.post('/api/clients', authenticateToken, (req, res) => {
     } catch (e) {}
 
     const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(newClientId);
+    const location = db.prepare('SELECT name, code FROM LOCATIONS WHERE location_id = ?').get(targetLocId);
+    const welcomeMessage = `Welcome to Maison BeYou, ${client.name}! Thank you for registering with us. Your client registration number is ${client.reg_no || regNo}. Please log in to the Visitor Portal using your registered mobile number, choose the services you would like for today, and submit your request. Our reception team will assist you with the next steps.`;
+    await dispatchContactNotification({
+      locationId: targetLocId,
+      entityType: 'client',
+      entityId: newClientId,
+      eventKey: 'client-welcome',
+      name: `${client.name || ''} ${client.surname || ''}`.trim(),
+      phone: client.primary_login_phone || client.phone,
+      email: client.primary_login_email || client.email,
+      subject: `Welcome to Maison BeYou${location?.name ? ` — ${location.name}` : ''}`,
+      message: welcomeMessage,
+      whatsappTemplateParams: [`${client.name || ''} ${client.surname || ''}`.trim(), client.reg_no || regNo, location?.name || 'your branch']
+    });
     res.status(201).json({
       success: true,
       message: 'Client successfully registered',
@@ -7261,8 +7466,10 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
     const auth = process.env.TWILIO_AUTH_TOKEN;
     const twilioFrom = process.env.TWILIO_WHATSAPP_FROM || (String(process.env.TWILIO_PHONE_NUMBER || '').startsWith('whatsapp:') ? process.env.TWILIO_PHONE_NUMBER : '');
     if (sid && auth && twilioFrom) {
-      const contentSid = process.env.TWILIO_WHATSAPP_CONTENT_SID;
-      if (options.requireApprovedTemplate && !contentSid) throw new Error('An approved Twilio WhatsApp template is required for automatic voucher delivery.');
+      const contentSid = options.skipTemplate ? '' : (options.contentSid || (options.requireApprovedTemplate
+        ? process.env.TWILIO_NOTIFICATION_CONTENT_SID
+        : process.env.TWILIO_WHATSAPP_CONTENT_SID));
+      if (options.requireApprovedTemplate && !contentSid) throw new Error('An approved Twilio WhatsApp notification template is required.');
       const params = new URLSearchParams({ To: `whatsapp:${recipient}`, From: twilioFrom });
       if (options.statusCallbackUrl) params.set('StatusCallback', options.statusCallbackUrl);
       if (contentSid) {
@@ -7289,11 +7496,35 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
     const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (accessToken && phoneNumberId) {
-      const templateName = process.env.WHATSAPP_TEMPLATE_NAME;
-      if (options.requireApprovedTemplate && !templateName) throw new Error('An approved Meta WhatsApp template is required for automatic voucher delivery.');
+      const templateName = options.skipTemplate ? '' : (options.templateName || (options.requireApprovedTemplate
+        ? process.env.WHATSAPP_NOTIFICATION_TEMPLATE_NAME
+        : process.env.WHATSAPP_TEMPLATE_NAME));
+      if (options.requireApprovedTemplate && !templateName) throw new Error('An approved Meta WhatsApp notification template is required.');
       const version = process.env.WHATSAPP_API_VERSION || 'v21.0';
       const templateComponents = [];
-      if (mediaUrl && /^(1|true|yes)$/i.test(String(process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA || ''))) {
+      let uploadedDocumentId = options.mediaId || null;
+      if (options.mediaBuffer && options.mediaType === 'document' && !uploadedDocumentId) {
+        const form = new FormData();
+        const filename = options.mediaFilename || 'Maison-BeYou-Invoice.pdf';
+        form.append('messaging_product', 'whatsapp');
+        form.append('type', options.mediaMimeType || 'application/pdf');
+        form.append('file', new Blob([options.mediaBuffer], { type: options.mediaMimeType || 'application/pdf' }), filename);
+        const uploadResponse = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          body: form,
+          signal: AbortSignal.timeout(20000)
+        });
+        const uploadResult = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok || !uploadResult.id) throw new Error(uploadResult.error?.message || `WhatsApp document upload returned ${uploadResponse.status}`);
+        uploadedDocumentId = uploadResult.id;
+      }
+      if (options.requireApprovedTemplate && options.mediaType === 'document' && (mediaUrl || uploadedDocumentId)) {
+        const document = uploadedDocumentId
+          ? { id: uploadedDocumentId, filename: options.mediaFilename || 'Maison-BeYou-Invoice.pdf' }
+          : { link: mediaUrl, filename: options.mediaFilename || 'Maison-BeYou-Invoice.pdf' };
+        templateComponents.push({ type: 'header', parameters: [{ type: 'document', document }] });
+      } else if (mediaUrl && /^(1|true|yes)$/i.test(String(process.env.WHATSAPP_TEMPLATE_HEADER_MEDIA || ''))) {
         templateComponents.push({ type: 'header', parameters: [{ type: 'image', image: { link: mediaUrl } }] });
       }
       if (options.templateParams?.length) templateComponents.push({
@@ -7308,6 +7539,10 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
           to: recipient.replace('+', ''),
           ...(templateName ? {
             type: 'template', template: { name: templateName, language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'en' }, components: templateComponents }
+          } : (uploadedDocumentId || (mediaUrl && options.mediaType === 'document')) ? {
+            type: 'document', document: uploadedDocumentId
+              ? { id: uploadedDocumentId, filename: options.mediaFilename || 'Maison-BeYou-Invoice.pdf', caption: message }
+              : { link: mediaUrl, filename: options.mediaFilename || 'Maison-BeYou-Invoice.pdf', caption: message }
           } : mediaUrl ? {
             type: 'image', image: { link: mediaUrl, caption: message }
           } : {
@@ -7325,47 +7560,82 @@ async function deliverVisitNotification(channel, recipient, message, subject, ht
   }
 
   if (channel === 'email') {
-    const resendKey = process.env.RESEND_API_KEY;
-    const resendFrom = process.env.RESEND_FROM_EMAIL;
-    if (resendKey && resendFrom) {
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: resendFrom, to: [recipient], subject, html, text: message, ...(attachments.length ? { attachments: attachments.map(file => ({ filename: file.filename, content: Buffer.from(file.content).toString('base64') })) } : {}) }),
-        signal: AbortSignal.timeout(12000)
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = Number(process.env.SMTP_PORT) || 587;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPassword = process.env.SMTP_PASSWORD;
+    const smtpFrom = process.env.SMTP_FROM_EMAIL || smtpUser;
+    if (smtpHost && smtpUser && smtpPassword && smtpFrom) {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: /^(1|true|yes)$/i.test(String(process.env.SMTP_SECURE || '')) || smtpPort === 465,
+        auth: { user: smtpUser, pass: smtpPassword },
+        connectionTimeout: 12000,
+        greetingTimeout: 12000,
+        socketTimeout: 20000
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.message || `Resend returned ${response.status}`);
-      return { provider: 'Resend', provider_reference: data.id || null };
+      const result = await transporter.sendMail({
+        from: smtpFrom,
+        to: recipient,
+        subject,
+        text: message,
+        html,
+        attachments: attachments.map(file => ({ filename: file.filename, content: file.content, contentType: file.contentType }))
+      });
+      return { provider: 'Mailbox SMTP', provider_reference: result.messageId || null };
     }
 
-    const sendGridKey = process.env.SENDGRID_API_KEY;
-    const sendGridFrom = process.env.SENDGRID_FROM_EMAIL;
-    if (sendGridKey && sendGridFrom) {
-      const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${sendGridKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email: recipient }] }],
-          from: { email: sendGridFrom },
-          subject,
-          content: [{ type: 'text/plain', value: message }, { type: 'text/html', value: html }],
-          ...(attachments.length ? { attachments: attachments.map(file => ({ filename: file.filename, type: file.contentType, disposition: 'attachment', content: Buffer.from(file.content).toString('base64') })) } : {})
-        }),
-        signal: AbortSignal.timeout(12000)
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.errors?.[0]?.message || `SendGrid returned ${response.status}`);
-      return { provider: 'SendGrid', provider_reference: response.headers.get('x-message-id') || null };
-    }
-
-    throw new Error('Email is not configured. Set Resend or SendGrid credentials.');
+    throw new Error('Direct email is not configured. Set your mailbox SMTP host, port, username, and password.');
   }
 
   throw new Error(`Unsupported notification channel: ${channel}`);
 }
 
-async function sendVisitNotification({ visitId, locationId, eventKey, channel, recipient, message, subject, html }) {
+const WHATSAPP_NOTIFICATION_TEMPLATES = {
+  'branch-access-created': {
+    key: 'BRANCH_ACCESS',
+    name: 'maison_beyou_branch_access',
+    body: 'Hi {{1}}, your branch {{2}} ({{3}}) is registered with Maison BeYou. Your {{4}} login is ready. Sign in with your registered mobile number and OTP.'
+  },
+  'admin-access-created': {
+    key: 'ADMIN_ACCESS',
+    name: 'maison_beyou_admin_access',
+    body: 'Hi {{1}}, your Branch Admin access for {{2}} ({{3}}) is ready. Sign in with your registered mobile number and OTP.'
+  },
+  'branch-user-access-created': {
+    key: 'BRANCH_USER_ACCESS',
+    name: 'maison_beyou_branch_user_access',
+    body: 'Hi {{1}}, your {{2}} access for {{3}} ({{4}}) is ready. Sign in with your registered mobile number and OTP.'
+  },
+  'client-welcome': {
+    key: 'CLIENT_WELCOME',
+    name: 'maison_beyou_client_welcome',
+    body: 'Welcome to Maison BeYou, {{1}}. Your client registration number is {{2}}. Please sign in to the Visitor Portal for {{3}}, choose your services for today, and submit your request.'
+  },
+  appointment: {
+    key: 'APPOINTMENT',
+    name: 'maison_beyou_appointment_confirmed',
+    body: 'Hi {{1}}, your appointment at {{2}} is confirmed for {{3}} at {{4}}. Services: {{5}}. Your specialist: {{6}}. We look forward to welcoming you.'
+  },
+  payment: {
+    key: 'PAYMENT',
+    name: 'maison_beyou_payment_received',
+    body: 'Hi {{1}}, we received {{2}} for invoice {{3}} at {{4}}. Services: {{5}}. Thank you for choosing Maison BeYou.'
+  }
+};
+
+function resolveWhatsAppTemplate(eventKey, params = []) {
+  const template = WHATSAPP_NOTIFICATION_TEMPLATES[eventKey];
+  if (!template) return {};
+  return {
+    templateName: process.env[`WHATSAPP_TEMPLATE_${template.key}_NAME`] || template.name,
+    contentSid: process.env[`TWILIO_WHATSAPP_${template.key}_CONTENT_SID`] || process.env.TWILIO_NOTIFICATION_CONTENT_SID || '',
+    templateParams: params.map(value => String(value ?? ''))
+  };
+}
+
+async function sendVisitNotification({ visitId, locationId, eventKey, channel, recipient, message, subject, html, attachments = [], whatsappTemplateKey = '', whatsappTemplateParams = [] }) {
   if (!recipient) return;
   ensureVisitNotificationOutbox();
   db.prepare(`
@@ -7387,7 +7657,11 @@ async function sendVisitNotification({ visitId, locationId, eventKey, channel, r
   if (!claim.changes) return;
 
   try {
-    const result = await deliverVisitNotification(channel, recipient, message, subject, html);
+    const templateSpec = channel === 'whatsapp' ? resolveWhatsAppTemplate(whatsappTemplateKey, whatsappTemplateParams) : {};
+    const result = await deliverVisitNotification(channel, recipient, message, subject, html, attachments, null, {
+      requireApprovedTemplate: channel === 'whatsapp',
+      ...templateSpec
+    });
     db.prepare(`
       UPDATE VISIT_NOTIFICATION_OUTBOX
       SET status = 'sent', provider = ?, sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, error = NULL
@@ -7405,11 +7679,120 @@ async function sendVisitNotification({ visitId, locationId, eventKey, channel, r
   }
 }
 
+function ensureBusinessNotificationOutbox() {
+  db.exec(`CREATE TABLE IF NOT EXISTS BUSINESS_NOTIFICATION_OUTBOX (
+    notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    location_id INTEGER,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    event_key TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    provider TEXT,
+    error TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    sent_at DATETIME,
+    UNIQUE (entity_type, entity_id, event_key, channel, recipient)
+  )`);
+}
+
+async function sendBusinessNotification({ locationId = null, entityType, entityId, eventKey, channel, recipient, message, subject, html, whatsappTemplateKey = '', whatsappTemplateParams = [] }) {
+  if (!recipient) return;
+  ensureBusinessNotificationOutbox();
+  db.prepare(`INSERT OR IGNORE INTO BUSINESS_NOTIFICATION_OUTBOX
+    (location_id, entity_type, entity_id, event_key, channel, recipient, status)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending')`).run(locationId, entityType, String(entityId), eventKey, channel, recipient);
+  const row = db.prepare(`SELECT * FROM BUSINESS_NOTIFICATION_OUTBOX
+    WHERE entity_type = ? AND entity_id = ? AND event_key = ? AND channel = ? AND recipient = ?`)
+    .get(entityType, String(entityId), eventKey, channel, recipient);
+  if (!row || row.status === 'sent' || row.status === 'sending') return;
+  const claimed = db.prepare(`UPDATE BUSINESS_NOTIFICATION_OUTBOX
+    SET status = 'sending', attempts = attempts + 1, error = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE notification_id = ? AND status NOT IN ('sent', 'sending')`).run(row.notification_id);
+  if (!claimed.changes) return;
+  try {
+    const templateSpec = channel === 'whatsapp' ? resolveWhatsAppTemplate(whatsappTemplateKey || eventKey, whatsappTemplateParams) : {};
+    const result = await deliverVisitNotification(channel, recipient, message, subject, html, [], null, {
+      requireApprovedTemplate: channel === 'whatsapp',
+      ...templateSpec
+    });
+    db.prepare(`UPDATE BUSINESS_NOTIFICATION_OUTBOX SET status = 'sent', provider = ?, sent_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP, error = NULL WHERE notification_id = ?`).run(result.provider, row.notification_id);
+  } catch (error) {
+    const details = String(error?.message || 'Delivery failed').slice(0, 500);
+    const status = /not configured|required/.test(details) ? 'not_configured' : 'failed';
+    db.prepare(`UPDATE BUSINESS_NOTIFICATION_OUTBOX SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE notification_id = ?`).run(status, details, row.notification_id);
+    console.error(`[Business notification ${channel}] ${entityType}=${entityId}: ${details}`);
+  }
+}
+
+async function dispatchContactNotification({ locationId, entityType, entityId, eventKey, name, phone, email, message, subject, whatsappTemplateKey = eventKey, whatsappTemplateParams = [] }) {
+  const safeName = escapeHtml(name || 'there');
+  const html = `<p>Hi ${safeName},</p><p>${escapeHtml(message).replace(/\n/g, '<br>')}</p><p>Maison BeYou</p>`;
+  const tasks = [];
+  const waPhone = normalizeNotificationPhone(phone);
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (waPhone) tasks.push(sendBusinessNotification({ locationId, entityType, entityId, eventKey, channel: 'whatsapp', recipient: waPhone, message, subject, html, whatsappTemplateKey, whatsappTemplateParams }));
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) tasks.push(sendBusinessNotification({ locationId, entityType, entityId, eventKey, channel: 'email', recipient: cleanEmail, message, subject, html }));
+  await Promise.allSettled(tasks);
+}
+
+function createVisitInvoiceAttachment(visit, services, branchName, clientName) {
+  return new Promise((resolve, reject) => {
+    try {
+      const document = new PDFDocument({ size: 'A4', margin: 48 });
+      const chunks = [];
+      document.on('data', chunk => chunks.push(chunk));
+      document.on('end', () => resolve({
+        filename: `INV-MBY-${String(visit.visit_id).padStart(5, '0')}.pdf`,
+        contentType: 'application/pdf',
+        content: Buffer.concat(chunks)
+      }));
+      document.on('error', reject);
+
+      const invoiceNumber = `INV-MBY-${String(visit.visit_id).padStart(5, '0')}`;
+      const money = amount => `INR ${(Number(amount) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      document.fillColor('#B88B4A').fontSize(22).font('Helvetica-Bold').text('MAISON BEYOU');
+      document.moveDown(0.3).fillColor('#292524').fontSize(17).text('PAYMENT INVOICE');
+      document.moveDown(0.5).fontSize(10).font('Helvetica')
+        .text(`Invoice: ${invoiceNumber}`)
+        .text(`Branch: ${branchName || 'Maison BeYou'}`)
+        .text(`Client: ${clientName || 'Client'}`)
+        .text(`Date: ${String(visit.visit_date || '').slice(0, 10)}`)
+        .moveDown(1);
+      document.font('Helvetica-Bold').text('Service', 48, document.y, { continued: true, width: 340 });
+      document.text('Amount', { align: 'right' });
+      document.moveTo(48, document.y + 4).lineTo(547, document.y + 4).strokeColor('#DAC493').stroke();
+      document.moveDown(0.5).font('Helvetica');
+      for (const service of services) {
+        document.text(String(service.service_name || 'Service').slice(0, 70), 48, document.y, { continued: true, width: 340 });
+        document.text(money(service.price_snapshot), { align: 'right' });
+      }
+      document.moveDown(1).font('Helvetica-Bold').text(`Subtotal: ${money(visit.subtotal)}`, { align: 'right' });
+      if (Number(visit.discount_amount) > 0) document.font('Helvetica').text(`Discount: -${money(visit.discount_amount)}`, { align: 'right' });
+      if (Number(visit.tax_amount) > 0) document.font('Helvetica').text(`Tax: ${money(visit.tax_amount)}`, { align: 'right' });
+      document.font('Helvetica-Bold').text(`Total: ${money(visit.total_amount)}`, { align: 'right' });
+      document.font('Helvetica').text(`Paid: ${money(visit.amount_paid)}`, { align: 'right' });
+      if (Number(visit.balance) > 0) document.text(`Balance due: ${money(visit.balance)}`, { align: 'right' });
+      document.moveDown(0.8).font('Helvetica').fontSize(9).fillColor('#78716C')
+        .text(`Payment method: ${visit.payment_method || 'Recorded at reception'}`)
+        .text('Thank you for choosing Maison BeYou.');
+      document.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
 async function dispatchVisitNotifications(visitId) {
   try {
     ensureVisitNotificationOutbox();
     const visit = db.prepare(`
-      SELECT v.*, c.name AS client_name, c.surname AS client_surname, c.phone AS client_phone,
+      SELECT v.*, c.name AS client_name, c.surname AS client_surname, c.reg_no AS client_reg_no, c.phone AS client_phone,
              c.primary_login_phone, c.email AS client_email, c.email_ids AS client_email_ids,
              c.primary_login_email, l.name AS location_name
       FROM VISITS v
@@ -7420,7 +7803,7 @@ async function dispatchVisitNotifications(visitId) {
     if (!visit) return;
 
     const services = db.prepare(`
-      SELECT vs.service_name_snapshot AS service_name, vs.staff_id, s.name AS staff_name
+      SELECT vs.service_name_snapshot AS service_name, vs.price_snapshot, vs.staff_id, s.name AS staff_name
       FROM VISIT_SERVICES vs
       LEFT JOIN STAFF s ON s.staff_id = vs.staff_id
       WHERE vs.visit_id = ?
@@ -7456,16 +7839,31 @@ async function dispatchVisitNotifications(visitId) {
       const message = `Hi ${greeting}, your appointment at ${branch} is confirmed.\n${commonDetails}\nWe look forward to welcoming you!`;
       const subject = `Appointment confirmed at ${branch}`;
       const html = `<p>Hi ${escape(greeting)},</p><p>Your appointment at <strong>${escape(branch)}</strong> is confirmed.</p><ul><li><strong>Date:</strong> ${escape(date)}</li><li><strong>Time:</strong> ${escape(appointmentTime)}</li><li><strong>Services:</strong> ${escape(serviceList)}</li>${staff.length ? `<li><strong>Your specialist${staff.length > 1 ? 's' : ''}:</strong> ${escape(staff.join(', '))}</li>` : ''}<li><strong>Visit reference:</strong> ${escape(visit.visit_id)}</li></ul><p>We look forward to welcoming you!</p>`;
-      notifications.push(...recipients.map(item => sendVisitNotification({ visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address, message, subject, html })));
+      notifications.push(...recipients.map(item => sendVisitNotification({
+        visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address, message, subject, html,
+        whatsappTemplateKey: 'appointment',
+        whatsappTemplateParams: [greeting, branch, date, appointmentTime, serviceList, staff.join(', ') || 'Our team']
+      })));
     }
 
     if (String(visit.payment_status).toLowerCase() === 'paid') {
       const eventKey = 'payment-paid';
+      const invoiceNumber = `INV-MBY-${String(visit.visit_id).padStart(5, '0')}`;
+      const clientName = `${visit.client_name || ''} ${visit.client_surname || ''}`.trim();
       const amount = `₹${Number(visit.total_amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-      const message = `Thank you for your payment, ${greeting}! We hope you enjoy your service.\n${commonDetails}\nAmount received: ${amount}`;
-      const subject = `Thank you for your payment — ${branch}`;
-      const html = `<p>Thank you for your payment, ${escape(greeting)}!</p><p>We hope you enjoy your service.</p><ul><li><strong>Branch:</strong> ${escape(branch)}</li><li><strong>Date:</strong> ${escape(date)}</li>${appointmentTime ? `<li><strong>Time:</strong> ${escape(appointmentTime)}</li>` : ''}<li><strong>Services:</strong> ${escape(serviceList)}</li>${staff.length ? `<li><strong>Your specialist${staff.length > 1 ? 's' : ''}:</strong> ${escape(staff.join(', '))}</li>` : ''}<li><strong>Amount received:</strong> ${escape(amount)}</li><li><strong>Visit reference:</strong> ${escape(visit.visit_id)}</li></ul>`;
-      notifications.push(...recipients.map(item => sendVisitNotification({ visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address, message, subject, html })));
+      const paidAmount = `₹${Number(visit.amount_paid || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const message = `Thank you for your payment, ${greeting}! Your invoice ${invoiceNumber} is ready.\n${commonDetails}\nTotal bill: ${amount}\nAmount received: ${paidAmount}\nThank you for choosing Maison BeYou.`;
+      const subject = `Invoice ${invoiceNumber} and payment confirmation — ${branch}`;
+      const html = `<p>Thank you for your payment, ${escape(greeting)}!</p><p>Your invoice <strong>${escape(invoiceNumber)}</strong> is ready. We hope you enjoyed your service.</p><ul><li><strong>Branch:</strong> ${escape(branch)}</li><li><strong>Client:</strong> ${escape(clientName)}</li><li><strong>Date:</strong> ${escape(date)}</li>${appointmentTime ? `<li><strong>Time:</strong> ${escape(appointmentTime)}</li>` : ''}<li><strong>Services:</strong> ${escape(serviceList)}</li>${staff.length ? `<li><strong>Your specialist${staff.length > 1 ? 's' : ''}:</strong> ${escape(staff.join(', '))}</li>` : ''}<li><strong>Subtotal:</strong> ₹${Number(visit.subtotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>${Number(visit.discount_amount) > 0 ? `<li><strong>Discount:</strong> ₹${Number(visit.discount_amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>` : ''}${Number(visit.tax_amount) > 0 ? `<li><strong>Tax:</strong> ₹${Number(visit.tax_amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</li>` : ''}<li><strong>Total bill:</strong> ${escape(amount)}</li><li><strong>Amount received:</strong> ${escape(paidAmount)}</li><li><strong>Payment method:</strong> ${escape(visit.payment_method || 'Reception')}</li></ul><p>The itemized invoice is attached.</p><p>Thank you for choosing Maison BeYou.</p>`;
+      let invoiceAttachments = [];
+      try { invoiceAttachments = [await createVisitInvoiceAttachment(visit, services, branch, clientName)]; }
+      catch (error) { console.error(`Invoice PDF generation failed for visit=${visitId}:`, error.message); }
+      notifications.push(...recipients.map(item => sendVisitNotification({
+        visitId, locationId: visit.location_id, eventKey, channel: item.channel, recipient: item.address,
+        message, subject, html, attachments: item.channel === 'email' ? invoiceAttachments : [],
+        whatsappTemplateKey: 'payment',
+        whatsappTemplateParams: [greeting, paidAmount, invoiceNumber, branch, serviceList]
+      })));
     }
 
     await Promise.allSettled(notifications);
@@ -7473,6 +7871,97 @@ async function dispatchVisitNotifications(visitId) {
     console.error(`Could not dispatch visit notifications for ${visitId}:`, error);
   }
 }
+
+app.post('/api/visits/:id/send-invoice', authenticateToken, authorizeRoles('admin', 'master_admin', 'reception', 'visitor', 'staff'), async (req, res) => {
+  try {
+    const visitId = Number(req.params.id);
+    const channel = String(req.body?.channel || '').toLowerCase();
+    if (!Number.isInteger(visitId) || !['email', 'whatsapp'].includes(channel)) {
+      return res.status(400).json({ error: 'Choose email or WhatsApp to send the invoice.' });
+    }
+    if (!req.locationId) return res.status(400).json({ error: 'Branch context is required to send this invoice.' });
+
+    const visit = db.prepare(`
+      SELECT v.*, c.name AS client_name, c.surname AS client_surname, c.reg_no AS client_reg_no,
+        c.phone AS client_phone, c.primary_login_phone, c.email AS client_email, c.email_ids AS client_email_ids,
+        c.primary_login_email, l.name AS location_name
+      FROM VISITS v JOIN CLIENTS c ON c.client_id = v.client_id
+      JOIN LOCATIONS l ON l.location_id = v.location_id
+      WHERE v.visit_id = ? AND v.location_id = ?
+    `).get(visitId, req.locationId);
+    if (!visit) return res.status(404).json({ error: 'Visit not found at this branch.' });
+
+    if (req.user.role === 'visitor') {
+      const account = db.prepare('SELECT phone, email FROM USERS WHERE user_id = ?').get(req.user.user_id) || {};
+      const normalizePhone = value => String(value || '').replace(/\D/g, '').slice(-10);
+      const userPhone = normalizePhone(account.phone || req.user.phone);
+      const visitPhones = [visit.primary_login_phone, visit.client_phone].map(normalizePhone).filter(Boolean);
+      const userEmail = String(account.email || req.user.email || '').trim().toLowerCase();
+      const visitEmails = [visit.primary_login_email, visit.client_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+      if (!((userPhone && visitPhones.includes(userPhone)) || (userEmail && visitEmails.includes(userEmail)))) {
+        return res.status(403).json({ error: 'You can only send invoices for your own client profile.' });
+      }
+    }
+
+    const services = db.prepare(`
+      SELECT vs.service_name_snapshot AS service_name, vs.price_snapshot, s.name AS staff_name
+      FROM VISIT_SERVICES vs LEFT JOIN STAFF s ON s.staff_id = vs.staff_id
+      WHERE vs.visit_id = ? ORDER BY vs.visit_service_id
+    `).all(visitId);
+    const invoiceNumber = `INV-MBY-${String(visitId).padStart(5, '0')}`;
+    const clientName = `${visit.client_name || ''} ${visit.client_surname || ''}`.trim();
+    const branch = visit.location_name || 'Maison BeYou';
+    const serviceList = services.map(item => item.service_name).filter(Boolean).join(', ') || 'Selected services';
+    const money = amount => `₹${Number(amount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const message = `Thank you for choosing Maison BeYou, ${visit.client_name || 'there'}. Invoice ${invoiceNumber}\nBranch: ${branch}\nDate: ${String(visit.visit_date || '').slice(0, 10)}${visit.service_time ? `\nScheduled time: ${visit.service_time}` : ''}\nServices: ${serviceList}\nTotal: ${money(visit.total_amount)}\nAmount paid: ${money(visit.amount_paid)}${Number(visit.balance) > 0 ? `\nBalance due: ${money(visit.balance)}` : ''}`;
+    const subject = `Maison BeYou invoice ${invoiceNumber}`;
+    const html = `<p>Thank you for choosing Maison BeYou, ${escapeHtml(visit.client_name || 'there')}.</p><p>Your invoice <strong>${invoiceNumber}</strong> is attached.</p><ul><li>Branch: ${escapeHtml(branch)}</li><li>Date: ${escapeHtml(String(visit.visit_date || '').slice(0, 10))}</li><li>Services: ${escapeHtml(serviceList)}</li><li>Total: ${money(visit.total_amount)}</li><li>Amount paid: ${money(visit.amount_paid)}</li>${Number(visit.balance) > 0 ? `<li>Balance due: ${money(visit.balance)}</li>` : ''}</ul>`;
+    const attachment = await createVisitInvoiceAttachment(visit, services, branch, clientName);
+
+    if (channel === 'email') {
+      let email = String(visit.primary_login_email || visit.client_email || '').trim().toLowerCase();
+      if (!email) {
+        try { email = (JSON.parse(visit.client_email_ids || '[]').find(value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) || '').trim().toLowerCase(); } catch {}
+      }
+      if (!email) return res.status(400).json({ error: 'This client profile has no email address. Add one before sending the invoice.' });
+      const delivered = await deliverVisitNotification('email', email, message, subject, html, [attachment]);
+      return res.json({ success: true, channel, recipient: email, provider: delivered.provider, message: `Invoice ${invoiceNumber} sent by email to ${email}.` });
+    }
+
+    const phone = normalizeNotificationPhone(visit.primary_login_phone || visit.client_phone);
+    if (!phone) return res.status(400).json({ error: 'This client profile has no valid phone number for WhatsApp.' });
+    const filename = `${invoiceNumber}.pdf`;
+    const twilioConfigured = Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && (process.env.TWILIO_WHATSAPP_FROM || String(process.env.TWILIO_PHONE_NUMBER || '').startsWith('whatsapp:')));
+    const metaConfigured = Boolean(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+    const publicBaseUrl = String(process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+    let mediaUrl = null;
+    if (twilioConfigured) {
+      if (!/^https:\/\//i.test(publicBaseUrl)) return res.status(503).json({ error: 'Set PUBLIC_BASE_URL to a public HTTPS CRM address so Twilio can attach the invoice PDF.' });
+      const invoiceDirectory = path.join(uploadsDir, 'invoices');
+      fs.mkdirSync(invoiceDirectory, { recursive: true });
+      fs.writeFileSync(path.join(invoiceDirectory, filename), attachment.content);
+      mediaUrl = `${publicBaseUrl}/uploads/invoices/${encodeURIComponent(filename)}`;
+      if (!process.env.TWILIO_WHATSAPP_INVOICE_CONTENT_SID) return res.status(503).json({ error: 'Set an approved Twilio invoice Content SID before sending WhatsApp invoices.' });
+    } else if (metaConfigured) {
+      if (!(process.env.WHATSAPP_INVOICE_TEMPLATE_NAME || 'maison_beyou_invoice_delivery')) return res.status(503).json({ error: 'Create and configure an approved Meta invoice template with a document header first.' });
+    }
+    const delivered = await deliverVisitNotification('whatsapp', phone, message, subject, html, [], mediaUrl, {
+      requireApprovedTemplate: true,
+      templateName: process.env.WHATSAPP_INVOICE_TEMPLATE_NAME || 'maison_beyou_invoice_delivery',
+      contentSid: process.env.TWILIO_WHATSAPP_INVOICE_CONTENT_SID,
+      templateParams: [visit.client_name || 'there', invoiceNumber, money(visit.total_amount), money(visit.amount_paid), branch, serviceList],
+      mediaBuffer: metaConfigured && !twilioConfigured ? attachment.content : null,
+      mediaMimeType: attachment.contentType,
+      skipTemplate: false,
+      mediaType: 'document',
+      mediaFilename: filename
+    });
+    return res.json({ success: true, channel, recipient: phone, provider: delivered.provider, message: `Invoice ${invoiceNumber} sent by WhatsApp.` });
+  } catch (error) {
+    console.error(`Manual invoice delivery failed for visit=${req.params.id}:`, error.message);
+    res.status(error.status || 502).json({ error: error.message || 'Could not send this invoice.' });
+  }
+});
 
 // Migrate one or more clients to another active branch membership plan while
 // preserving their old membership instances and sending a change notice.
@@ -8031,6 +8520,7 @@ app.get('/api/appointments/slots', authenticateToken, (req, res) => {
 });
 
 app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 'visitor', 'staff'), async (req, res) => {
+  let newlyCreatedClientId = null;
   const transaction = db.transaction(() => {
     const {
       client_type, // 'new' or 'regular'
@@ -8079,6 +8569,8 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       if (slotMinutes + appointmentDuration > closesAt) throw new Error('The selected appointment duration extends past branch closing time. Choose an earlier slot.');
     }
     let finalClientId = client_id;
+    const updateVisitId = Number(req.body.update_visit_id) || 0;
+    let existingPendingVisit = null;
 
     // 1. Client resolution / creation
     if (client_type === 'new') {
@@ -8156,6 +8648,7 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
             INSERT INTO USERS (name, email, phone, password_hash, role, active, location_id)
             VALUES (?, ?, ?, ?, 'visitor', 1, ?)
           `).run(`${name} ${(req.body.surname || '')}`.trim(), cleanPrimaryEmail, cleanPrimaryPhone, vHash, targetLocId);
+          newlyCreatedClientId = finalClientId;
         }
       } catch (e) {}
     } else {
@@ -8168,6 +8661,18 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       }
       if (Number(existing.location_id) !== Number(req.locationId)) {
         throw new Error('Access denied: Selected client belongs to another studio location');
+      }
+    }
+
+    if (updateVisitId) {
+      if (req.user.role !== 'visitor') throw new Error('Only the visitor can edit their pending service request.');
+      existingPendingVisit = db.prepare(`SELECT * FROM VISITS
+        WHERE visit_id = ? AND created_by = ? AND location_id = ?`).get(updateVisitId, req.user.user_id, req.locationId);
+      if (!existingPendingVisit || Number(existingPendingVisit.client_id) !== Number(finalClientId)) {
+        throw new Error('This pending visit cannot be edited from this account.');
+      }
+      if (['paid', 'cancelled'].includes(String(existingPendingVisit.payment_status || '').toLowerCase())) {
+        throw new Error('This visit can no longer be edited because payment is complete or the visit was cancelled.');
       }
     }
 
@@ -8349,7 +8854,8 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
           rawT.includes('eternal') ? 15000 :
           rawT.includes('eclat') ? 6000 : 0;
 
-        const creditRow = db.prepare('SELECT COALESCE(SUM(membership_amount_used), 0) as total_used FROM VISITS WHERE client_id = ?').get(finalClientId);
+        const creditRow = db.prepare(`SELECT COALESCE(SUM(membership_amount_used), 0) as total_used
+          FROM VISITS WHERE client_id = ? AND (? = 0 OR visit_id != ?)`).get(finalClientId, updateVisitId, updateVisitId);
         const totalUsedSoFar = creditRow?.total_used || 0;
         const actualAvailableBal = tierCost > 0 ? Math.max(0, tierCost - totalUsedSoFar) : Math.max(0, clientInDb?.membership_balance || 0);
 
@@ -8414,45 +8920,44 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
       });
     }
 
-    // 3. Insert Visit
-    const visitInfo = db.prepare(`
-      INSERT INTO VISITS (
-        client_id, location_id, visit_date, subtotal, discount_type, discount_value,
-        discount_amount, total_amount, amount_paid, balance,
-        payment_method, payment_status, upi_ref, created_by, notes, created_at, service_time,
-        tax_amount, membership_price, membership_tier, is_appointment, appointment_duration_mins,
-        membership_amount_used, membership_benefit_used, benefit_used_date, benefit_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      finalClientId,
-      clientLocationId,
-      todayDate,
-      subtotal,
-      discType,
-      discVal,
-      discountAmount,
-      totalAmount,
-      paid,
-      balance,
-      pMethod,
-      paymentStatus,
-      upiRef,
-      req.user.user_id,
-      notes || '',
-      createdAt,
-      finalServiceTime,
-      taxAmount,
-      membershipPrice,
-      membershipTier,
-      req.body.is_appointment ? 1 : 0,
-      appointmentDuration,
-      validCreditUsed,
-      req.body.membership_benefit_used || null,
-      req.body.benefit_used_date || todayDate,
-      req.body.benefit_status || 'Available'
-    );
-
-    const visitId = visitInfo.lastInsertRowid;
+    // 3. Create a visit or update this visitor's existing unpaid request.
+    let visitId;
+    if (existingPendingVisit) {
+      paid = Math.min(Number(existingPendingVisit.amount_paid) || 0, remainingPayable);
+      balance = Math.max(0, remainingPayable - paid - validCreditUsed);
+      paymentStatus = balance === 0 ? 'Paid' : (paid > 0 ? 'Partially Paid' : 'Pending');
+      visitId = updateVisitId;
+      db.prepare(`UPDATE VISITS SET subtotal = ?, discount_type = ?, discount_value = ?, discount_amount = ?,
+        total_amount = ?, amount_paid = ?, balance = ?, payment_method = ?, payment_status = ?, upi_ref = ?,
+        notes = ?, service_time = ?, tax_amount = ?, membership_price = ?, membership_tier = ?,
+        membership_amount_used = ?, membership_benefit_used = ?, benefit_used_date = ?, benefit_status = ?
+        WHERE visit_id = ?`).run(
+        subtotal, discType, discVal, discountAmount, totalAmount, paid, balance, pMethod, paymentStatus,
+        upiRef, notes || '', finalServiceTime, taxAmount, membershipPrice, membershipTier, validCreditUsed,
+        req.body.membership_benefit_used || null, req.body.benefit_used_date || todayDate,
+        req.body.benefit_status || 'Available', visitId
+      );
+      db.prepare('DELETE FROM TREATMENT_COURSE_SESSIONS WHERE visit_id = ?').run(visitId);
+      db.prepare('DELETE FROM VISIT_SERVICES WHERE visit_id = ?').run(visitId);
+    } else {
+      const visitInfo = db.prepare(`
+        INSERT INTO VISITS (
+          client_id, location_id, visit_date, subtotal, discount_type, discount_value,
+          discount_amount, total_amount, amount_paid, balance,
+          payment_method, payment_status, upi_ref, created_by, notes, created_at, service_time,
+          tax_amount, membership_price, membership_tier, is_appointment, appointment_duration_mins,
+          membership_amount_used, membership_benefit_used, benefit_used_date, benefit_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        finalClientId, clientLocationId, todayDate, subtotal, discType, discVal, discountAmount,
+        totalAmount, paid, balance, pMethod, paymentStatus, upiRef, req.user.user_id, notes || '',
+        createdAt, finalServiceTime, taxAmount, membershipPrice, membershipTier,
+        req.body.is_appointment ? 1 : 0, appointmentDuration, validCreditUsed,
+        req.body.membership_benefit_used || null, req.body.benefit_used_date || todayDate,
+        req.body.benefit_status || 'Available'
+      );
+      visitId = visitInfo.lastInsertRowid;
+    }
 
     // 4. Insert Visit Services with immutable snapshots
     const insertVisitService = db.prepare(`
@@ -8512,8 +9017,10 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
     // Keep their client record and reserved credit, but defer visit aggregates.
     if (!req.body.is_appointment) {
       const client = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(finalClientId);
-      const newTotalVisits = (client.total_visits || 0) + 1;
-      const newTotalSpend = (client.total_spend || 0) + totalAmount;
+      const newTotalVisits = existingPendingVisit ? (client.total_visits || 0) : (client.total_visits || 0) + 1;
+      const newTotalSpend = existingPendingVisit
+        ? Math.max(0, (client.total_spend || 0) - (Number(existingPendingVisit.total_amount) || 0) + totalAmount)
+        : (client.total_spend || 0) + totalAmount;
       const firstVisit = client.first_visit_date || todayDate;
 
       db.prepare(`
@@ -8649,6 +9156,22 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
   try {
     const result = transaction();
     if (result?.payment_status === 'Paid') awardLoyaltyPointsForVisit(result.visit_id);
+    if (newlyCreatedClientId) {
+      const newClient = db.prepare('SELECT * FROM CLIENTS WHERE client_id = ?').get(newlyCreatedClientId);
+      const branch = db.prepare('SELECT name, code FROM LOCATIONS WHERE location_id = ?').get(req.locationId);
+      await dispatchContactNotification({
+        locationId: req.locationId,
+        entityType: 'client',
+        entityId: newlyCreatedClientId,
+        eventKey: 'client-welcome',
+        name: `${newClient?.name || ''} ${newClient?.surname || ''}`.trim(),
+        phone: newClient?.primary_login_phone || newClient?.phone,
+        email: newClient?.primary_login_email || newClient?.email,
+        subject: `Welcome to Maison BeYou${branch?.name ? ` — ${branch.name}` : ''}`,
+        message: `Welcome to Maison BeYou, ${newClient?.name || 'there'}! Thank you for registering with us. Your client registration number is ${newClient?.reg_no || `MB-REG-${String(newlyCreatedClientId).padStart(5, '0')}`}. Please log in to the Visitor Portal using your registered mobile number, choose your services for today, and submit your request. Our reception team will assist you with the next steps.`,
+        whatsappTemplateParams: [`${newClient?.name || ''} ${newClient?.surname || ''}`.trim(), newClient?.reg_no || `MB-REG-${String(newlyCreatedClientId).padStart(5, '0')}`, branch?.name || branch?.code || 'your branch']
+      });
+    }
     await dispatchVisitNotifications(result.visit_id);
     res.status(201).json({
       message: 'Visit successfully recorded.',
@@ -8661,6 +9184,75 @@ app.post('/api/visits', authenticateToken, authorizeRoles('admin', 'reception', 
 });
 
 // Get single visit receipt / summary
+app.get('/api/visitor/pending-visit', authenticateToken, authorizeRoles('visitor'), (req, res) => {
+  try {
+    const locationId = Number(req.locationId || req.user.location_id);
+    if (!locationId) return res.status(400).json({ error: 'Branch context is required to find your pending visit.' });
+    const normalizeLoginPhone = value => {
+      let digits = String(value || '').replace(/\D/g, '');
+      if (digits.startsWith('00')) digits = digits.slice(2);
+      if (digits.startsWith('91') && digits.length > 10) digits = digits.slice(-10);
+      else if (digits.startsWith('0') && digits.length > 10) digits = digits.slice(1);
+      return digits;
+    };
+    const userPhone = normalizeLoginPhone(req.user.phone);
+    const userEmail = String(req.user.email || '').trim().toLowerCase();
+    const matchingClients = db.prepare(`SELECT client_id, phone, primary_login_phone, email, primary_login_email
+      FROM CLIENTS WHERE location_id = ?`).all(locationId).filter(client => {
+      const phones = [client.phone, client.primary_login_phone].map(normalizeLoginPhone).filter(Boolean);
+      const emails = [client.email, client.primary_login_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+      return (userPhone && phones.includes(userPhone)) || (userEmail && emails.includes(userEmail));
+    });
+    try {
+      const verified = jwt.verify(req.get('x-verified-client-token') || '', JWT_SECRET);
+      if (verified?.verified && Number.isInteger(Number(verified.client_id))) {
+        const verifiedClient = db.prepare('SELECT client_id, location_id FROM CLIENTS WHERE client_id = ?').get(Number(verified.client_id));
+        if (verifiedClient && Number(verifiedClient.location_id) === locationId && !matchingClients.some(client => Number(client.client_id) === Number(verifiedClient.client_id))) {
+          matchingClients.push(verifiedClient);
+        }
+      }
+    } catch {}
+    if (req.user.client_id && !matchingClients.some(client => Number(client.client_id) === req.user.client_id)) {
+      const authenticatedClient = db.prepare('SELECT client_id, location_id FROM CLIENTS WHERE client_id = ?').get(req.user.client_id);
+      if (authenticatedClient && Number(authenticatedClient.location_id) === locationId) matchingClients.push(authenticatedClient);
+    }
+    const identityClientIds = matchingClients.map(client => Number(client.client_id)).filter(Number.isInteger);
+    const identityClause = identityClientIds.length
+      ? `v.client_id IN (${identityClientIds.map(() => '?').join(',')})`
+      : 'v.created_by = ?';
+    const identityParams = identityClientIds.length ? identityClientIds : [req.user.user_id];
+    const visit = db.prepare(`
+      SELECT v.*, c.name AS client_name, c.surname AS client_surname, c.phone AS client_phone,
+             c.email AS client_email, c.reg_no AS client_reg_no, c.gender AS client_gender,
+             c.city AS client_city, u.name AS created_by_name
+      FROM VISITS v
+      JOIN CLIENTS c ON c.client_id = v.client_id
+      LEFT JOIN USERS u ON u.user_id = v.created_by
+      WHERE ${identityClause} AND v.location_id = ? AND c.location_id = ?
+        AND COALESCE(v.is_appointment, 0) = 0
+        AND lower(COALESCE(v.payment_status, '')) NOT IN ('paid', 'cancelled')
+      ORDER BY v.visit_id DESC LIMIT 1
+    `).get(...identityParams, locationId, locationId);
+    if (!visit) return res.json({ visit: null });
+    const clientDetails = getFullClientRecord(visit.client_id);
+    const services = db.prepare(`
+      SELECT vs.*, s.name AS staff_name, s.role AS staff_role,
+             tcs.session_id, tcs.session_number, tcs.total_sessions AS course_total_sessions,
+             tcs.status AS treatment_session_status, tc.next_due_date, tc.status AS course_status,
+             tc.interval_value, tc.interval_unit, tc.completed_sessions_count AS course_completed_count
+      FROM VISIT_SERVICES vs
+      LEFT JOIN STAFF s ON vs.staff_id = s.staff_id
+      LEFT JOIN TREATMENT_COURSE_SESSIONS tcs ON tcs.visit_service_id = vs.visit_service_id
+      LEFT JOIN CLIENT_TREATMENT_COURSES tc ON tc.course_id = tcs.course_id
+      WHERE vs.visit_id = ?
+    `).all(visit.visit_id);
+    res.json({ visit: { ...visit, client: clientDetails?.client || null, services } });
+  } catch (error) {
+    console.error('Visitor pending visit lookup error:', error);
+    res.status(500).json({ error: 'Could not load your pending visit.' });
+  }
+});
+
 app.get('/api/visits/:id', authenticateToken, (req, res) => {
   try {
     const visitId = req.params.id;
@@ -8775,8 +9367,156 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
         ? (parseFloat(req.body.membership_amount_used) || 0)
         : (existingVisit.membership_amount_used || 0);
 
+      const loyaltyPointsRequested = Math.max(0, Math.floor(Number(req.body.loyalty_points_redeemed) || 0));
+      const requestedWalletUse = Math.max(0, Math.round((Number(req.body.wallet_amount_used) || 0) * 100) / 100);
+      const requestedExistingWalletUse = Math.max(0, Math.round((Number(req.body.existing_wallet_amount_used) || 0) * 100) / 100);
+      const giftVoucherId = Number(req.body.gift_voucher_id) || 0;
+      const requestedGiftVoucherAmount = Math.max(0, Math.round((Number(req.body.gift_voucher_amount_applied) || 0) * 100) / 100);
+      let loyaltyWalletApplied = 0;
+      let existingWalletApplied = 0;
+      let giftVoucherAmountApplied = 0;
+      if ((loyaltyPointsRequested > 0 || requestedExistingWalletUse > 0) && ['paid', 'cancelled'].includes(String(existingVisit.payment_status || '').toLowerCase())) {
+        throw new Error('Loyalty points and wallet balance can only be applied to an unpaid visit.');
+      }
+      if (requestedExistingWalletUse > 0) {
+        if (!['admin', 'reception', 'master_admin'].includes(req.user.role)) {
+          throw new Error('Only reception or a manager can apply client wallet balance to a visit.');
+        }
+        const existingWalletBalance = Math.max(0, Number(db.prepare(`SELECT COALESCE(SUM(amount), 0) AS balance
+          FROM CLIENT_WALLET_LEDGER WHERE client_id = ?`).get(existingVisit.client_id)?.balance) || 0);
+        if (requestedExistingWalletUse > existingWalletBalance) {
+          throw new Error('The client’s wallet balance changed. Refresh the payment record and review the available balance.');
+        }
+        const maximumWalletUse = Math.max(0, newTotalAmount - (Number(existingVisit.amount_paid) || 0) - membershipAmountUsed);
+        if (requestedExistingWalletUse > maximumWalletUse) {
+          throw new Error('Wallet credit cannot exceed the remaining bill after membership credits.');
+        }
+        existingWalletApplied = requestedExistingWalletUse;
+        db.prepare(`INSERT INTO CLIENT_WALLET_LEDGER (entry_key, client_id, location_id, amount, description)
+          VALUES (?, ?, ?, ?, ?)`)
+          .run(`wallet:visit:${visitId}:${Date.now()}:${randomBytes(4).toString('hex')}`, existingVisit.client_id,
+            existingVisit.location_id, -existingWalletApplied, `Wallet applied to visit #${visitId}`);
+      }
+      if (giftVoucherId || requestedGiftVoucherAmount > 0) {
+        if (!['admin', 'reception', 'master_admin'].includes(req.user.role)) {
+          throw new Error('Only reception or a manager can redeem a gift voucher.');
+        }
+        if (!giftVoucherId || requestedGiftVoucherAmount <= 0 || ['paid', 'cancelled'].includes(String(existingVisit.payment_status || '').toLowerCase())) {
+          throw new Error('Select a valid gift voucher for an unpaid visit.');
+        }
+        const voucher = db.prepare('SELECT * FROM GIFT_VOUCHERS WHERE voucher_id = ?').get(giftVoucherId);
+        if (!voucher || voucher.payment_status !== 'paid' || !['active', 'partially_redeemed'].includes(voucher.status) || voucher.expiry_date < new Date().toISOString().slice(0, 10)) {
+          throw new Error('This gift voucher is expired or no longer available. Refresh the client profile and try again.');
+        }
+        const client = db.prepare('SELECT phone, primary_login_phone, email, primary_login_email FROM CLIENTS WHERE client_id = ?').get(existingVisit.client_id);
+        const normalizeVoucherPhone = value => {
+          let digits = String(value || '').replace(/\D/g, '');
+          if (digits.startsWith('00')) digits = digits.slice(2);
+          if (digits.startsWith('0') && digits.length === 11) digits = `91${digits.slice(1)}`;
+          if (digits.length === 10) digits = `91${digits}`;
+          return digits ? `+${digits}` : '';
+        };
+        const clientPhones = [client?.phone, client?.primary_login_phone].map(normalizeVoucherPhone).filter(Boolean);
+        const clientEmails = [client?.email, client?.primary_login_email].map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+        const voucherBelongsToClient = (voucher.recipient_phone && clientPhones.includes(normalizeVoucherPhone(voucher.recipient_phone))) ||
+          (voucher.recipient_email && clientEmails.includes(String(voucher.recipient_email).trim().toLowerCase()));
+        if (!voucherBelongsToClient) throw new Error('This gift voucher is not assigned to this client.');
+        if (db.prepare('SELECT 1 FROM GIFT_VOUCHER_REDEMPTIONS WHERE transaction_ref = ?').get(`visit:${visitId}:voucher:${giftVoucherId}`)) {
+          throw new Error('This gift voucher was already redeemed for this visit.');
+        }
+        const remainingBillForVoucher = Math.max(0, newTotalAmount - (Number(existingVisit.amount_paid) || 0) - membershipAmountUsed - requestedExistingWalletUse - requestedWalletUse);
+        const previousVoucherBalance = Math.max(0, Number(voucher.remaining_balance) || 0);
+        let eligibleServices = [];
+        try { eligibleServices = JSON.parse(voucher.service_snapshot_json || '[]'); } catch {}
+        let redemptionServices = [];
+        let voucherRedemptionAmount = requestedGiftVoucherAmount;
+        let nextServiceUses = Number(voucher.service_redemptions_used) || 0;
+        if (voucher.voucher_type === 'service') {
+          const visitServices = db.prepare('SELECT service_name_snapshot, price_snapshot FROM VISIT_SERVICES WHERE visit_id = ?').all(visitId);
+          const eligibleNames = new Set(eligibleServices.map(service => String(service.service_name || '').toLowerCase()));
+          const matchingService = visitServices.find(service => voucher.eligibility_mode === 'unrestricted' || eligibleNames.has(String(service.service_name_snapshot || '').toLowerCase()));
+          if (!matchingService) throw new Error('This gift voucher is not valid for a service in this visit.');
+          const usesAllowed = Number(voucher.service_redemptions_allowed) || 1;
+          const usesLeft = Math.max(0, usesAllowed - nextServiceUses);
+          if (!usesLeft) throw new Error('All service uses on this gift voucher have already been redeemed.');
+          const serviceValue = usesLeft === 1 ? previousVoucherBalance : (Number(voucher.original_value) || 0) / usesAllowed;
+          voucherRedemptionAmount = Math.min(previousVoucherBalance, serviceValue, Number(matchingService.price_snapshot) || 0, remainingBillForVoucher);
+          if (voucherRedemptionAmount <= 0 || Math.abs(voucherRedemptionAmount - requestedGiftVoucherAmount) > 0.02) throw new Error('The gift voucher amount changed. Refresh the settlement and review it again.');
+          nextServiceUses += 1;
+          redemptionServices = [{ service_name: matchingService.service_name_snapshot, amount: voucherRedemptionAmount }];
+        } else {
+          if (voucherRedemptionAmount > previousVoucherBalance || voucherRedemptionAmount > remainingBillForVoucher) throw new Error('The gift voucher amount exceeds its balance or the remaining bill.');
+        }
+        const nextVoucherBalance = Math.round(Math.max(0, previousVoucherBalance - voucherRedemptionAmount) * 100) / 100;
+        const nextVoucherStatus = voucher.voucher_type === 'service'
+          ? (nextServiceUses >= Number(voucher.service_redemptions_allowed) ? 'fully_redeemed' : 'partially_redeemed')
+          : (nextVoucherBalance <= 0 ? 'fully_redeemed' : 'partially_redeemed');
+        const voucherUpdate = db.prepare(`UPDATE GIFT_VOUCHERS SET remaining_balance = ?, service_redemptions_used = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE voucher_id = ? AND remaining_balance = ? AND status IN ('active','partially_redeemed') AND payment_status = 'paid'`)
+          .run(nextVoucherBalance, nextServiceUses, nextVoucherStatus, giftVoucherId, previousVoucherBalance);
+        if (!voucherUpdate.changes) throw new Error('Gift voucher balance changed. Refresh the settlement and try again.');
+        const voucherReference = `visit:${visitId}:voucher:${giftVoucherId}`;
+        db.prepare(`INSERT INTO GIFT_VOUCHER_REDEMPTIONS (voucher_id, redeeming_location_id, redeeming_user_id, transaction_ref, amount, services_json, previous_balance, updated_balance)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(giftVoucherId, existingVisit.location_id, req.user.user_id, voucherReference, voucherRedemptionAmount,
+            JSON.stringify(redemptionServices), previousVoucherBalance, nextVoucherBalance);
+        db.prepare(`INSERT INTO GIFT_VOUCHER_BALANCE_LEDGER (voucher_id, location_id, entry_type, amount, previous_balance, updated_balance, reference, notes, created_by)
+          VALUES (?, ?, 'redeem', ?, ?, ?, ?, ?, ?)`)
+          .run(giftVoucherId, existingVisit.location_id, -voucherRedemptionAmount, previousVoucherBalance, nextVoucherBalance,
+            `redeem:${voucherReference}`, `Redeemed against visit #${visitId}`, req.user.user_id);
+        giftVoucherAmountApplied = voucherRedemptionAmount;
+      }
+      if (loyaltyPointsRequested > 0) {
+        if (!['admin', 'reception', 'master_admin'].includes(req.user.role)) {
+          throw new Error('Only reception or a manager can confirm loyalty redemption.');
+        }
+        if (db.prepare('SELECT 1 FROM CLIENT_LOYALTY_LEDGER WHERE entry_key = ?').get(`redeem:visit:${visitId}`)) {
+          throw new Error('Loyalty points for this visit have already been redeemed. Refresh the payment record.');
+        }
+        const loyaltySettings = getLoyaltySettingsForLocation(existingVisit.location_id);
+        if (!loyaltySettings.enabled) throw new Error('The loyalty program is currently inactive.');
+        const nowDate = new Date().toISOString().slice(0, 10);
+        const loyaltyBalance = Number(db.prepare(`SELECT COALESCE(SUM(points), 0) AS balance
+          FROM CLIENT_LOYALTY_LEDGER WHERE client_id = ? AND (expires_at IS NULL OR date(expires_at) >= date(?))`)
+          .get(existingVisit.client_id, nowDate)?.balance) || 0;
+        if (loyaltyPointsRequested < Number(loyaltySettings.minimum_redemption_points || 0)) {
+          throw new Error('The requested loyalty points are below the minimum redemption amount.');
+        }
+        if (loyaltyPointsRequested > loyaltyBalance) {
+          throw new Error('The client’s loyalty balance changed. Refresh the payment record and review the available points.');
+        }
+        const walletCredit = Math.round((loyaltyPointsRequested / Number(loyaltySettings.redemption_points || 100) * Number(loyaltySettings.redemption_value || 0)) * 100) / 100;
+        const maximumBillUse = Math.max(0, newTotalAmount - (Number(existingVisit.amount_paid) || 0) - membershipAmountUsed - existingWalletApplied);
+        loyaltyWalletApplied = Math.min(requestedWalletUse, walletCredit, maximumBillUse);
+        db.prepare(`INSERT INTO CLIENT_LOYALTY_LEDGER
+          (entry_key, client_id, location_id, visit_id, entry_type, points, bill_amount, description)
+          VALUES (?, ?, ?, ?, 'redeemed', ?, ?, ?)`)
+          .run(`redeem:visit:${visitId}`, existingVisit.client_id, existingVisit.location_id, visitId,
+            -loyaltyPointsRequested, newTotalAmount, `Redeemed ${loyaltyPointsRequested} points at visit #${visitId}`);
+        if (walletCredit > 0) {
+          db.prepare(`INSERT INTO CLIENT_WALLET_LEDGER (entry_key, client_id, location_id, amount, description)
+            VALUES (?, ?, ?, ?, ?)`)
+            .run(`loyalty-wallet:visit:${visitId}:credit`, existingVisit.client_id, existingVisit.location_id,
+              walletCredit, `Loyalty redemption · ${loyaltyPointsRequested} points`);
+        }
+        if (loyaltyWalletApplied > 0) {
+          db.prepare(`INSERT INTO CLIENT_WALLET_LEDGER (entry_key, client_id, location_id, amount, description)
+            VALUES (?, ?, ?, ?, ?)`)
+            .run(`loyalty-wallet:visit:${visitId}:use`, existingVisit.client_id, existingVisit.location_id,
+              -loyaltyWalletApplied, `Wallet credit applied to visit #${visitId}`);
+        }
+      } else if (requestedWalletUse > 0) {
+        throw new Error('Select an eligible loyalty redemption before applying loyalty wallet credit.');
+      }
+
       if (amount_paid !== undefined) {
-        newAmountPaid = parseFloat(amount_paid) || 0;
+        if (loyaltyPointsRequested > 0) {
+          const amountPaidSubmitted = Math.max(0, Number(amount_paid) || 0);
+          const manualAmount = Math.max(0, amountPaidSubmitted - (Number(existingVisit.amount_paid) || 0) - requestedWalletUse - existingWalletApplied - giftVoucherAmountApplied);
+          newAmountPaid = (Number(existingVisit.amount_paid) || 0) + manualAmount + loyaltyWalletApplied + existingWalletApplied + giftVoucherAmountApplied;
+        } else {
+          newAmountPaid = parseFloat(amount_paid) || 0;
+        }
         const totalSettled = newAmountPaid + membershipAmountUsed;
         newBalance = Math.max(0, newTotalAmount - totalSettled);
         if (newBalance === 0) {
@@ -8789,10 +9529,14 @@ app.patch('/api/visits/:id', authenticateToken,  authorizeRoles('admin', 'recept
       }
 
       if (payment_status) {
-        newPaymentStatus = payment_status;
+        newPaymentStatus = loyaltyPointsRequested > 0
+          ? (newBalance === 0 ? 'Paid' : (newAmountPaid + membershipAmountUsed > 0 ? 'Partially Paid' : 'Pending'))
+          : payment_status;
       }
       if (payment_method) {
         if (['Cash', 'UPI', 'Card', 'Membership', 'Other'].includes(payment_method)) {
+          newPaymentMethod = payment_method;
+        } else if (payment_method.toLowerCase().includes('wallet')) {
           newPaymentMethod = payment_method;
         } else if (payment_method.toLowerCase().includes('cash')) {
           newPaymentMethod = 'Cash';
@@ -9939,6 +10683,8 @@ app.get('/api/reports/day-details', authenticateToken, authorizeRoles('admin'), 
 registerGiftVoucherRoutes({
   app,
   db,
+  jwt,
+  jwtSecret: JWT_SECRET,
   authenticateToken,
   authorizeRoles,
   recordAuditLog,
