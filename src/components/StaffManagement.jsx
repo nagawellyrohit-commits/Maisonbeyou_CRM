@@ -5,6 +5,7 @@ import {
   ShieldCheck, Calculator, FileCheck, Landmark, Settings, ChevronDown, Mail, MapPin
 } from 'lucide-react';
 import { apiRequest, formatCurrency, formatPhone } from '../utils/api';
+import { IndianCityDropdown, IndianStateDropdown } from './IndianStateCityFields';
 
 const teamMasterRequestError = (error) => /API endpoint not found/i.test(String(error?.message || ''))
   ? 'The backend on port 5001 is an older version. Stop it and restart the server from this project folder, then refresh the page.'
@@ -1044,9 +1045,9 @@ export default function StaffManagement({ branding, currentUser, activeLocation,
                 </div>
                 <label style={fieldLabel}>Address *<input required value={address} onChange={e => setAddress(e.target.value)} placeholder="Street address, building, area" style={fieldInput} /></label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px' }}>
-                  <label style={fieldLabel}>Pincode *<input required value={pincode} onChange={e => setPincode(e.target.value)} placeholder="Pincode" style={fieldInput} /></label>
-                  <label style={fieldLabel}>City *<input required value={city} onChange={e => setCity(e.target.value)} placeholder="City" style={fieldInput} /></label>
-                  <label style={fieldLabel}>State *<input required value={stateName} onChange={e => setStateName(e.target.value)} placeholder="State" style={fieldInput} /></label>
+                  <label style={{ ...fieldLabel, order: 3 }}>Pincode *<input required value={pincode} onChange={e => setPincode(e.target.value)} placeholder="Pincode" style={fieldInput} /></label>
+                  <label style={{ ...fieldLabel, order: 2 }}>City *<IndianCityDropdown state={stateName} value={city} onChange={setCity} selectStyle={fieldInput} inputStyle={{ ...fieldInput, marginTop: 7 }} /></label>
+                  <label style={{ ...fieldLabel, order: 1 }}>State *<IndianStateDropdown value={stateName} onChange={value => { setStateName(value); setCity(''); }} style={fieldInput} /></label>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '12px' }}>
                   <label style={fieldLabel}>Phone number *<input required type="tel" inputMode="numeric" maxLength={10} value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit phone number" style={fieldInput} /></label>

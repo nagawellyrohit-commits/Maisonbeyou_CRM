@@ -15,6 +15,7 @@ import ReceiptModal from './components/ReceiptModal';
 import ErrorBoundary from './components/ErrorBoundary';
 import MessageBoxHost from './components/MessageBoxHost';
 import StudioManagement from './components/StudioManagement';
+import MasterAdminReportsDashboard from './components/MasterAdminReportsDashboard';
 import LocationSelection from './components/LocationSelection';
 import { canAccessModule } from './utils/permissions';
 import { brandingCssVariables, DEFAULT_MASTER_PORTAL_BRANDING, getLocationBranding } from './utils/branding';
@@ -39,8 +40,11 @@ export default function App() {
   const [brandingPreview, setBrandingPreview] = useState(null);
   const [masterPortalBranding, setMasterPortalBranding] = useState(DEFAULT_MASTER_PORTAL_BRANDING);
   const [masterPortalBrandingPreview, setMasterPortalBrandingPreview] = useState(null);
-  const [masterAdminView, setMasterAdminView] = useState('types'); // 'types' | 'locations'
+  const [masterAdminView, setMasterAdminView] = useState('branch-reports');
   const [selectedLocationType, setSelectedLocationType] = useState('branch'); // 'branch' | 'franchise'
+  // Keep the branch list visible on the master portal landing view by default.
+  const [inlineLocationType, setInlineLocationType] = useState('branch');
+  const [showRevenueAnalytics, setShowRevenueAnalytics] = useState(false);
 
   const [activeTab, setActiveTab] = useState(() => {
     const user = getStoredUser();
@@ -98,6 +102,8 @@ export default function App() {
   }, []);
 
   const handleLogout = () => {
+    setShowRevenueAnalytics(false);
+    setInlineLocationType(null);
     setStoredToken(null);
     setStoredUser(null);
     setStoredLocation(null);
@@ -164,7 +170,7 @@ export default function App() {
     }
     setSelectedLocation(null);
     setStoredLocation(null);
-    setMasterAdminView('types');
+    setMasterAdminView('branch-reports');
     setActiveTab('dashboard');
     window.dispatchEvent(new Event('auth_change'));
   };
@@ -180,7 +186,8 @@ export default function App() {
           if (res.user?.role === 'master_admin') {
             const loc = getStoredLocation();
             if (!loc) {
-              setMasterAdminView('types');
+              setMasterAdminView('branch-reports');
+              setInlineLocationType('branch');
             } else {
               setActiveTab('dashboard');
             }
@@ -207,7 +214,7 @@ export default function App() {
       setSelectedLocation(loc);
       if (u?.role === 'master_admin') {
         if (!loc) {
-          setMasterAdminView('locations');
+          setMasterAdminView('branch-reports');
         } else {
           setActiveTab('dashboard');
         }
@@ -313,7 +320,7 @@ export default function App() {
               // Master admin must never be redirected directly to a branch dashboard
               setSelectedLocation(null);
               setStoredLocation(null);
-              setMasterAdminView('types');
+              setMasterAdminView('branch-reports');
             } else {
               const locToSet = location || user?.location || null;
               if (locToSet) {
@@ -331,6 +338,10 @@ export default function App() {
 
   // Master Admin View: When no location is selected, display Studio Management or Location Selection
   if ((currentUser?.role === 'master_admin' || currentUser?.original_role === 'master_admin') && !selectedLocation) {
+    if (masterAdminView === 'branch-reports' || masterAdminView === 'franchise-reports') {
+      const reportType = masterAdminView === 'franchise-reports' ? 'franchise' : 'branch';
+      return <><MessageBoxHost /><div className="master-reports-screen" style={{ minHeight: '100vh', padding: 0, backgroundColor: '#F7F3ED' }}><MasterAdminReportsDashboard type={reportType} activeSection={showRevenueAnalytics ? `${reportType}-revenue` : (inlineLocationType || selectedLocationType)} onBack={() => { setShowRevenueAnalytics(false); setMasterAdminView('branch-reports'); }} onSelectType={(type) => { setShowRevenueAnalytics(false); setSelectedLocationType(type); setInlineLocationType(type); }} onSelectRevenue={(type) => { setInlineLocationType(null); setShowRevenueAnalytics(true); setMasterAdminView(type === 'franchise' ? 'franchise-reports' : 'branch-reports'); }} branding={activeMasterPortalBranding} onPreviewBranding={setMasterPortalBrandingPreview} onSaveBranding={saveMasterPortalBranding} onLogout={handleLogout} hideAnalyticsContent={!showRevenueAnalytics} customizerInitialView={inlineLocationType ? 'firm_type' : 'studio_management'} />{inlineLocationType && <LocationSelection embedded type={inlineLocationType} currentUser={currentUser} onSelectLocation={handleSelectLocation} onBack={() => setInlineLocationType(null)} onLogout={handleLogout} branding={activeMasterPortalBranding} onPreviewBranding={setMasterPortalBrandingPreview} onSaveBranding={saveMasterPortalBranding} />}</div></>;
+    }
     if (masterAdminView === 'locations') {
       return (
         <>
@@ -339,7 +350,7 @@ export default function App() {
             type={selectedLocationType}
             currentUser={currentUser}
             onSelectLocation={handleSelectLocation}
-            onBack={() => setMasterAdminView('types')}
+            onBack={() => setMasterAdminView(selectedLocationType === 'franchise' ? 'franchise-reports' : 'branch-reports')}
             onLogout={handleLogout}
             branding={activeMasterPortalBranding}
             onPreviewBranding={setMasterPortalBrandingPreview}
@@ -358,6 +369,7 @@ export default function App() {
             setSelectedLocationType(type);
             setMasterAdminView('locations');
           }}
+          onSelectRevenue={(type) => setMasterAdminView(type === 'franchise' ? 'franchise-reports' : 'branch-reports')}
           onLogout={handleLogout}
           branding={activeMasterPortalBranding}
           onPreviewBranding={setMasterPortalBrandingPreview}

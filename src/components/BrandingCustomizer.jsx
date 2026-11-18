@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, RotateCcw, Upload, X } from 'lucide-react';
+import { Check, RotateCcw, SlidersHorizontal, Upload, X } from 'lucide-react';
 import { apiRequest } from '../utils/api';
 import { DEFAULT_LOCATION_BRANDING, DEFAULT_MASTER_PORTAL_BRANDING, getLocationBranding } from '../utils/branding';
 
@@ -24,7 +24,7 @@ const masterColorFields = [
 ];
 const fontFamilies = ['Inter, sans-serif', 'Arial, sans-serif', 'Georgia, serif', 'Trebuchet MS, sans-serif', 'Courier New, monospace'];
 
-export default function BrandingCustomizer({ location, initialBranding, section = 'visits', scope = 'branch', showMasterLoginTab = false, onPreview, onSaved }) {
+export default function BrandingCustomizer({ location, initialBranding, section = 'visits', initialView = section, scope = 'branch', showMasterLoginTab = false, onPreview, onSaved }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(section);
   const [draft, setDraft] = useState(() => getLocationBranding({ ...location, branding_config: initialBranding }));
@@ -32,6 +32,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
+  const [showMasterBackgroundControls, setShowMasterBackgroundControls] = useState(false);
 
   const typographyHint = key => {
     const isHeading = /_(heading|title)$/.test(key) || ['team_heading', 'clients_heading', 'reports_heading', 'user_access_managers_label', 'user_access_visitors_label'].includes(key);
@@ -59,13 +60,14 @@ export default function BrandingCustomizer({ location, initialBranding, section 
     const openCustomizer = event => {
       setDraft(getLocationBranding({ ...location, branding_config: initialBranding }));
       const requestedSection = event.detail?.section;
-      setView(requestedSection || section);
+      setView(requestedSection || initialView);
+      setShowMasterBackgroundControls(false);
       setOpen(true);
     };
     const eventName = scope === 'master' ? 'open_master_portal_customizer' : 'open_branding_customizer';
     window.addEventListener(eventName, openCustomizer);
     return () => window.removeEventListener(eventName, openCustomizer);
-  }, [location?.location_id, initialBranding, section, scope]);
+  }, [location?.location_id, initialBranding, section, initialView, scope]);
 
   const update = (key, value) => {
     setDraft(current => {
@@ -138,6 +140,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
     onPreview?.(current);
     setError('');
     setSavedMessage('');
+    setShowMasterBackgroundControls(false);
     setOpen(false);
   };
 
@@ -145,7 +148,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
     visits: 'Dashboard', clients: 'Clients', services: 'Services', staff: 'Team',
     membership: 'Membership', reports: 'Reports', users: 'User Access', visitor_home: 'Visitor Welcome',
     branch_details: 'Branch Details', appointments: 'Appointments', login: 'Login',
-    studio_management: 'Studio Management', all_branches: 'All Branches', locations: 'All Branches', login: 'Login Screen'
+    studio_management: 'Studio Management', all_branches: 'Branch Directory', firm_type: 'Select Firm Type', locations: 'All Branches', login: 'Login Screen'
   };
 
   const uploadControl = (key, label) => (
@@ -177,6 +180,8 @@ export default function BrandingCustomizer({ location, initialBranding, section 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
               {scope === 'master' && showMasterLoginTab && <div style={{ display: 'flex', gap: 8, padding: 4, background: '#F7F2E9', borderRadius: 10 }}>
                 <button type="button" onClick={() => setView(section)} style={{ ...buttonStyle, flex: 1, background: view === section ? '#FFFFFF' : 'transparent', borderColor: view === section ? '#D99A64' : 'transparent' }}>{sectionLabels[section] || 'All Branches'}</button>
+                {section === 'studio_management' && <button type="button" onClick={() => setView('all_branches')} style={{ ...buttonStyle, flex: 1, background: view === 'all_branches' ? '#FFFFFF' : 'transparent', borderColor: view === 'all_branches' ? '#D99A64' : 'transparent' }}>Branch Directory</button>}
+                {section === 'studio_management' && <button type="button" onClick={() => setView('firm_type')} style={{ ...buttonStyle, flex: 1, background: view === 'firm_type' ? '#FFFFFF' : 'transparent', borderColor: view === 'firm_type' ? '#D99A64' : 'transparent' }}>Firm Type Cards</button>}
                 <button type="button" onClick={() => setView('login')} style={{ ...buttonStyle, flex: 1, background: view === 'login' ? '#FFFFFF' : 'transparent', borderColor: view === 'login' ? '#D99A64' : 'transparent' }}>Login screen</button>
               </div>}
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, fontWeight: 700, color: '#57534E' }}>
@@ -308,22 +313,92 @@ export default function BrandingCustomizer({ location, initialBranding, section 
               {scope === 'master' && view !== 'login' && <>
                 {uploadControl('master_logo_url', 'Master portal logo')}
                 {uploadControl('master_background_image_url', 'Master portal background image')}
-                <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                {draft.master_background_image_url && <button type="button" aria-expanded={showMasterBackgroundControls} onClick={() => setShowMasterBackgroundControls(value => !value)} style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 7, marginTop: -2, padding: '9px 11px', border: '1px solid #D9B77A', borderRadius: 8, background: '#FBF7F0', color: '#8B642D', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  <SlidersHorizontal size={14} /> {showMasterBackgroundControls ? 'Hide image customization' : 'Customize image'}
+                </button>}
+                {draft.master_background_image_url && showMasterBackgroundControls && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 2, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                  <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Background image display</div>
+                  <label style={rangeLabelStyle}>Hero height <strong>{Number(draft.master_hero_height) || 430}px</strong></label>
+                  <input aria-label="Hero height" type="range" min="280" max="680" step="10" value={draft.master_hero_height ?? 430} onChange={event => update('master_hero_height', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                  <label style={rangeLabelStyle}>Image width / zoom <strong>{Number(draft.master_background_width) || 100}%</strong></label>
+                  <input aria-label="Background image width" type="range" min="100" max="180" step="1" value={draft.master_background_width ?? 100} onChange={event => update('master_background_width', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                  <label style={rangeLabelStyle}>Horizontal position <strong>{Number(draft.master_background_position_x ?? 50)}%</strong></label>
+                  <input aria-label="Background image horizontal position" type="range" min="0" max="100" step="1" value={draft.master_background_position_x ?? 50} onChange={event => update('master_background_position_x', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                  <label style={rangeLabelStyle}>Vertical position <strong>{Number(draft.master_background_position_y ?? 52)}%</strong></label>
+                  <input aria-label="Background image vertical position" type="range" min="0" max="100" step="1" value={draft.master_background_position_y ?? 52} onChange={event => update('master_background_position_y', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                  <label style={rangeLabelStyle}>Image overlay <strong>{Number(draft.master_overlay_opacity) || 0}%</strong></label>
+                  <input aria-label="Background image overlay" type="range" min="0" max="90" step="1" value={draft.master_overlay_opacity ?? 62} onChange={event => update('master_overlay_opacity', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                </section>}
+                {view === 'firm_type' && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                  <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Select Firm Type page and cards</div>
+                  {[
+                    ['master_firm_type_heading', 'Page heading', 80],
+                    ['master_firm_proprietor_title', 'Proprietor card heading', 50],
+                    ['master_firm_proprietor_description', 'Proprietor card description', 120],
+                    ['master_firm_partnership_title', 'Partnership card heading', 50],
+                    ['master_firm_partnership_description', 'Partnership card description', 120],
+                    ['master_firm_pvt_ltd_title', 'Pvt. Ltd. card heading', 50],
+                    ['master_firm_pvt_ltd_description', 'Pvt. Ltd. card description', 120],
+                    ['master_firm_llp_title', 'LLP card heading', 50],
+                    ['master_firm_llp_description', 'LLP card description', 120],
+                    ['master_register_branch_label', 'Register branch button', 40],
+                    ['master_register_franchise_label', 'Register franchise button', 40]
+                  ].map(([key, label, maxLength]) => <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, fontWeight: 700, color: '#57534E' }}>
+                    {label}
+                    <input value={draft[key] ?? DEFAULT_MASTER_PORTAL_BRANDING[key]} maxLength={maxLength} onChange={event => update(key, event.target.value)} style={inputStyle} />
+                  </label>)}
+                  <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase', marginTop: 4 }}>Card appearance</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {[
+                      ['master_firm_card_fill', 'Card fill'],
+                      ['master_firm_card_border', 'Card border'],
+                      ['master_firm_card_text_color', 'Card descriptions'],
+                      ['master_firm_icon_fill', 'Icon tile fill'],
+                      ['master_firm_icon_color', 'Icon color'],
+                      ['master_firm_button_fill', 'Button fill'],
+                      ['master_firm_button_text', 'Button text']
+                    ].map(([key, label]) => <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: 8, border: '1px solid #E7DED2', borderRadius: 8, color: '#57534E', fontSize: 10.5, fontWeight: 700, background: '#FFFFFF' }}>
+                      <input aria-label={label} type="color" value={draft[key] || DEFAULT_MASTER_PORTAL_BRANDING[key]} onChange={event => update(key, event.target.value)} style={{ width: 25, height: 25, padding: 0, border: 0, background: 'none', cursor: 'pointer' }} />
+                      <span>{label}</span>
+                    </label>)}
+                  </div>
+                </section>}
+                {['studio_management', 'firm_type'].includes(view) && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
+                  <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>Card heading typography</div>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, fontWeight: 700, color: '#57534E' }}>
+                    Heading font
+                    <select value={draft.master_card_heading_font_family} onChange={event => update('master_card_heading_font_family', event.target.value)} style={inputStyle}>{fontFamilies.map(font => <option key={font} value={font}>{font.split(',')[0]}</option>)}</select>
+                  </label>
+                  <label style={rangeLabelStyle}>Font size <strong>{draft.master_card_heading_font_size}px</strong></label>
+                  <input type="range" min="12" max="36" step="1" value={draft.master_card_heading_font_size} onChange={event => update('master_card_heading_font_size', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <select aria-label="Card heading font style" value={draft.master_card_heading_font_style} onChange={event => update('master_card_heading_font_style', event.target.value)} style={inputStyle}><option value="normal">Normal</option><option value="italic">Italic</option></select>
+                    <select aria-label="Card heading font weight" value={draft.master_card_heading_font_weight} onChange={event => update('master_card_heading_font_weight', Number(event.target.value))} style={inputStyle}><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semi bold</option><option value="700">Bold</option><option value="800">Extra bold</option></select>
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 9, border: '1px solid #E7DED2', borderRadius: 9, color: '#57534E', fontSize: 11, fontWeight: 700, background: '#FFFFFF' }}>
+                    <input aria-label="Card heading color" type="color" value={draft.master_card_heading_color || DEFAULT_MASTER_PORTAL_BRANDING.master_card_heading_color} onChange={event => update('master_card_heading_color', event.target.value)} style={{ width: 28, height: 28, padding: 0, border: 0, background: 'none', cursor: 'pointer' }} />
+                    <span>Heading color</span>
+                  </label>
+                </section>}
+                {view !== 'firm_type' && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>
                   <div style={{ color: '#9F7335', fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase' }}>{view === 'studio_management' ? 'Studio Management page text' : 'All Branches page text'}</div>
                   {(view === 'studio_management' ? [
                     ['master_studio_heading', 'Page heading', 80],
-                    ['master_studio_subtitle', 'Page subtitle', 120],
                     ['master_branches_title', 'Branches card title', 50],
-                    ['master_branches_subtitle', 'Branches card description', 120],
-                    ['master_branches_button', 'Branches button', 40],
                     ['master_franchises_title', 'Franchises card title', 50],
-                    ['master_franchises_subtitle', 'Franchises card description', 120],
-                    ['master_franchises_button', 'Franchises button', 40],
+                    ['master_branch_revenue_title', 'Branch revenue card title', 60],
+                    ['master_franchise_revenue_title', 'Franchise revenue card title', 60],
                     ['master_logout_label', 'Sign out label', 40]
                   ] : [
                     ['master_locations_heading', 'Page heading (blank uses All Branches/Franchises)', 80],
-                    ['master_back_label', 'Back button', 60],
-                    ['master_reports_label', 'Reports button', 40],
+                    ['master_add_location_label', 'Add location button', 50],
+                    ['master_table_number_heading', 'Number column heading', 30],
+                    ['master_table_name_heading', 'Name column heading', 50],
+                    ['master_table_address_heading', 'Address column heading', 50],
+                    ['master_table_target_heading', 'Store target column heading', 50],
+                    ['master_table_type_heading', 'Type column heading', 50],
+                    ['master_table_status_heading', 'Status column heading', 40],
+                    ['master_table_action_heading', 'Action column heading', 40],
                     ['master_logout_label', 'Sign out label', 40]
                   ]).map(([key, label, maxLength]) => (
                     <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, fontWeight: 700, color: '#57534E' }}>
@@ -332,9 +407,7 @@ export default function BrandingCustomizer({ location, initialBranding, section 
                       <input value={draft[key] ?? DEFAULT_MASTER_PORTAL_BRANDING[key]} maxLength={maxLength} onChange={event => update(key, event.target.value)} style={inputStyle} />
                     </label>
                   ))}
-                  {view === 'studio_management' && <label style={rangeLabelStyle}>Background image overlay <strong>{Number(draft.master_overlay_opacity) || 0}%</strong></label>}
-                  {view === 'studio_management' && <input type="range" min="0" max="90" step="1" value={draft.master_overlay_opacity} onChange={event => update('master_overlay_opacity', Number(event.target.value))} style={{ width: '100%', accentColor: draft.master_primary_color }} />}
-                </section>
+                </section>}
               </>}
 
               {view === 'visits' && <section style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 13, border: '1px solid #E7DED2', borderRadius: 10, background: '#FFFFFF' }}>

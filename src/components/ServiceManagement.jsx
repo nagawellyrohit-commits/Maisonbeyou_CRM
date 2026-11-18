@@ -12,6 +12,8 @@ import { CATEGORY_ICONS, renderCategoryIcon, CATEGORY_IMAGE_PRESETS } from '../u
 import { getServiceMedia, isVideoMediaUrl } from '../utils/serviceMedia';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 
+const DEFAULT_CATEGORY_IMAGE_URL = '/services/categories/cat_01_signature_facials.png';
+
 export default function ServiceManagement({ branding, masterCatalogMode = false }) {
   const [categories, setCategories] = useState([]);
   const [masterCatalogData, setMasterCatalogData] = useState(null);
@@ -55,7 +57,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
   const [catActionLabel, setCatActionLabel] = useState('Explore');
   const [catOrder, setCatOrder] = useState(1);
   const [catIcon, setCatIcon] = useState('Sparkles');
-  const [catImageUrl, setCatImageUrl] = useState('/services/categories/cat_01_signature_facials.png?v=45');
+  const [catImageUrl, setCatImageUrl] = useState(DEFAULT_CATEGORY_IMAGE_URL);
   const [catImagePosX, setCatImagePosX] = useState(0);
   const [catImagePosY, setCatImagePosY] = useState(0);
   const [catImageScale, setCatImageScale] = useState(1);
@@ -438,7 +440,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
         setCatDesc(cat.description || '');
         setCatOrder(cat.display_order || 1);
         setCatIcon(cat.icon || 'Sparkles');
-        setCatImageUrl(cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : null) || '/services/categories/cat_01_signature_facials.png?v=45');
+        setCatImageUrl(cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : ''));
         let pos = { x: 0, y: 0, scale: 1 };
         if (cat.image_position) {
           try {
@@ -461,7 +463,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
         setCatDesc('');
         setCatOrder(nextOrder);
         setCatIcon('Sparkles');
-        setCatImageUrl(null);
+        setCatImageUrl(DEFAULT_CATEGORY_IMAGE_URL);
         setCatImagePosX(0);
         setCatImagePosY(0);
         setCatImageScale(1);
@@ -606,7 +608,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
       alert('Category Name is required');
       return;
     }
-    const finalImageUrl = catImageUrl || '/services/categories/cat_01_signature_facials.png?v=45';
+    const finalImageUrl = catImageUrl || null;
     const imagePositionStr = JSON.stringify({
       x: Math.round(catImagePosX),
       y: Math.round(catImagePosY),
@@ -1026,7 +1028,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px', minHeight: '60vh' }}>
+    <div className="animate-fade-in service-management-screen" style={{ display: 'flex', flexDirection: 'column', gap: '24px', minHeight: '60vh' }}>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
@@ -1171,6 +1173,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
           </div>
 
           {/* Categories Accordion Cards */}
+          <div className="service-category-cards-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '16px' }}>
           {categories.map((cat, idx) => {
             const isExpanded = Boolean(expandedCatIds[cat.category_id]);
             const serviceCount = (cat.services || []).length;
@@ -1181,7 +1184,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                 onDragEnter={(e) => handleCatCardDragOver(e, cat.category_id)}
                 onDragOver={(e) => handleCatCardDragOver(e, cat.category_id)}
                 onDrop={(e) => handleCatCardDrop(e, cat.category_id)}
-                className="card service-category-card"
+                className="card service-category-card service-category-admin-card"
                 style={{
                   overflow: 'hidden',
                   border: dragOverCatId === cat.category_id
@@ -1195,6 +1198,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
               >
                 {/* Category Header Bar (Clickable to Open/Close) */}
                 <div
+                  className="service-category-admin-header"
                   role="button"
                   draggable
                   onDragStart={(e) => handleCatCardDragStart(e, cat.category_id)}
@@ -1225,8 +1229,8 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                   title="Hold and drag up or down to reorder category, or click to open/collapse sub-services"
                 >
                   {/* Left: Category Icon, Name, Badges & Subtitle */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: '280px' }}>
-                    <div style={{
+                  <div className="service-category-admin-lead" style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: '280px' }}>
+                    <div className="service-category-admin-number" style={{
                       width: '38px',
                       height: '38px',
                       borderRadius: '8px',
@@ -1241,7 +1245,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                     }}>
                       {String(idx + 1).padStart(2, '0')}
                     </div>
-                    <div style={{
+                    <div className={`service-category-admin-image${cat.image_url ? '' : ' service-category-admin-image-empty'}`} style={{
                       width: '42px',
                       height: '42px',
                       borderRadius: '8px',
@@ -1261,14 +1265,17 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                           draggable={false}
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => {
-                            e.currentTarget.style.display = 'none';
+                            if (e.currentTarget.dataset.fallbackApplied === 'true') {
+                              e.currentTarget.style.display = 'none';
+                              return;
+                            }
+                            e.currentTarget.dataset.fallbackApplied = 'true';
+                            e.currentTarget.src = DEFAULT_CATEGORY_IMAGE_URL;
                           }}
                         />
-                      ) : (
-                        renderCategoryIcon(cat.icon, 19)
-                      )}
+                      ) : renderCategoryIcon(cat.icon, 42, '#A8793D')}
                     </div>
-                    <div style={{ flex: 1 }}>
+                    <div className="service-category-admin-copy" style={{ flex: 1 }}>
                       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                         <h2 style={{ fontSize: '18px', color: '#1C1917', margin: 0, fontWeight: '700' }}>
                           {cat.category_name}
@@ -1295,7 +1302,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                   </div>
 
                   {/* Right: Expand Toggle Button & Indicator */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div className="service-category-admin-toggle-wrap" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div
                       style={{
                         display: 'inline-flex',
@@ -1557,6 +1564,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
               </div>
             );
           })}
+          </div>
         </div>
       )}
 
@@ -1818,7 +1826,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingTop: '4px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <label style={{ fontSize: '13px', fontWeight: '600', margin: 0, color: '#1C1917' }}>
-                        Category Card Photography / Visual *
+                        Category Card Photography / Visual (Optional)
                       </label>
                       <span style={{
                         fontSize: '11px',
@@ -1870,7 +1878,24 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                           <span>{uploadingCatImage ? 'Validating & Uploading...' : 'Upload Transparent PNG'}</span>
                         </button>
 
-                        {catImageTransparentVerified && !catImageUploadError && (
+                        {catImageUrl && <button
+                          type="button"
+                          onClick={() => {
+                            setCatImageUrl('');
+                            setCatImageUploadError('');
+                            setCatImageTransparentVerified(false);
+                            setCatIcon(current => current.includes('/') ? 'Sparkles' : current);
+                            setIsCatImgSelected(false);
+                            setCatImagePosX(0);
+                            setCatImagePosY(0);
+                            setCatImageScale(1);
+                          }}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid #E7D8C4', background: '#FAF7F2', color: '#725C43', fontSize: 12, fontWeight: 650, cursor: 'pointer' }}
+                        >
+                          <X size={13} /> Remove Image
+                        </button>}
+
+                        {catImageUrl && catImageTransparentVerified && !catImageUploadError && (
                           <span style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -2015,7 +2040,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                       </div>
                     </div>
 
-                    <div
+                    {catImageUrl ? <div
                       className="ritual-card-image-wrap"
                       style={{
                         pointerEvents: 'none',
@@ -2050,7 +2075,7 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                         }}
                       >
                         <img
-                          src={catImageUrl || undefined}
+                          src={catImageUrl}
                           alt={catName || 'Category Image'}
                           className="ritual-card-img"
                           draggable={false}
@@ -2064,7 +2089,12 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                             display: 'block'
                           }}
                           onError={(e) => {
-                            e.currentTarget.src = '/services/categories/cat_01_signature_facials.png?v=45';
+                            if (e.currentTarget.dataset.fallbackApplied === 'true') {
+                              e.currentTarget.style.display = 'none';
+                              return;
+                            }
+                            e.currentTarget.dataset.fallbackApplied = 'true';
+                            e.currentTarget.src = DEFAULT_CATEGORY_IMAGE_URL;
                           }}
                         />
 
@@ -2103,7 +2133,10 @@ export default function ServiceManagement({ branding, masterCatalogMode = false 
                           </>
                         )}
                       </div>
-                    </div>
+                    </div> : <div className="ritual-card-image-wrap ritual-card-image-empty">
+                      <ImageIcon size={34} strokeWidth={1.4} />
+                      <span>No image</span>
+                    </div>}
 
                     {/* Floating Toolbar near the selected image (only shown when selected): Zoom % + Reset */}
                     {isCatImgSelected && (

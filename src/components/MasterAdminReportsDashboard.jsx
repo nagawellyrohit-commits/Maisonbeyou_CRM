@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   Building2,
+  Handshake,
+  Menu,
+  Palette,
+  LogOut,
   TrendingUp,
   Calendar,
   Award,
@@ -24,32 +28,51 @@ import {
   DollarSign
 } from 'lucide-react';
 import { apiRequest, formatCurrency } from '../utils/api';
+import brandLogoImg from '../assets/brand-logo.png';
+import studioBg from '../assets/studio-bg.png';
+import BrandingCustomizer from './BrandingCustomizer';
+import { masterPortalCssVariables } from '../utils/branding';
 
-export default function MasterAdminReportsDashboard({ onBack }) {
+export default function MasterAdminReportsDashboard({ onBack, type = 'branch', activeSection: activeSectionProp, onSelectType, onSelectRevenue, branding, onPreviewBranding, onSaveBranding, onLogout, hideAnalyticsContent = false, customizerInitialView = 'studio_management' }) {
+  const locationLabel = type === 'franchise' ? 'Franchise' : 'Branch';
+  const activeSection = activeSectionProp || (hideAnalyticsContent ? type : `${type}-revenue`);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reportsData, setReportsData] = useState(null);
 
   // Active Tab: 'overview' | 'timeline' | 'monthly' | 'consistency'
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('timeline');
 
   // Filters
   const [selectedFirmType, setSelectedFirmType] = useState('All');
   const [selectedYear, setSelectedYear] = useState('All');
+  const [selectedReportYear, setSelectedReportYear] = useState('2026');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Selected Month for Month-wise Leaderboard
   const [selectedMonth, setSelectedMonth] = useState('2026-10');
+  const [consistencyStartMonth, setConsistencyStartMonth] = useState('2026-07');
+  const [consistencyEndMonth, setConsistencyEndMonth] = useState('2026-10');
+
+  useEffect(() => {
+    const handleClickOutside = event => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+  return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     fetchReports();
-  }, []);
+  }, [type]);
 
   const fetchReports = async () => {
     try {
       setLoading(true);
       setError('');
-      const data = await apiRequest('/admin/master-reports');
+      const data = await apiRequest(`/admin/master-reports?type=${type}`);
       if (data) {
         setReportsData(data);
       }
@@ -127,7 +150,7 @@ export default function MasterAdminReportsDashboard({ onBack }) {
               cursor: 'pointer'
             }}
           >
-            Back to Branches
+            Back to {locationLabel}s
           </button>
         </div>
       </div>
@@ -139,7 +162,6 @@ export default function MasterAdminReportsDashboard({ onBack }) {
     firmTypeBreakdown,
     yearlyExpansion,
     timeline,
-    months,
     monthlyLeaderboards,
     growthConsistency
   } = reportsData;
@@ -164,12 +186,45 @@ export default function MasterAdminReportsDashboard({ onBack }) {
   };
 
   // Helper to dynamically get or generate leaderboard for ANY custom month
-  const getActiveMonthData = () => {
-    if (monthlyLeaderboards && monthlyLeaderboards[selectedMonth]) {
-      return monthlyLeaderboards[selectedMonth];
+  const getActiveMonthData = (monthKey = selectedMonth) => {
+    if (monthKey === 'All') {
+      const monthKeys = [];
+      for (let year = 2024; year <= 2026; year++) {
+        for (let month = 1; month <= (year === 2026 ? 11 : 12); month++) {
+          monthKeys.push(`${year}-${String(month).padStart(2, '0')}`);
+        }
+      }
+      const allTimeBranches = (timeline || []).map(location => {
+        const totals = monthKeys.reduce((result, key) => {
+          const existing = monthlyLeaderboards?.[key]?.branches?.find(item => item.location_id === location.location_id);
+          if (existing) {
+            result.revenue += Number(existing.revenue) || 0;
+            result.visits += Number(existing.visits) || 0;
+            return result;
+          }
+          const [year, month] = key.split('-').map(Number);
+          const opened = new Date(location.opened_at || location.created_at || '2024-01-01');
+          if (opened > new Date(year, month, 0)) return result;
+          const hash = ((location.location_id * 19) % 37) / 100;
+          const baseMultiplier = location.location_id === 1 ? 1 : location.location_id === 2 ? 0.74 : 0.42 + hash;
+          const yearMultiplier = year === 2026 ? 1 : year === 2025 ? 0.85 : 0.68;
+          const monthMultiplier = 0.82 + ((month % 6) * 0.04);
+          const revenue = Math.round(354944 * baseMultiplier * yearMultiplier * monthMultiplier);
+          result.revenue += revenue;
+          result.visits += Math.max(1, Math.round(revenue / 5600));
+          return result;
+        }, { revenue: 0, visits: 0 });
+        return { ...location, revenue: totals.revenue, visits: totals.visits, avgTicket: totals.visits ? Math.round(totals.revenue / totals.visits) : 0 };
+      }).sort((a, b) => b.revenue - a.revenue);
+      const totalRevenue = allTimeBranches.reduce((sum, item) => sum + item.revenue, 0);
+      allTimeBranches.forEach((item, index) => { item.rank = index + 1; item.sharePct = totalRevenue ? ((item.revenue / totalRevenue) * 100).toFixed(1) : 0; });
+      return { month: 'All', label: 'All Years (2024–2026)', totalRevenue, topBranch: allTimeBranches[0] || null, branches: allTimeBranches };
     }
-    const [y, m] = (selectedMonth || '2026-10').split('-').map(Number);
-    const monthLabel = getMonthDisplayName(selectedMonth);
+    if (monthlyLeaderboards && monthlyLeaderboards[monthKey]) {
+      return monthlyLeaderboards[monthKey];
+    }
+    const [y, m] = (monthKey || '2026-10').split('-').map(Number);
+    const monthLabel = getMonthDisplayName(monthKey);
 
     const monthBranches = (timeline || []).map(b => {
       const branchOpenedDate = new Date(b.opened_at || b.created_at || '2024-01-01');
@@ -207,7 +262,7 @@ export default function MasterAdminReportsDashboard({ onBack }) {
     });
 
     return {
-      month: selectedMonth,
+      month: monthKey,
       label: monthLabel,
       totalRevenue: totalMonthRevenue,
       topBranch: monthBranches[0] || null,
@@ -217,6 +272,74 @@ export default function MasterAdminReportsDashboard({ onBack }) {
 
   // Current selected month leaderboard
   const activeMonthData = getActiveMonthData();
+
+  const monthSelectorBar = (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            flexWrap: 'wrap',
+            gap: '16px'
+          }}>
+            {/* Selection Controls: Year + Custom Month Picker */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '5px 10px', border: '1px solid #DAC493', borderRadius: 9999, background: '#FFFFFF', color: '#9F7335', fontSize: 12, fontWeight: 800 }}>
+                YEAR:
+                <select value={selectedReportYear} onChange={event => {
+                  const year = event.target.value;
+                  setSelectedReportYear(year);
+                  if (year === 'All') setSelectedMonth('All');
+                  else {
+                    const month = selectedMonth.match(/^\d{4}-(\d{2})$/)?.[1] || '10';
+                    setSelectedMonth(`${year}-${month}`);
+                  }
+                }} style={{ border: 0, background: 'transparent', color: '#302820', fontSize: 12, fontWeight: 700, outline: 'none', cursor: 'pointer' }}>
+                  {['All', '2026', '2025', '2024'].map(year => <option key={year} value={year}>{year === 'All' ? 'All years' : year}</option>)}
+                </select>
+              </label>
+
+              {/* Custom Month Picker */}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
+                border: '1.5px solid #DAC493',
+                padding: '5px 12px',
+                borderRadius: '9999px',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
+              }}>
+                <span style={{ fontSize: '12px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Custom Month:
+                </span>
+                <input
+                  type="month"
+                  value={selectedMonth === 'All' ? '' : selectedMonth}
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      setSelectedMonth(e.target.value);
+                      setSelectedReportYear(e.target.value.slice(0, 4));
+                    }
+                  }}
+                  style={{
+                    border: '1px solid #DAC493',
+                    background: '#FFFFFF',
+                    borderRadius: '8px',
+                    padding: '4px 8px',
+                    fontSize: '12.5px',
+                    fontWeight: '700',
+                    color: '#1C1917',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-sans)'
+                  }}
+                  title="Choose any custom month & year"
+                />
+              </div>
+            </div>
+          </div>
+  );
+
   const filteredMonthlyBranches = (activeMonthData.branches || []).filter(item => {
     const matchesFirm = selectedFirmType === 'All' || item.firm_type === selectedFirmType;
     const matchesSearch = !searchQuery || 
@@ -226,14 +349,53 @@ export default function MasterAdminReportsDashboard({ onBack }) {
     return matchesFirm && matchesSearch;
   });
 
-  // Filtered consistency records
-  const filteredConsistency = growthConsistency.filter(item => {
+  const consistencyStartIndex = (() => { const [year, month] = consistencyStartMonth.split('-').map(Number); return year * 12 + month - 1; })();
+  const consistencyEndIndex = (() => { const [year, month] = consistencyEndMonth.split('-').map(Number); return year * 12 + month - 1; })();
+  const consistencyRangeValid = Number.isFinite(consistencyStartIndex) && Number.isFinite(consistencyEndIndex) && consistencyEndIndex >= consistencyStartIndex;
+  const consistencyMonthKeys = consistencyRangeValid
+    ? Array.from({ length: Math.min(consistencyEndIndex - consistencyStartIndex + 1, 120) }, (_, offset) => {
+      const index = consistencyStartIndex + offset;
+      return `${Math.floor(index / 12)}-${String((index % 12) + 1).padStart(2, '0')}`;
+    })
+    : [];
+  const consistencyGrowthColumns = consistencyMonthKeys.slice(1);
+  const monthRows = consistencyMonthKeys.map(key => [key, getActiveMonthData(key)]);
+  const calculatedConsistency = (timeline || []).map(location => {
+    const monthRevenues = monthRows.map(([key, monthData]) => ({
+      key,
+      revenue: Number(monthData.branches.find(branch => branch.location_id === location.location_id)?.revenue) || 0
+    }));
+    const monthlyTrend = monthRevenues.slice(1).map((point, index) => {
+      const previousRevenue = monthRevenues[index].revenue;
+      const growth = previousRevenue > 0 ? Number((((point.revenue - previousRevenue) / previousRevenue) * 100).toFixed(1)) : 0;
+      return { month: point.key, growth };
+    });
+    const averageGrowth = monthlyTrend.length ? Number((monthlyTrend.reduce((sum, point) => sum + point.growth, 0) / monthlyTrend.length).toFixed(1)) : 0;
+    let growthStreakMonths = 0;
+    for (const point of [...monthlyTrend].reverse()) {
+      if (point.growth <= 0) break;
+      growthStreakMonths += 1;
+    }
+    let consistencyStatus = 'Steady Performer';
+    let consistencyBadge = '📈 Steady Upward Trend';
+    if (growthStreakMonths >= 3 && averageGrowth >= 10) {
+      consistencyStatus = 'Consistent Growth Leader';
+      consistencyBadge = '🔥 Top Growth Champion';
+    } else if (averageGrowth >= 7) {
+      consistencyStatus = 'High Velocity Emerging';
+      consistencyBadge = '⚡ High Acceleration';
+    }
+    return { ...location, avgMoMGrowth: averageGrowth, growthStreakMonths, consistencyStatus, consistencyBadge, monthlyTrend };
+  }).sort((a, b) => (b.growthStreakMonths * 100 + b.avgMoMGrowth) - (a.growthStreakMonths * 100 + a.avgMoMGrowth));
+
+  const consistencyChampion = calculatedConsistency[0] || null;
+  const filteredConsistency = calculatedConsistency.filter(item => {
     const matchesFirm = selectedFirmType === 'All' || item.firm_type === selectedFirmType;
     const matchesSearch = !searchQuery || 
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.code.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesFirm && matchesSearch;
+    return consistencyRangeValid && matchesFirm && matchesSearch;
   });
 
   const getFirmIcon = (type) => {
@@ -247,247 +409,54 @@ export default function MasterAdminReportsDashboard({ onBack }) {
   };
 
   return (
-    <div style={{ paddingBottom: '60px' }}>
-      {/* ======================================================== */}
-      {/* 1. TOP NAVIGATION & EXECUTIVE HEADER                     */}
-      {/* ======================================================== */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '16px',
-        paddingTop: '52px',
-        marginBottom: '44px'
+    <div className="master-portal-themed master-admin-reports-dashboard" style={{ ...masterPortalCssVariables(branding), paddingBottom: hideAnalyticsContent ? 0 : '60px' }}>
+      <header className="master-reports-navbar">
+        <div className="master-reports-navbar-inner">
+          <img src={branding?.master_logo_url || brandLogoImg} alt={branding?.brand_name || 'Maison BeYou'} />
+          <div ref={menuRef} className="master-reports-navbar-menu">
+            <button type="button" aria-label="Open master menu" aria-expanded={showMenu} onClick={() => setShowMenu(value => !value)}><Menu size={20} /></button>
+            {showMenu && <div className="master-reports-navbar-dropdown">
+            <button type="button" onClick={() => { setShowMenu(false); window.dispatchEvent(new CustomEvent('open_master_portal_customizer', { detail: { section: customizerInitialView } })); }}><Palette size={16} />Customize</button>
+              <button type="button" onClick={() => { setShowMenu(false); onLogout?.(); }}><LogOut size={16} />{branding?.master_logout_label || 'Sign Out'}</button>
+            </div>}
+          </div>
+        </div>
+      </header>
+      <section className="master-reports-hero" style={{
+        minHeight: `${Math.min(680, Math.max(280, Number(branding?.master_hero_height) || 430))}px`,
+        backgroundColor: branding?.master_background_color || '#2C211B',
+        backgroundImage: `linear-gradient(rgba(0, 0, 0, ${Math.min(90, Math.max(0, Number(branding?.master_overlay_opacity ?? 62))) / 100}), rgba(0, 0, 0, ${Math.min(90, Math.max(0, Number(branding?.master_overlay_opacity ?? 62))) / 100})), url(${branding?.master_background_image_url || studioBg})`,
+        backgroundSize: `100% 100%, ${Math.min(180, Math.max(100, Number(branding?.master_background_width) || 100))}% auto`,
+        backgroundPosition: `center, ${Math.min(100, Math.max(0, Number(branding?.master_background_position_x ?? 50)))}% ${Math.min(100, Math.max(0, Number(branding?.master_background_position_y ?? 52)))}%`
       }}>
-        {/* Back to Branches Button */}
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '13.5px',
-            fontWeight: '700',
-            color: '#FFFFFF',
-            background: 'rgba(0, 0, 0, 0.55)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            border: '1.5px solid rgba(218, 196, 147, 0.65)',
-            padding: '9px 22px',
-            borderRadius: '9999px',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.3)'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(184, 139, 74, 0.4)';
-            e.currentTarget.style.borderColor = '#C59A58';
-            e.currentTarget.style.transform = 'translateX(-3px)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.55)';
-            e.currentTarget.style.borderColor = 'rgba(218, 196, 147, 0.65)';
-            e.currentTarget.style.transform = 'translateX(0)';
-          }}
-        >
-          <ArrowLeft size={16} color="#DFBA73" />
-          <span>Back to Branches</span>
-        </button>
-
-        {/* Live Network Status Indicator */}
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-          background: 'rgba(0,0,0,0.5)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(218, 196, 147, 0.4)',
-          padding: '6px 16px',
-          borderRadius: '9999px',
-          color: '#F5ECE0',
-          fontSize: '12px',
-          fontWeight: '700'
-        }}>
-          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10B981', boxShadow: '0 0 10px #10B981' }} />
-          <span>Active Network: {summary.totalBranches} Registered Studios</span>
+        <div className="master-reports-hero-content">
+          <h1>{branding?.master_studio_heading || 'STUDIO MANAGEMENT'}</h1>
+          <div className="master-reports-hero-rule" />
         </div>
-      </div>
+      </section>
 
-      {/* Hero Title Block */}
-      <div style={{ marginBottom: '52px' }}>
-        <h1 style={{
-          fontFamily: 'var(--font-sans)',
-          fontSize: '32px',
-          fontWeight: '800',
-          color: '#FFFFFF',
-          letterSpacing: '0.01em',
-          margin: 0,
-          textShadow: '0 2px 14px rgba(0,0,0,0.75)'
-        }}>
-          Branch Expansion & Revenue Analytics
-        </h1>
-      </div>
-
-      {/* ======================================================== */}
-      {/* 2. EXECUTIVE HERO KPI METRIC CARDS                       */}
-      {/* ======================================================== */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))',
-        gap: '16px',
-        marginBottom: '32px'
-      }}>
-        {/* Card 1: Total Branches */}
-        <div style={{
-          background: '#FFFFFF',
-          borderRadius: '18px',
-          border: '1.5px solid #DAC493',
-          padding: '22px 20px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
-          position: 'relative',
-          overflow: 'hidden'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Network Size
-            </span>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '10px',
-              background: '#FAF6EE',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#B88B4A'
-            }}>
-              <Building2 size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1 }}>
-            {summary.totalBranches}
-          </div>
-          <div style={{ fontSize: '12px', fontWeight: '600', color: '#10B981', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <CheckCircle2 size={13} />
-            <span>{summary.activeBranches} Active Studios ({summary.citiesCount} Cities)</span>
-          </div>
+      <nav className="master-reports-section-nav" aria-label="Studio management sections">
+        <div className="master-reports-breadcrumb"><span>HOME</span><b>›</b><strong>STUDIO MANAGEMENT</strong></div>
+        <div className="master-reports-section-links">
+          <button type="button" className={activeSection === 'branch' ? 'is-active' : ''} aria-current={activeSection === 'branch' ? 'page' : undefined} onClick={() => onSelectType?.('branch')}>{branding?.master_branches_title || 'BRANCHES'}</button>
+          <button type="button" className={activeSection === 'franchise' ? 'is-active' : ''} aria-current={activeSection === 'franchise' ? 'page' : undefined} onClick={() => onSelectType?.('franchise')}>{branding?.master_franchises_title || 'FRANCHISES'}</button>
+          <button type="button" className={activeSection === 'branch-revenue' ? 'is-active' : ''} aria-current={activeSection === 'branch-revenue' ? 'page' : undefined} onClick={() => onSelectRevenue?.('branch')}>{branding?.master_branch_revenue_title || 'BRANCH REVENUE'}</button>
+          <button type="button" className={activeSection === 'franchise-revenue' ? 'is-active' : ''} aria-current={activeSection === 'franchise-revenue' ? 'page' : undefined} onClick={() => onSelectRevenue?.('franchise')}>{branding?.master_franchise_revenue_title || 'FRANCHISE REVENUE'}</button>
         </div>
+      </nav>
 
-        {/* Card 2: Best Expansion Year */}
-        <div style={{
-          background: '#FFFFFF',
-          borderRadius: '18px',
-          border: '1.5px solid #DAC493',
-          padding: '22px 20px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.06)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Best Expansion Year
-            </span>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '10px',
-              background: '#FEF3C7',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#D97706'
-            }}>
-              <Award size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: '800', color: '#1C1917', lineHeight: 1, display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-            <span>{summary.bestYear}</span>
-            <span style={{ fontSize: '12px', fontWeight: '800', color: '#D97706', background: '#FEF3C7', padding: '2px 8px', borderRadius: '9999px' }}>
-              Peak
-            </span>
-          </div>
-          <div style={{ fontSize: '12px', color: '#78716C', marginTop: '8px' }}>
-            <strong style={{ color: '#1C1917' }}>{summary.bestYearCount} studios</strong> launched in {summary.bestYear}
-          </div>
-        </div>
-
-        {/* Card 3: Top Earning Branch */}
-        <div style={{
-          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF6EE 100%)',
-          borderRadius: '18px',
-          border: '1.5px solid #DAC493',
-          padding: '22px 20px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.06)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Top Earning Branch
-            </span>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '10px',
-              background: '#FEF3C7',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#B45309'
-            }}>
-              <Crown size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {summary.topEarningBranch ? summary.topEarningBranch.name.replace('Maison BeYou — ', '') : 'Jubilee Hills Flagship'}
-          </div>
-          <div style={{ fontSize: '13px', fontWeight: '800', color: '#B88B4A', marginTop: '6px' }}>
-            ₹{summary.topEarningBranch?.revenue.toLocaleString('en-IN')} (Oct 2026)
-          </div>
-        </div>
-
-        {/* Card 4: Most Consistent Growth */}
-        <div style={{
-          background: '#FFFFFF',
-          borderRadius: '18px',
-          border: '1.5px solid #DAC493',
-          padding: '22px 20px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.06)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Consistent Growth Leader
-            </span>
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '10px',
-              background: '#ECFDF5',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#059669'
-            }}>
-              <Flame size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {summary.mostConsistentBranch ? summary.mostConsistentBranch.name.replace('Maison BeYou — ', '') : 'Gachibowli Studio'}
-          </div>
-          <div style={{ fontSize: '12px', fontWeight: '700', color: '#059669', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <TrendingUp size={14} />
-            <span>+{summary.mostConsistentBranch?.avgMoMGrowth}% Avg MoM ({summary.mostConsistentBranch?.growthStreakMonths} Mo Streak)</span>
-          </div>
-        </div>
-      </div>
-
+      {!hideAnalyticsContent && <>
       {/* ======================================================== */}
       {/* 3. LUXURY NAVIGATION TABS & CONTROLS                     */}
       {/* ======================================================== */}
       <div style={{
+        display: 'flex',
         background: '#FFFFFF',
         borderRadius: '20px',
         border: '1.5px solid #DAC493',
         padding: '16px 20px',
-        marginBottom: '28px',
+        marginTop: '40px',
+        marginBottom: '40px',
         boxShadow: '0 6px 20px rgba(0,0,0,0.04)',
         display: 'flex',
         alignItems: 'center',
@@ -498,7 +467,6 @@ export default function MasterAdminReportsDashboard({ onBack }) {
         {/* Tab Buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           {[
-            { id: 'overview', label: 'Portfolio Overview', icon: Layers },
             { id: 'timeline', label: 'Expansion Timeline & Gaps', icon: Calendar },
             { id: 'monthly', label: 'Month-Wise Leaderboard', icon: BarChart3 },
             { id: 'consistency', label: 'Income Growth Consistency', icon: TrendingUp }
@@ -558,8 +526,8 @@ export default function MasterAdminReportsDashboard({ onBack }) {
       {/* ======================================================== */}
       {/* TAB 1: PORTFOLIO OVERVIEW (FIRM TYPES & BEST YEAR)       */}
       {/* ======================================================== */}
-      {activeTab === 'overview' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+      {activeTab === 'overview' && false && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
           {/* Firm Types Section */}
           <div style={{
             background: '#FFFFFF',
@@ -571,10 +539,10 @@ export default function MasterAdminReportsDashboard({ onBack }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <div>
                 <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
-                  Firm Type Distribution ({summary.totalBranches} Branches)
+              Firm Type Distribution ({summary.totalBranches} {locationLabel}s)
                 </h2>
                 <div style={{ fontSize: '13px', color: '#78716C', marginTop: '4px' }}>
-                  Statutory ownership model and branch share across Sole Proprietorship, Partnership, Pvt. Ltd., and LLP
+                  Statutory ownership model and {locationLabel.toLowerCase()} share across Sole Proprietorship, Partnership, Pvt. Ltd., and LLP
                 </div>
               </div>
 
@@ -763,12 +731,9 @@ export default function MasterAdminReportsDashboard({ onBack }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '22px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <h2 style={{ fontSize: '20px', fontWeight: '800', color: '#1C1917', margin: 0 }}>
+              <h2 className="master-report-section-title" style={{ margin: 0 }}>
                 Chronological Branch Expansion & Opening Gaps
               </h2>
-              <div style={{ fontSize: '13px', color: '#78716C', marginTop: '4px' }}>
-                Complete timeline showing when each studio opened, where, and the exact interval in days from the previous opening
-              </div>
             </div>
 
             {/* Year Filters */}
@@ -897,114 +862,7 @@ export default function MasterAdminReportsDashboard({ onBack }) {
       {/* TAB 3: MONTH-WISE BRANCH REVENUE LEADERBOARD             */}
       {/* ======================================================== */}
       {activeTab === 'monthly' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-          {/* Month Selector Bar */}
-          <div style={{
-            background: '#FFFFFF',
-            borderRadius: '20px',
-            border: '1.5px solid #DAC493',
-            padding: '16px 22px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '16px',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.04)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
-                background: '#FAF6EE',
-                border: '1px solid #DAC493',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#B88B4A'
-              }}>
-                <Calendar size={17} />
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  Calendar Month Filter
-                </div>
-                <div style={{ fontSize: '15px', fontWeight: '800', color: '#1C1917' }}>
-                  {activeMonthData.label}
-                </div>
-              </div>
-            </div>
-
-            {/* Selection Controls: Quick Pills + Custom Month Picker */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              {/* Quick Preset Buttons */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                {months.map(m => {
-                  const isSelected = selectedMonth === m.key;
-                  return (
-                    <button
-                      key={m.key}
-                      type="button"
-                      onClick={() => setSelectedMonth(m.key)}
-                      style={{
-                        padding: '7px 14px',
-                        borderRadius: '9999px',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        border: isSelected ? '1.5px solid #B88B4A' : '1px solid #E7E5E4',
-                        background: isSelected ? 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)' : '#FFFFFF',
-                        color: isSelected ? '#9F7335' : '#78716C',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        boxShadow: isSelected ? '0 2px 8px rgba(184, 139, 74, 0.2)' : 'none'
-                      }}
-                    >
-                      {m.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Custom Month Picker */}
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: 'linear-gradient(135deg, #FAF6EE 0%, #F5ECE0 100%)',
-                border: '1.5px solid #DAC493',
-                padding: '5px 12px',
-                borderRadius: '9999px',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.04)'
-              }}>
-                <span style={{ fontSize: '12px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Custom Month:
-                </span>
-                <input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      setSelectedMonth(e.target.value);
-                    }
-                  }}
-                  style={{
-                    border: '1px solid #DAC493',
-                    background: '#FFFFFF',
-                    borderRadius: '8px',
-                    padding: '4px 8px',
-                    fontSize: '12.5px',
-                    fontWeight: '700',
-                    color: '#1C1917',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-sans)'
-                  }}
-                  title="Choose any custom month & year"
-                />
-              </div>
-            </div>
-          </div>
-
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
           {/* Top Earning Branch Spotlight Banner */}
           {activeMonthData.topBranch && (
             <div style={{
@@ -1070,9 +928,12 @@ export default function MasterAdminReportsDashboard({ onBack }) {
             padding: '28px',
             boxShadow: '0 8px 24px rgba(0,0,0,0.04)'
           }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: '0 0 16px' }}>
-              All Branches Revenue Ranking ({activeMonthData.label})
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+              <h3 className="master-report-section-title" style={{ margin: 0 }}>
+                All Branches Revenue Ranking ({activeMonthData.label})
+              </h3>
+              {monthSelectorBar}
+            </div>
 
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '700px' }}>
@@ -1148,7 +1009,7 @@ export default function MasterAdminReportsDashboard({ onBack }) {
       {/* TAB 4: INCOME GROWTH CONSISTENCY TRACKER                 */}
       {/* ======================================================== */}
       {activeTab === 'consistency' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '40px' }}>
           {/* Consistency Champion Banner */}
           <div style={{
             background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)',
@@ -1181,10 +1042,12 @@ export default function MasterAdminReportsDashboard({ onBack }) {
                 <span>Consistently Growing Income Champion</span>
               </div>
               <h3 style={{ fontSize: '26px', fontWeight: '800', color: '#064E3B', margin: 0 }}>
-                {summary.mostConsistentBranch ? summary.mostConsistentBranch.name : 'Gachibowli Studio'}
+                {consistencyChampion?.name || 'No branch data for this period'}
               </h3>
               <div style={{ fontSize: '13.5px', color: '#047857', marginTop: '4px', fontWeight: '600' }}>
-                Unbroken streak of consecutive positive revenue growth across all recent months
+                {consistencyRangeValid && consistencyMonthKeys.length > 1
+                  ? `Revenue growth from ${getMonthDisplayName(consistencyStartMonth)} through ${getMonthDisplayName(consistencyEndMonth)}`
+                  : 'Select a range of at least two months to compare revenue growth'}
               </div>
             </div>
 
@@ -1193,10 +1056,10 @@ export default function MasterAdminReportsDashboard({ onBack }) {
                 Average MoM Growth
               </div>
               <div style={{ fontSize: '32px', fontWeight: '800', color: '#064E3B' }}>
-                +{summary.mostConsistentBranch?.avgMoMGrowth}%
+                {consistencyChampion ? `${consistencyChampion.avgMoMGrowth > 0 ? '+' : ''}${consistencyChampion.avgMoMGrowth}%` : '—'}
               </div>
               <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#059669' }}>
-                {summary.mostConsistentBranch?.growthStreakMonths} Consecutive Growth Months
+                {consistencyChampion?.growthStreakMonths ?? 0} Consecutive Growth Months
               </div>
             </div>
           </div>
@@ -1209,9 +1072,23 @@ export default function MasterAdminReportsDashboard({ onBack }) {
             padding: '28px',
             boxShadow: '0 8px 24px rgba(0,0,0,0.04)'
           }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '800', color: '#1C1917', margin: '0 0 16px' }}>
-              Branch Month-over-Month (MoM) Growth Consistency Ranking
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '14px', flexWrap: 'wrap', marginBottom: '16px' }}>
+              <h3 className="master-report-section-title" style={{ margin: 0 }}>
+                Branch Month-over-Month (MoM) Growth Consistency Ranking
+              </h3>
+              <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'flex-end', gap: '14px', flexWrap: 'wrap' }}>
+              <label style={{ display: 'grid', gap: '6px', color: '#78716C', fontSize: '12px', fontWeight: '700' }}>
+                From month
+                <input type="month" value={consistencyStartMonth} onChange={event => setConsistencyStartMonth(event.target.value)}
+                  style={{ minHeight: '40px', padding: '8px 12px', border: '1px solid #DAC493', borderRadius: '10px', background: '#FFFFFF', color: '#44403C', font: 'inherit' }} />
+              </label>
+              <label style={{ display: 'grid', gap: '6px', color: '#78716C', fontSize: '12px', fontWeight: '700' }}>
+                To month
+                <input type="month" value={consistencyEndMonth} onChange={event => setConsistencyEndMonth(event.target.value)}
+                  style={{ minHeight: '40px', padding: '8px 12px', border: '1px solid #DAC493', borderRadius: '10px', background: '#FFFFFF', color: '#44403C', font: 'inherit' }} />
+              </label>
+              </div>
+            </div>
 
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '700px' }}>
@@ -1219,9 +1096,7 @@ export default function MasterAdminReportsDashboard({ onBack }) {
                   <tr style={{ background: '#FAF6EE', borderBottom: '1.5px solid #DAC493' }}>
                     <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase' }}>Studio Branch</th>
                     <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase' }}>City</th>
-                    <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', textAlign: 'center' }}>Jul → Aug</th>
-                    <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', textAlign: 'center' }}>Aug → Sep</th>
-                    <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', textAlign: 'center' }}>Sep → Oct</th>
+                    {consistencyGrowthColumns.map(month => <th key={month} style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', textAlign: 'center', whiteSpace: 'nowrap' }}>{getMonthDisplayName(month)} Growth</th>)}
                     <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase', textAlign: 'right' }}>Avg MoM Growth</th>
                     <th style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '800', color: '#9F7335', textTransform: 'uppercase' }}>Consistency Rating</th>
                   </tr>
@@ -1242,21 +1117,11 @@ export default function MasterAdminReportsDashboard({ onBack }) {
                       <td style={{ padding: '14px', fontSize: '13px', color: '#44403C' }}>
                         {item.city}
                       </td>
-                      <td style={{ padding: '14px', textAlign: 'center' }}>
-                        <span style={{ fontSize: '12.5px', fontWeight: '700', color: item.monthlyTrend[1].growth >= 0 ? '#059669' : '#DC2626' }}>
-                          {item.monthlyTrend[1].growth >= 0 ? `+${item.monthlyTrend[1].growth}%` : `${item.monthlyTrend[1].growth}%`}
+                      {item.monthlyTrend.map((trend, trendIndex) => <td key={`${item.location_id}-${trend.month}`} style={{ padding: '14px', textAlign: 'center' }}>
+                        <span style={{ fontSize: '12.5px', fontWeight: '700', color: trend.growth >= 0 ? '#059669' : '#DC2626' }}>
+                          {trend.growth > 0 ? `+${trend.growth}%` : `${trend.growth}%`}
                         </span>
-                      </td>
-                      <td style={{ padding: '14px', textAlign: 'center' }}>
-                        <span style={{ fontSize: '12.5px', fontWeight: '700', color: item.monthlyTrend[2].growth >= 0 ? '#059669' : '#DC2626' }}>
-                          {item.monthlyTrend[2].growth >= 0 ? `+${item.monthlyTrend[2].growth}%` : `${item.monthlyTrend[2].growth}%`}
-                        </span>
-                      </td>
-                      <td style={{ padding: '14px', textAlign: 'center' }}>
-                        <span style={{ fontSize: '12.5px', fontWeight: '700', color: item.monthlyTrend[3].growth >= 0 ? '#059669' : '#DC2626' }}>
-                          {item.monthlyTrend[3].growth >= 0 ? `+${item.monthlyTrend[3].growth}%` : `${item.monthlyTrend[3].growth}%`}
-                        </span>
-                      </td>
+                      </td>)}
                       <td style={{ padding: '14px', textAlign: 'right' }}>
                         <span style={{ fontSize: '14px', fontWeight: '800', color: item.avgMoMGrowth >= 0 ? '#059669' : '#DC2626' }}>
                           +{item.avgMoMGrowth}%
@@ -1286,6 +1151,8 @@ export default function MasterAdminReportsDashboard({ onBack }) {
           </div>
         </div>
       )}
+      </>}
+      <BrandingCustomizer scope="master" section="studio_management" initialView={customizerInitialView} showMasterLoginTab location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
     </div>
   );
 }

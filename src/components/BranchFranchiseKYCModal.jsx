@@ -1,19 +1,199 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Building2, Handshake, X, ArrowLeft, ArrowRight, Plus, Trash2,
   Upload, FileText, CheckCircle2, AlertCircle, Eye, RefreshCw,
   Phone, Mail, Calendar, MapPin, ShieldCheck, User, ExternalLink,
-  Key, Lock, EyeOff, Copy, Check, HelpCircle
+  Key, Lock, EyeOff, Copy, Check, HelpCircle, Printer, Share2, Download
 } from 'lucide-react';
 import LuxuryDatePicker from './LuxuryDatePicker';
 import LoginPreferenceSelector from './LoginPreferenceSelector';
+import { IndianCityDropdown, IndianStateDropdown } from './IndianStateCityFields';
 import { apiRequest } from '../utils/api';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
+const cleanPhoneDigits = value => String(value || '').replace(/\D/g, '').slice(-10);
+const isValidIndianMobile = value => /^[6-9]\d{9}$/.test(cleanPhoneDigits(value));
+
+function PhoneOtpVerification({ value, verified, onVerified }) {
+  const [otp, setOtp] = useState('');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [demoOtp, setDemoOtp] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const phone = String(value || '').replace(/\D/g, '').slice(-10);
+
+  useEffect(() => {
+    setOtp('');
+    setSent(false);
+    setError('');
+    setDemoOtp('');
+  }, [phone]);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = window.setTimeout(() => setCooldown(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+
+  const sendOtp = async () => {
+    if (!/^[6-9]\d{9}$/.test(phone) || busy || cooldown > 0) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiRequest('/kyc/phone-otp/send', { method: 'POST', body: JSON.stringify({ phone }) });
+      setSent(true);
+      setCooldown(60);
+      setDemoOtp(result.demoOtp || '');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not send OTP. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    if (!/^\d{6}$/.test(otp) || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/kyc/phone-otp/verify', { method: 'POST', body: JSON.stringify({ phone, otp }) });
+      onVerified(phone);
+      setSent(false);
+      setDemoOtp('');
+      setCooldown(0);
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'OTP verification failed. Check the code and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!phone) return null;
+  if (verified) return <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#12805C', fontSize: 11.5, fontWeight: 700, marginTop: 6 }}><CheckCircle2 size={14} /> Mobile verified</div>;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 7 }}>
+      {!sent ? (
+        <button type="button" onClick={sendOtp} disabled={busy || !/^[6-9]\d{9}$/.test(phone)} style={{ border: '1px solid #DAC493', borderRadius: 7, padding: '6px 10px', background: '#FAF6EE', color: '#8C6228', fontSize: 11.5, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: /^[6-9]\d{9}$/.test(phone) ? 1 : .55 }}>
+          {busy ? 'Sending OTP…' : 'Verify by OTP'}
+        </button>
+      ) : (
+        <>
+          <input aria-label="SMS verification code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit OTP" style={{ width: 112, padding: '7px 9px', border: '1px solid #DAC493', borderRadius: 7, fontSize: 12, boxSizing: 'border-box' }} />
+          <button type="button" onClick={verifyOtp} disabled={busy || otp.length !== 6} style={{ border: 0, borderRadius: 7, padding: '7px 10px', background: '#A0723E', color: '#FFFFFF', fontSize: 11.5, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: otp.length === 6 ? 1 : .55 }}>
+            {busy ? 'Checking…' : 'Confirm OTP'}
+          </button>
+          <button type="button" onClick={sendOtp} disabled={busy || cooldown > 0} style={{ border: 0, padding: '5px 2px', background: 'transparent', color: '#8C6228', fontSize: 11, fontWeight: 600, cursor: cooldown > 0 ? 'default' : 'pointer' }}>
+            {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend OTP'}
+          </button>
+        </>
+      )}
+      {/^[0-9]{10}$/.test(phone) && !/^[6-9]\d{9}$/.test(phone) && <span role="alert" style={{ color: '#B42318', fontSize: 11 }}>Enter a valid Indian mobile number starting with 6–9.</span>}
+      {demoOtp && <span style={{ color: '#796B5D', fontSize: 11 }}>Demo OTP: {demoOtp}</span>}
+      {error && <span role="alert" style={{ color: '#B42318', fontSize: 11.5 }}>{error}</span>}
+    </div>
+  );
+}
+
+function BranchEditOtpGate({ locationId, onVerified }) {
+  const [otp, setOtp] = useState('');
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [demoOtp, setDemoOtp] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  const [sentTo, setSentTo] = useState('');
+  const initialSendStarted = useRef(false);
+
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const timer = window.setTimeout(() => setCooldown(value => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
+
+  const sendOtp = useCallback(async () => {
+    if (busy || cooldown > 0) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await apiRequest('/locations/edit-otp/send', { method: 'POST', body: JSON.stringify({ location_id: locationId }) });
+      setSent(true);
+      setCooldown(60);
+      setDemoOtp(result.demoOtp || '');
+      setSentTo(result.sentTo || 'your signed-in account mobile number');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not send OTP. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, cooldown, locationId]);
+
+  useEffect(() => {
+    if (initialSendStarted.current) return;
+    initialSendStarted.current = true;
+    sendOtp();
+  }, [sendOtp]);
+
+  const verifyOtp = async () => {
+    if (!/^\d{6}$/.test(otp) || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest('/locations/edit-otp/verify', { method: 'POST', body: JSON.stringify({ location_id: locationId, otp }) });
+      onVerified();
+    } catch (requestError) {
+      setError(requestError.message || 'OTP verification failed. Check the code and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div role="presentation" style={{ position: 'fixed', inset: 0, zIndex: 3200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(28, 25, 23, .58)', backdropFilter: 'blur(4px)' }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="branch-edit-otp-title" style={{ width: '100%', maxWidth: 460, padding: 30, border: '1px solid #E7D8C4', borderRadius: 18, background: '#FFFFFF', boxShadow: '0 24px 70px rgba(0,0,0,.24)', textAlign: 'center' }}>
+        <ShieldCheck size={34} color="#A0723E" />
+        <h3 id="branch-edit-otp-title" style={{ margin: '12px 0 8px', color: '#302820' }}>Verify to save branch detail changes</h3>
+        {sent
+          ? <p style={{ margin: '0 0 20px', color: '#796B5D', fontSize: 14 }}>OTP sent to <strong style={{ color: '#51463D' }}>{sentTo}</strong></p>
+          : <p style={{ margin: '0 0 20px', color: '#796B5D', fontSize: 14 }}>{busy ? 'Sending an OTP to the signed-in stakeholder or brand owner…' : 'We could not send the OTP yet. Please try again.'}</p>}
+        {sent && <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+          <input aria-label="Verification code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={otp} onChange={event => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="6-digit OTP" style={{ width: 132, padding: '10px 12px', border: '1px solid #DAC493', borderRadius: 8, fontSize: 14 }} />
+          <button type="button" onClick={verifyOtp} disabled={busy || otp.length !== 6} className="btn-primary" style={{ padding: '10px 16px', opacity: busy || otp.length !== 6 ? .65 : 1 }}>{busy ? 'Checking…' : 'Verify & Save'}</button>
+        </div>}
+        {demoOtp && <div style={{ marginTop: 12, color: '#796B5D', fontSize: 12 }}>Demo OTP: {demoOtp}</div>}
+        {error && <div role="alert" style={{ marginTop: 12, color: '#B42318', fontSize: 13 }}>{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, marginTop: 20 }}>
+          {!sent && <button type="button" onClick={sendOtp} disabled={busy || cooldown > 0} style={{ border: 0, background: 'transparent', color: '#8C6228', cursor: busy || cooldown > 0 ? 'default' : 'pointer', fontWeight: 700 }}>{cooldown > 0 ? `Try again in ${cooldown}s` : 'Send OTP'}</button>}
+          {sent && <button type="button" onClick={sendOtp} disabled={busy || cooldown > 0} style={{ border: 0, background: 'transparent', color: '#8C6228', cursor: busy || cooldown > 0 ? 'default' : 'pointer', fontWeight: 700 }}>{cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend OTP'}</button>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const headerUtilityButtonStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 7,
+  minHeight: 36,
+  padding: '0 12px',
+  border: '1px solid #E7D8C4',
+  borderRadius: 999,
+  background: '#FFFFFF',
+  color: '#80633C',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap'
+};
 
 export default function BranchFranchiseKYCModal({
   isOpen,
+  embedded = false,
   onClose,
   onSuccess,
   defaultType = 'branch', // 'branch' | 'franchise'
@@ -23,6 +203,35 @@ export default function BranchFranchiseKYCModal({
   if (!isOpen) return null;
 
   const isEdit = Boolean(locationToEdit?.location_id);
+  const existingPhoneDigits = new Set();
+  const addExistingPhones = values => {
+    let items = Array.isArray(values) ? values : [values];
+    if (typeof values === 'string' && values.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(values);
+        if (Array.isArray(parsed)) items = parsed;
+      } catch {}
+    }
+    items.forEach(value => {
+      const digits = cleanPhoneDigits(value);
+      if (digits.length === 10) existingPhoneDigits.add(digits);
+    });
+  };
+  addExistingPhones([locationToEdit?.phone, locationToEdit?.primary_login_phone, locationToEdit?.kyc?.primary_login_phone]);
+  addExistingPhones(locationToEdit?.kyc?.mobile_numbers);
+  (locationToEdit?.stakeholders || []).forEach(stakeholder => {
+    addExistingPhones([stakeholder?.mobile, stakeholder?.primary_login_phone]);
+    addExistingPhones(stakeholder?.mobile_numbers);
+  });
+  const [verifiedPhones, setVerifiedPhones] = useState({});
+  const isPhoneVerified = phone => {
+    const digits = cleanPhoneDigits(phone);
+    return Boolean(verifiedPhones[digits] || (isEdit && existingPhoneDigits.has(digits)));
+  };
+  const markPhoneVerified = phone => {
+    const digits = cleanPhoneDigits(phone);
+    if (digits.length === 10) setVerifiedPhones(prev => ({ ...prev, [digits]: true }));
+  };
 
   // RELATIONSHIP & FIRM TYPE (Determined directly by navigation)
   const [relationshipType, setRelationshipType] = useState(
@@ -66,27 +275,6 @@ export default function BranchFranchiseKYCModal({
       return locationToEdit.kyc.email_ids;
     }
     return [locationToEdit?.email || ''];
-  });
-
-  // Primary Login Preferences
-  const [primaryLoginPhone, setPrimaryLoginPhone] = useState(() => {
-    return (
-      locationToEdit?.primary_login_phone ||
-      locationToEdit?.kyc?.primary_login_phone ||
-      (locationToEdit?.kyc?.mobile_numbers?.length > 0 ? locationToEdit.kyc.mobile_numbers[0] : '') ||
-      locationToEdit?.phone ||
-      ''
-    );
-  });
-
-  const [primaryLoginEmail, setPrimaryLoginEmail] = useState(() => {
-    return (
-      locationToEdit?.primary_login_email ||
-      locationToEdit?.kyc?.primary_login_email ||
-      (locationToEdit?.kyc?.email_ids?.length > 0 ? locationToEdit.kyc.email_ids[0] : '') ||
-      locationToEdit?.email ||
-      ''
-    );
   });
 
   // Helper to ensure multi-item lists (arrays or JSON strings)
@@ -140,10 +328,10 @@ export default function BranchFranchiseKYCModal({
           name: s.name || '',
           mobile: mList[0] || s.mobile || '',
           mobile_numbers: mList,
-          primary_login_phone: s.primary_login_phone || mList[0] || s.mobile || '',
+          primary_login_phone: mList.length === 1 ? (mList[0] || '') : (s.primary_login_phone || mList[0] || s.mobile || ''),
           email: eList[0] || s.email || '',
           email_ids: eList,
-          primary_login_email: s.primary_login_email || eList[0] || s.email || '',
+          primary_login_email: eList.length === 1 ? (eList[0] || '') : (s.primary_login_email || eList[0] || s.email || ''),
           gender: s.gender || 'Female',
           dob: s.dob || '',
           marital_status: s.marital_status || 'Unmarried',
@@ -188,6 +376,7 @@ export default function BranchFranchiseKYCModal({
 
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showEditOtp, setShowEditOtp] = useState(false);
   const [uploadingDocKey, setUploadingDocKey] = useState(null);
   const [validationErrors, setValidationErrors] = useState({});
   const [viewingDocUrl, setViewingDocUrl] = useState(null);
@@ -195,20 +384,14 @@ export default function BranchFranchiseKYCModal({
 
   // Flow Step: 1 = KYC Form, 2 = Create Admin Logins, 3 = Confirmation / Summary
   const [currentStep, setCurrentStep] = useState(1);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState('');
   const [savedLocation, setSavedLocation] = useState(null);
   const [adminAccounts, setAdminAccounts] = useState([]);
   const [adminErrors, setAdminErrors] = useState({});
   const [isSavingAdmins, setIsSavingAdmins] = useState(false);
   const [createdAdminResult, setCreatedAdminResult] = useState([]);
   const [copiedKey, setCopiedKey] = useState(null);
-  const [availableLocations, setAvailableLocations] = useState([]);
-  const [copyServiceCatalog, setCopyServiceCatalog] = useState(false);
-  const [copyMembershipPlans, setCopyMembershipPlans] = useState(false);
-  const [copyDesignationList, setCopyDesignationList] = useState(false);
-  const [copyRoleList, setCopyRoleList] = useState(false);
-  const [copyClientProfiles, setCopyClientProfiles] = useState(false);
-  const [clientSourceLocationId, setClientSourceLocationId] = useState('');
-  const [copyOptionsError, setCopyOptionsError] = useState('');
 
   // Hidden file input refs
   const fileInputRefs = useRef({});
@@ -218,7 +401,9 @@ export default function BranchFranchiseKYCModal({
     if (!isOpen) return;
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
-        if (currentStep === 2) {
+        if (currentStep === 1 && isReviewing) {
+          setIsReviewing(false);
+        } else if (currentStep === 2) {
           setCurrentStep(1);
           window.scrollTo({ top: 0, behavior: 'smooth' });
         } else if (currentStep === 3) {
@@ -231,7 +416,7 @@ export default function BranchFranchiseKYCModal({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, currentStep, onSuccess, savedLocation, onClose]);
+  }, [isOpen, currentStep, isReviewing, onSuccess, savedLocation, onClose]);
 
   useEffect(() => {
     if (!isOpen || isEdit) return;
@@ -243,19 +428,17 @@ export default function BranchFranchiseKYCModal({
   // Sync preselected registration relationship and firm type when modal opens
   useEffect(() => {
     if (isOpen) {
+      // Verification is per form session; saved values must be verified again when editing.
+      setVerifiedPhones({});
+      setShowEditOtp(false);
       setCurrentStep(1);
+      setIsReviewing(false);
+      setShareFeedback('');
       setSavedLocation(null);
       setAdminAccounts([]);
       setAdminErrors({});
       setCreatedAdminResult([]);
       setCopiedKey(null);
-      setCopyServiceCatalog(false);
-      setCopyMembershipPlans(false);
-      setCopyDesignationList(false);
-      setCopyRoleList(false);
-      setCopyClientProfiles(false);
-      setClientSourceLocationId('');
-      setCopyOptionsError('');
 
       const initialType = locationToEdit?.type || defaultType || 'branch';
       const initialFirm = locationToEdit?.kyc?.firm_type || locationToEdit?.firm_type || defaultFirmType || 'Proprietor';
@@ -273,8 +456,6 @@ export default function BranchFranchiseKYCModal({
         setMobileNumbers(['']);
         setEmailIds(['']);
         setOfficePhone('');
-        setPrimaryLoginPhone('');
-        setPrimaryLoginEmail('');
         setValidationErrors({});
         setFirmPan('');
         setFirmPanDoc('');
@@ -313,21 +494,6 @@ export default function BranchFranchiseKYCModal({
           : ensureList(locationToEdit.email, '');
         setEmailIds(initEmails);
 
-        setPrimaryLoginPhone(
-          locationToEdit.primary_login_phone ||
-          locationToEdit.kyc?.primary_login_phone ||
-          initMobiles[0] ||
-          locationToEdit.phone ||
-          ''
-        );
-        setPrimaryLoginEmail(
-          locationToEdit.primary_login_email ||
-          locationToEdit.kyc?.primary_login_email ||
-          initEmails[0] ||
-          locationToEdit.email ||
-          ''
-        );
-
         const targetRole = initialFirm === 'Proprietor' ? 'Proprietor' : (initialFirm === 'Partnership' ? 'Partner' : 'Director');
         const minRequired = (initialFirm === 'Pvt. Ltd.' || initialFirm === 'LLP') ? 3 : (initialFirm === 'Partnership' ? 2 : 1);
         if (locationToEdit.stakeholders && locationToEdit.stakeholders.length > 0) {
@@ -339,10 +505,10 @@ export default function BranchFranchiseKYCModal({
               name: s.name || '',
               mobile: mList[0] || s.mobile || '',
               mobile_numbers: mList,
-              primary_login_phone: s.primary_login_phone || mList[0] || s.mobile || '',
+              primary_login_phone: mList.length === 1 ? (mList[0] || '') : (s.primary_login_phone || mList[0] || s.mobile || ''),
               email: eList[0] || s.email || '',
               email_ids: eList,
-              primary_login_email: s.primary_login_email || eList[0] || s.email || '',
+              primary_login_email: eList.length === 1 ? (eList[0] || '') : (s.primary_login_email || eList[0] || s.email || ''),
               gender: s.gender || 'Female',
               dob: s.dob || '',
               marital_status: s.marital_status || 'Unmarried',
@@ -391,38 +557,11 @@ export default function BranchFranchiseKYCModal({
       return copy;
     });
 
-    if (primaryLoginPhone && primaryLoginPhone === oldVal) {
-      setPrimaryLoginPhone(clean);
-    }
   };
 
   const handleRemoveMobile = (idx) => {
     if (mobileNumbers.length <= 1) return;
-    const removedVal = mobileNumbers[idx];
     setMobileNumbers(prev => prev.filter((_, i) => i !== idx));
-    if (primaryLoginPhone && primaryLoginPhone === removedVal) {
-      setPrimaryLoginPhone('');
-    }
-  };
-
-  const handleSelectPrimaryPhone = (mob) => {
-    const clean = (mob || '').replace(/\D/g, '').slice(0, 10);
-    if (!clean || clean.length < 10) {
-      alert('Please enter a valid 10-digit mobile number before setting it as login preference');
-      return;
-    }
-    setPrimaryLoginPhone(clean);
-    if (validationErrors.primaryLoginPhone) {
-      setValidationErrors(prev => {
-        const copy = { ...prev };
-        delete copy.primaryLoginPhone;
-        return copy;
-      });
-    }
-  };
-
-  const handleChangePrimaryPhonePreference = () => {
-    setPrimaryLoginPhone('');
   };
 
   // Multiple Emails Handlers
@@ -431,45 +570,16 @@ export default function BranchFranchiseKYCModal({
   };
 
   const handleEmailChange = (idx, val) => {
-    const oldVal = emailIds[idx];
     setEmailIds(prev => {
       const copy = [...prev];
       copy[idx] = val;
       return copy;
     });
-
-    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === oldVal.trim().toLowerCase()) {
-      setPrimaryLoginEmail(val.trim().toLowerCase());
-    }
   };
 
   const handleRemoveEmail = (idx) => {
     if (emailIds.length <= 1) return;
-    const removedVal = emailIds[idx];
     setEmailIds(prev => prev.filter((_, i) => i !== idx));
-    if (primaryLoginEmail && primaryLoginEmail.toLowerCase() === removedVal.trim().toLowerCase()) {
-      setPrimaryLoginEmail('');
-    }
-  };
-
-  const handleSelectPrimaryEmail = (em) => {
-    const clean = (em || '').trim().toLowerCase();
-    if (!clean || !/^\S+@\S+\.\S+$/.test(clean)) {
-      alert('Please enter a valid email address before setting it as login preference');
-      return;
-    }
-    setPrimaryLoginEmail(clean);
-    if (validationErrors.primaryLoginEmail) {
-      setValidationErrors(prev => {
-        const copy = { ...prev };
-        delete copy.primaryLoginEmail;
-        return copy;
-      });
-    }
-  };
-
-  const handleChangePrimaryEmailPreference = () => {
-    setPrimaryLoginEmail('');
   };
 
   // Stakeholder Multiple Mobiles Handlers
@@ -501,6 +611,8 @@ export default function BranchFranchiseKYCModal({
       let newPrimary = copy[stkIdx]?.primary_login_phone || '';
       if (newPrimary && newPrimary === oldVal) {
         newPrimary = clean;
+      } else if (!newPrimary && mobIdx === 0) {
+        newPrimary = clean;
       }
       copy[stkIdx] = {
         ...copy[stkIdx],
@@ -531,7 +643,10 @@ export default function BranchFranchiseKYCModal({
       if (cur.length === 0) cur = [''];
       let newPrimary = copy[stkIdx]?.primary_login_phone || '';
       if (newPrimary && newPrimary === removedVal) {
-        newPrimary = '';
+        newPrimary = cur.find(value => String(value || '').trim()) || '';
+      }
+      if (cur.length === 1) {
+        newPrimary = cur[0] || '';
       }
       copy[stkIdx] = {
         ...copy[stkIdx],
@@ -606,6 +721,8 @@ export default function BranchFranchiseKYCModal({
       let newPrimary = copy[stkIdx]?.primary_login_email || '';
       if (newPrimary && newPrimary.toLowerCase() === oldVal.trim().toLowerCase()) {
         newPrimary = val.trim().toLowerCase();
+      } else if (!newPrimary && emailIdx === 0) {
+        newPrimary = val.trim().toLowerCase();
       }
       copy[stkIdx] = {
         ...copy[stkIdx],
@@ -636,7 +753,10 @@ export default function BranchFranchiseKYCModal({
       if (cur.length === 0) cur = [''];
       let newPrimary = copy[stkIdx]?.primary_login_email || '';
       if (newPrimary && newPrimary.toLowerCase() === (removedVal || '').trim().toLowerCase()) {
-        newPrimary = '';
+        newPrimary = cur.find(value => String(value || '').trim())?.trim().toLowerCase() || '';
+      }
+      if (cur.length === 1) {
+        newPrimary = (cur[0] || '').trim().toLowerCase();
       }
       copy[stkIdx] = {
         ...copy[stkIdx],
@@ -790,6 +910,12 @@ export default function BranchFranchiseKYCModal({
       if (!adm.password || adm.password.trim().length < 6) {
         errors[`${pfx}password`] = `Password must be at least 6 characters`;
       }
+      const phone = String(adm.phone || '').trim();
+      if (phone && !isValidIndianMobile(phone)) {
+        errors[`${pfx}phone`] = 'Enter a valid 10-digit Indian mobile number';
+      } else if (phone && !isPhoneVerified(phone)) {
+        errors[`${pfx}phone`] = 'Verify this mobile number with OTP before completing setup';
+      }
     });
 
     if (Object.keys(errors).length > 0) {
@@ -890,8 +1016,18 @@ export default function BranchFranchiseKYCModal({
         setFirmPanDoc(data.fileUrl);
       } else if (key === 'gst') {
         setGstDoc(data.fileUrl);
+        setValidationErrors(prev => {
+          const updated = { ...prev };
+          delete updated.gstDoc;
+          return updated;
+        });
       } else if (key === 'gumastha') {
         setGumasthaDoc(data.fileUrl);
+        setValidationErrors(prev => {
+          const updated = { ...prev };
+          delete updated.gumasthaDoc;
+          return updated;
+        });
       } else if (key === 'incorporation') {
         setIncorporationDoc(data.fileUrl);
       } else if (key === 'aoa') {
@@ -933,28 +1069,25 @@ export default function BranchFranchiseKYCModal({
     }
 
     // Validate mobiles
-    const validMobiles = mobileNumbers.filter(m => m.trim().length === 10);
+    const enteredMobiles = mobileNumbers.filter(m => m.trim());
+    const validMobiles = enteredMobiles.filter(isValidIndianMobile);
     if (validMobiles.length === 0) {
       errors.mobileNumbers = 'At least one valid 10-digit Mobile Number is required';
+    } else if (enteredMobiles.some(m => !isValidIndianMobile(m))) {
+      errors.mobileNumbers = 'Every entered business mobile number must be a valid 10-digit Indian number';
+    } else if (enteredMobiles.some(m => !isPhoneVerified(m))) {
+      errors.mobileNumbers = 'Verify every entered business mobile number with OTP before continuing';
+    }
+    if (officePhone && !isValidIndianMobile(officePhone)) {
+      errors.officePhone = 'Enter a valid 10-digit Indian office phone number';
+    } else if (officePhone && !isPhoneVerified(officePhone)) {
+      errors.officePhone = 'Verify the office phone number with OTP before continuing';
     }
 
     // Validate emails
     const validEmails = emailIds.filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()));
     if (validEmails.length === 0) {
       errors.emailIds = 'At least one valid Email Address is required';
-    }
-
-    // Validate primary login preferences
-    if (!primaryLoginPhone) {
-      errors.primaryLoginPhone = 'Please select a Primary Login Number for dashboard access authorization';
-    } else if (!mobileNumbers.includes(primaryLoginPhone)) {
-      errors.primaryLoginPhone = 'Selected Primary Login Number must be one of the entered mobile numbers';
-    }
-
-    if (!primaryLoginEmail) {
-      errors.primaryLoginEmail = 'Please select a Primary Login Email for dashboard access authorization';
-    } else if (!emailIds.map(e => e.trim().toLowerCase()).includes(primaryLoginEmail.toLowerCase())) {
-      errors.primaryLoginEmail = 'Selected Primary Login Email must be one of the entered email addresses';
     }
 
     // Validate stakeholders
@@ -981,14 +1114,19 @@ export default function BranchFranchiseKYCModal({
 
       // Primary mobile is compulsory
       const primaryMob = (sMobiles[0] || '').replace(/\D/g, '');
-      if (!primaryMob || primaryMob.length < 10) {
+      if (!primaryMob || primaryMob.length !== 10 || !/^[6-9]\d{9}$/.test(primaryMob)) {
         errors[`${prefix}mobile`] = `Valid 10-digit mobile required for ${s.role_type} #${idx + 1}`;
       }
       // Additional mobiles: if entered, must be 10 digits
       sMobiles.slice(1).forEach((m, mIdx) => {
         const cleanM = (m || '').replace(/\D/g, '');
-        if (m && m.trim() && cleanM.length < 10) {
-          errors[`${prefix}mobile_${mIdx + 1}`] = `Valid 10-digit mobile required`;
+        if (m && m.trim() && (cleanM.length !== 10 || !/^[6-9]\d{9}$/.test(cleanM))) {
+          errors[`${prefix}mobile_${mIdx + 1}`] = 'Valid 10-digit Indian mobile required';
+        }
+      });
+      sMobiles.forEach((mobile, mobileIdx) => {
+        if (String(mobile || '').trim() && isValidIndianMobile(mobile) && !isPhoneVerified(mobile)) {
+          errors[`${prefix}${mobileIdx === 0 ? 'mobile' : `mobile_${mobileIdx}`}`] = `Verify this mobile number with OTP for ${s.role_type} #${idx + 1}`;
         }
       });
 
@@ -1040,10 +1178,13 @@ export default function BranchFranchiseKYCModal({
         errors[`${prefix}pan_doc`] = `PAN Card document upload is required for ${s.role_type} #${idx + 1}`;
       }
 
-      // Aadhaar number remains required; the supporting document upload is optional.
+      // Aadhaar number and its supporting document are both required.
       const cleanAadhaar = (s.aadhaar_number || '').replace(/\D/g, '');
       if (!cleanAadhaar || cleanAadhaar.length !== 12) {
         errors[`${prefix}aadhaar`] = `Valid 12-digit Aadhaar Number is required for ${s.role_type} #${idx + 1}`;
+      }
+      if (!s.aadhaar_doc) {
+        errors[`${prefix}aadhaar_doc`] = `Aadhaar document upload is required for ${s.role_type} #${idx + 1}`;
       }
 
       // Optional DIN validation: If provided, must be 8 digits
@@ -1064,9 +1205,14 @@ export default function BranchFranchiseKYCModal({
       }
     }
 
-    if (gstNumber.trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstNumber.trim().toUpperCase())) {
+    if (!gstNumber.trim()) {
+      errors.gstNumber = 'GST Number is required';
+    } else if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstNumber.trim().toUpperCase())) {
       errors.gstNumber = 'Valid 15-character GST Number format required (e.g. 29ABCDE1234F1Z5)';
     }
+    if (!gstDoc) errors.gstDoc = 'GST Certificate upload is required';
+    if (!gumasthaNumber.trim()) errors.gumasthaNumber = 'Gumastha License Number is required';
+    if (!gumasthaDoc) errors.gumasthaDoc = 'Gumastha Certificate upload is required';
 
     // Validate Firm Bank Details
     if (!bankFirmName.trim()) {
@@ -1092,23 +1238,27 @@ export default function BranchFranchiseKYCModal({
     return Object.keys(errors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e, otpVerified = false) => {
     e?.preventDefault();
     if (!validateForm()) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (!isEdit && relationshipType === 'branch' && copyClientProfiles && !clientSourceLocationId) {
-      setCopyOptionsError('Choose a source branch for the client profiles.');
-      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    if (!isReviewing) {
+      setIsReviewing(true);
+      setShareFeedback('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (relationshipType !== 'branch' && copyClientProfiles) setCopyClientProfiles(false);
-    setCopyOptionsError('');
-
+    if (isEdit && !otpVerified) {
+      setShowEditOtp(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     try {
       setIsSubmitting(true);
 
+      const primaryStakeholder = stakeholders.find(item => item.name?.trim());
       const payload = {
         name: branchName.trim(),
         type: relationshipType,
@@ -1122,8 +1272,8 @@ export default function BranchFranchiseKYCModal({
         office_phone: officePhone.trim(),
         mobile_numbers: mobileNumbers.filter(Boolean),
         email_ids: emailIds.filter(Boolean),
-        primary_login_phone: primaryLoginPhone,
-        primary_login_email: primaryLoginEmail,
+        primary_login_phone: primaryStakeholder?.primary_login_phone || primaryStakeholder?.mobile || '',
+        primary_login_email: primaryStakeholder?.primary_login_email || primaryStakeholder?.email || '',
         firm_pan: firmPan.trim().toUpperCase(),
         firm_pan_doc: firmPanDoc,
         cin_number: (firmType === 'Proprietor' || firmType === 'Partnership') ? '' : cinNumber.trim().toUpperCase(),
@@ -1163,14 +1313,6 @@ export default function BranchFranchiseKYCModal({
             din_number: (s.din_number || '').trim()
           };
         }),
-        startup_data_copy: {
-          client_source_location_id: clientSourceLocationId ? Number(clientSourceLocationId) : null,
-          service_catalog: !isEdit && copyServiceCatalog,
-          membership_plans: !isEdit && copyMembershipPlans,
-          designations: !isEdit && copyDesignationList,
-          team_roles: !isEdit && copyRoleList,
-          client_profiles: !isEdit && relationshipType === 'branch' && copyClientProfiles
-        },
         status: locationToEdit?.status || 'Active'
       };
 
@@ -1197,6 +1339,7 @@ export default function BranchFranchiseKYCModal({
           role_type: account.role_type || 'Branch Admin'
         })));
         setAdminErrors({});
+        setIsReviewing(false);
         setCurrentStep(3);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
@@ -1208,8 +1351,55 @@ export default function BranchFranchiseKYCModal({
     }
   };
 
+  const registrationSummaryText = () => {
+    const location = savedLocation || {};
+    const lines = [
+      isEdit ? 'MAISON BEYOU — BRANCH DETAILS' : 'MAISON BEYOU — REGISTRATION SUMMARY',
+      `Location: ${location.name || branchName}`,
+      `Code: ${location.code || locationToEdit?.code || (isEdit ? '—' : 'Pending')}`,
+      `Type: ${relationshipType} · ${firmType}`,
+      `Firm: ${firmName}`,
+      `Address: ${[addressLine1, addressLine2, city, state, pincode].filter(Boolean).join(', ')}`,
+      `Office phone: ${officePhone || '—'}`,
+      `Business mobiles: ${mobileNumbers.filter(Boolean).join(', ') || '—'}`,
+      `Business emails: ${emailIds.filter(Boolean).join(', ') || '—'}`,
+      `Firm PAN: ${firmPan || '—'} · document: ${firmPanDoc ? 'Attached' : '—'}`,
+      `CIN: ${cinNumber || '—'} · incorporation document: ${incorporationDoc ? 'Attached' : '—'}`,
+      `GST: ${gstNumber || '—'} · certificate: ${gstDoc ? 'Attached' : '—'}`,
+      `Gumastha: ${gumasthaNumber || '—'} · certificate: ${gumasthaDoc ? 'Attached' : '—'}`,
+      `Bank: ${bankName || '—'} · account ending ${bankAccountNumber.replace(/\D/g, '').slice(-4) || '—'} · IFSC ${bankIfscCode || '—'}`,
+      '',
+      'STAKEHOLDERS',
+      ...stakeholders.map((person, index) => `${index + 1}. ${person.name} (${person.role_type}) | Mobile: ${(person.mobile_numbers || [person.mobile]).filter(Boolean).join(', ') || '—'} | Email: ${(person.email_ids || [person.email]).filter(Boolean).join(', ') || '—'} | DOB: ${person.dob || '—'} | Marital status: ${person.marital_status || '—'} | PAN: ${person.pan_number || '—'} | Aadhaar: ${String(person.aadhaar_number || '').replace(/\D/g, '').slice(-4).padStart(String(person.aadhaar_number || '').replace(/\D/g, '').length, '•') || '—'} | PAN document: ${person.pan_doc ? 'Attached' : '—'} | Aadhaar document: ${person.aadhaar_doc ? 'Attached' : '—'} | DIN: ${person.din_number || '—'}`)
+    ];
+    return lines.join('\n');
+  };
+
+  const shareRegistrationSummary = async () => {
+    const text = registrationSummaryText();
+    try {
+      if (navigator.share) await navigator.share({ title: 'Maison BeYou registration summary', text });
+      else {
+        await navigator.clipboard.writeText(text);
+        setShareFeedback('Summary copied. You can paste it into WhatsApp, email, or another app.');
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') setShareFeedback('Unable to open sharing on this device. Use Print / Save as PDF instead.');
+    }
+  };
+
+  const downloadRegistrationSummary = () => {
+    const file = new Blob([registrationSummaryText()], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(savedLocation?.name || branchName || 'location').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-registration-summary.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="animate-fade-in client-info-form-wrapper" style={{ width: '100%', margin: '0 auto 40px auto', boxSizing: 'border-box' }}>
+    <div className="animate-fade-in client-info-form-wrapper" style={{ width: '100%', margin: `${embedded ? '48px' : '0'} auto 40px auto`, boxSizing: 'border-box' }}>
       <div className="card" style={{ padding: 'clamp(28px, 4vw, 40px) clamp(24px, 4vw, 44px)', width: '100%', boxSizing: 'border-box', position: 'relative' }}>
         
         {/* Prominent Modal Header Bar Inside Card */}
@@ -1224,7 +1414,9 @@ export default function BranchFranchiseKYCModal({
           <button
             type="button"
             onClick={() => {
-              if (currentStep === 2) {
+              if (currentStep === 1 && isReviewing) {
+                setIsReviewing(false);
+              } else if (currentStep === 2) {
                 setCurrentStep(1);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               } else if (currentStep === 3) {
@@ -1258,8 +1450,19 @@ export default function BranchFranchiseKYCModal({
             }}
           >
             <ArrowLeft size={15} />
-            <span>{currentStep === 2 ? 'Back to Step 1' : 'Back to Dashboard'}</span>
+            <span>{currentStep === 1 && isReviewing ? 'Edit Details' : currentStep === 2 ? 'Back to Step 1' : 'Back to Dashboard'}</span>
           </button>
+
+          {isEdit && currentStep === 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', marginRight: 14 }}>
+              <button type="button" onClick={() => window.print()} aria-label="Print branch details" title="Print branch details" style={headerUtilityButtonStyle}>
+                <Printer size={15} /><span>Print</span>
+              </button>
+              <button type="button" onClick={downloadRegistrationSummary} aria-label="Download branch details" title="Download branch details" style={headerUtilityButtonStyle}>
+                <Download size={15} /><span>Download</span>
+              </button>
+            </div>
+          )}
 
           <button
             type="button"
@@ -1292,9 +1495,15 @@ export default function BranchFranchiseKYCModal({
             <X size={18} />
           </button>
         </div>
-        <h2 style={{ fontFamily: 'var(--font-sans)', fontSize: '28px', fontWeight: '500', color: '#1C1917', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '8px' }}>
+        {isEdit && showEditOtp && <BranchEditOtpGate locationId={locationToEdit.location_id} onVerified={() => {
+          setShowEditOtp(false);
+          handleSubmit(null, true);
+        }} />}
+        <style>{`@media print { body * { visibility: hidden !important; } .registration-print-area, .registration-print-area *, .branch-kyc-print-summary { visibility: visible !important; } .registration-print-area { position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; max-width: none !important; box-shadow: none !important; border: 0 !important; } .registration-print-area button { display: none !important; } .branch-kyc-print-summary { display: block !important; position: absolute !important; inset: 0 auto auto 0 !important; width: 100% !important; padding: 28px !important; box-sizing: border-box !important; background: #FFFFFF !important; color: #302820 !important; font: 12pt/1.6 Arial, sans-serif !important; white-space: pre-wrap !important; } }`}</style>
+        {isEdit && currentStep === 1 && <pre className="branch-kyc-print-summary" style={{ display: 'none' }}>{registrationSummaryText()}</pre>}
+        <h2 className="kyc-modal-title" style={{ fontFamily: 'var(--font-sans)', fontSize: '28px', fontWeight: '500', color: '#C28B42', letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: '8px' }}>
           {currentStep === 1
-            ? (isEdit
+            ? isReviewing ? 'REVIEW BRANCH / FRANCHISE DETAILS' : (isEdit
                 ? `EDIT ${firmType.toUpperCase()} ${relationshipType === 'branch' ? 'BRANCH' : 'FRANCHISE'} KYC`
                 : `REGISTER ${firmType.toUpperCase()} ${relationshipType === 'branch' ? 'COMPANY-OWNED BRANCH' : 'FRANCHISE PARTNER'} KYC`)
             : currentStep === 2
@@ -1306,7 +1515,7 @@ export default function BranchFranchiseKYCModal({
         {/* ======================================================== */}
         {/* STEP 1: KYC FORM                                         */}
         {/* ======================================================== */}
-        {currentStep === 1 && (
+        {currentStep === 1 && !isReviewing && (
           <div>
             {/* Validation Alert Summary */}
             {Object.keys(validationErrors).length > 0 && (
@@ -1465,9 +1674,9 @@ export default function BranchFranchiseKYCModal({
                 />
               </div>
 
-              {/* Pincode, City, State */}
+              {/* State, City, Pincode */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '16px' }}>
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, order: 3 }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                     Pin Code <span style={{ color: '#DC2626' }}>*</span>
                   </label>
@@ -1497,27 +1706,16 @@ export default function BranchFranchiseKYCModal({
                   )}
                 </div>
 
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, order: 2 }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                     City <span style={{ color: '#DC2626' }}>*</span>
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <IndianCityDropdown
+                    state={state}
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="Bengaluru"
-                    style={{
-                      width: '100%',
-                      maxWidth: '100%',
-                      boxSizing: 'border-box',
-                      padding: '12px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`,
-                      background: 'var(--bg-card-subtle)',
-                      outline: 'none',
-                      fontSize: '14px'
-                    }}
+                    onChange={setCity}
+                    selectStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
+                    inputStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px', marginTop: '8px' }}
                   />
                   {validationErrors.city && (
                     <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
@@ -1526,27 +1724,14 @@ export default function BranchFranchiseKYCModal({
                   )}
                 </div>
 
-                <div style={{ minWidth: 0 }}>
+                <div style={{ minWidth: 0, order: 1 }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                     State <span style={{ color: '#DC2626' }}>*</span>
                   </label>
-                  <input
-                    type="text"
-                    required
+                  <IndianStateDropdown
                     value={state}
-                    onChange={(e) => setState(e.target.value)}
-                    placeholder="Karnataka"
-                    style={{
-                      width: '100%',
-                      maxWidth: '100%',
-                      boxSizing: 'border-box',
-                      padding: '12px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      border: `1.5px solid ${validationErrors.state ? '#DC2626' : 'var(--border-color)'}`,
-                      background: 'var(--bg-card-subtle)',
-                      outline: 'none',
-                      fontSize: '14px'
-                    }}
+                    onChange={value => { setState(value); setCity(''); }}
+                    style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.state ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
                   />
                   {validationErrors.state && (
                     <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
@@ -1578,6 +1763,8 @@ export default function BranchFranchiseKYCModal({
                     boxSizing: 'border-box'
                   }}
                 />
+                <PhoneOtpVerification value={officePhone} verified={isPhoneVerified(officePhone)} onVerified={markPhoneVerified} />
+                {validationErrors.officePhone && <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>{validationErrors.officePhone}</div>}
                 <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '5px' }}>
                   This number appears on the branch card. Personal director numbers remain login contacts.
                 </div>
@@ -1610,7 +1797,8 @@ export default function BranchFranchiseKYCModal({
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {mobileNumbers.map((mob, mIdx) => (
-                    <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div key={mIdx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{
                         padding: '11px 12px',
                         background: 'var(--bg-surface)',
@@ -1634,20 +1822,12 @@ export default function BranchFranchiseKYCModal({
                           minWidth: '150px',
                           padding: '12px 14px',
                           borderRadius: 'var(--radius-md)',
-                          border: `1.5px solid ${primaryLoginPhone && mob === primaryLoginPhone ? '#B88B4A' : 'var(--border-color)'}`,
+                          border: '1.5px solid var(--border-color)',
                           background: 'var(--bg-card-subtle)',
                           outline: 'none',
                           fontSize: '14px',
                           boxSizing: 'border-box'
                         }}
-                      />
-                      <LoginPreferenceSelector
-                        type="phone"
-                        itemValue={mob}
-                        isSelected={Boolean(primaryLoginPhone && mob && primaryLoginPhone === mob)}
-                        isDisabled={Boolean(primaryLoginPhone && mob !== primaryLoginPhone)}
-                        onSelect={() => handleSelectPrimaryPhone(mob)}
-                        onChangePreference={() => handleChangePrimaryPhonePreference()}
                       />
                       {mobileNumbers.length > 1 && (
                         <button
@@ -1671,20 +1851,13 @@ export default function BranchFranchiseKYCModal({
                         </button>
                       )}
                     </div>
+                    <PhoneOtpVerification value={mob} verified={isPhoneVerified(mob)} onVerified={markPhoneVerified} />
+                    </div>
                   ))}
-                </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <HelpCircle size={12} color="#B88B4A" />
-                  <span>Only one phone number can be authorized as the primary credential for dashboard access.</span>
                 </div>
                 {validationErrors.mobileNumbers && (
                   <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
                     {validationErrors.mobileNumbers}
-                  </div>
-                )}
-                {validationErrors.primaryLoginPhone && (
-                  <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
-                    {validationErrors.primaryLoginPhone}
                   </div>
                 )}
               </div>
@@ -1728,7 +1901,7 @@ export default function BranchFranchiseKYCModal({
                             boxSizing: 'border-box',
                             padding: '11px 14px 11px 36px',
                             borderRadius: 'var(--radius-md)',
-                            border: `1.5px solid ${primaryLoginEmail && em.trim().toLowerCase() === primaryLoginEmail.toLowerCase() ? '#B88B4A' : 'var(--border-color)'}`,
+                            border: '1.5px solid var(--border-color)',
                             background: 'var(--bg-card-subtle)',
                             outline: 'none',
                             fontSize: '14px'
@@ -1736,14 +1909,6 @@ export default function BranchFranchiseKYCModal({
                         />
                         <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '13px' }} />
                       </div>
-                      <LoginPreferenceSelector
-                        type="email"
-                        itemValue={em}
-                        isSelected={Boolean(primaryLoginEmail && em && primaryLoginEmail.toLowerCase() === em.trim().toLowerCase())}
-                        isDisabled={Boolean(primaryLoginEmail && em.trim().toLowerCase() !== primaryLoginEmail.toLowerCase())}
-                        onSelect={() => handleSelectPrimaryEmail(em)}
-                        onChangePreference={() => handleChangePrimaryEmailPreference()}
-                      />
                       {emailIds.length > 1 && (
                         <button
                           type="button"
@@ -1768,18 +1933,9 @@ export default function BranchFranchiseKYCModal({
                     </div>
                   ))}
                 </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <HelpCircle size={12} color="#B88B4A" />
-                  <span>Only one email address can be authorized as the primary credential for dashboard access.</span>
-                </div>
                 {validationErrors.emailIds && (
                   <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
                     {validationErrors.emailIds}
-                  </div>
-                )}
-                {validationErrors.primaryLoginEmail && (
-                  <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px', fontWeight: '600' }}>
-                    {validationErrors.primaryLoginEmail}
                   </div>
                 )}
               </div>
@@ -2114,14 +2270,16 @@ export default function BranchFranchiseKYCModal({
                                       fontSize: '14px'
                                     }}
                                   />
-                                  <LoginPreferenceSelector
-                                    type="phone"
-                                    itemValue={mob}
-                                    isSelected={Boolean(sh.primary_login_phone && mob && sh.primary_login_phone === mob)}
-                                    isDisabled={Boolean(sh.primary_login_phone && mob !== sh.primary_login_phone)}
-                                    onSelect={() => handleSelectStakeholderPrimaryPhone(shIdx, mob)}
-                                    onChangePreference={() => handleChangeStakeholderPrimaryPhone(shIdx)}
-                                  />
+                                  {Array.isArray(sh.mobile_numbers) && sh.mobile_numbers.length > 1 && (
+                                    <LoginPreferenceSelector
+                                      type="phone"
+                                      itemValue={mob}
+                                      isSelected={Boolean(sh.primary_login_phone && mob && sh.primary_login_phone === mob)}
+                                      isDisabled={Boolean(sh.primary_login_phone && mob !== sh.primary_login_phone)}
+                                      onSelect={() => handleSelectStakeholderPrimaryPhone(shIdx, mob)}
+                                      onChangePreference={() => handleChangeStakeholderPrimaryPhone(shIdx)}
+                                    />
+                                  )}
                                   {(Array.isArray(sh.mobile_numbers) ? sh.mobile_numbers.length : 1) > 1 && (
                                     <button
                                       type="button"
@@ -2144,6 +2302,7 @@ export default function BranchFranchiseKYCModal({
                                     </button>
                                   )}
                                 </div>
+                                <PhoneOtpVerification value={mob} verified={isPhoneVerified(mob)} onVerified={markPhoneVerified} />
                                 {(validationErrors[`${prefix}mobile_${mIdx}`] || (mIdx === 0 && validationErrors[`${prefix}mobile`])) && (
                                   <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
                                     {validationErrors[`${prefix}mobile_${mIdx}`] || (mIdx === 0 && validationErrors[`${prefix}mobile`])}
@@ -2209,14 +2368,16 @@ export default function BranchFranchiseKYCModal({
                                     />
                                     <Mail size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '13px' }} />
                                   </div>
-                                  <LoginPreferenceSelector
-                                    type="email"
-                                    itemValue={em}
-                                    isSelected={Boolean(sh.primary_login_email && em && sh.primary_login_email.toLowerCase() === em.trim().toLowerCase())}
-                                    isDisabled={Boolean(sh.primary_login_email && em.trim().toLowerCase() !== sh.primary_login_email.toLowerCase())}
-                                    onSelect={() => handleSelectStakeholderPrimaryEmail(shIdx, em)}
-                                    onChangePreference={() => handleChangeStakeholderPrimaryEmail(shIdx)}
-                                  />
+                                  {Array.isArray(sh.email_ids) && sh.email_ids.length > 1 && (
+                                    <LoginPreferenceSelector
+                                      type="email"
+                                      itemValue={em}
+                                      isSelected={Boolean(sh.primary_login_email && em && sh.primary_login_email.toLowerCase() === em.trim().toLowerCase())}
+                                      isDisabled={Boolean(sh.primary_login_email && em.trim().toLowerCase() !== sh.primary_login_email.toLowerCase())}
+                                      onSelect={() => handleSelectStakeholderPrimaryEmail(shIdx, em)}
+                                      onChangePreference={() => handleChangeStakeholderPrimaryEmail(shIdx)}
+                                    />
+                                  )}
                                   {(Array.isArray(sh.email_ids) ? sh.email_ids.length : 1) > 1 && (
                                     <button
                                       type="button"
@@ -2312,7 +2473,7 @@ export default function BranchFranchiseKYCModal({
                           {/* Hidden file input */}
                           <input
                             type="file"
-                            accept=".pdf,image/png,image/jpeg,image/webp"
+                            accept="application/pdf,image/*"
                             ref={el => fileInputRefs.current[`stakeholder_${shIdx}`] = el}
                             style={{ display: 'none' }}
                             onChange={(e) => handleDocumentFile(e, `stakeholder_${shIdx}`, shIdx)}
@@ -2457,13 +2618,13 @@ export default function BranchFranchiseKYCModal({
 
                         <div>
                           <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                            Upload {sh.role_type} Aadhaar Card <span style={{ color: 'var(--text-muted)', fontWeight: '400' }}>(Optional)</span>
+                            Upload {sh.role_type} Aadhaar Card <span style={{ color: '#DC2626' }}>*</span>
                           </label>
 
                           {/* Hidden file input for Aadhaar */}
                           <input
                             type="file"
-                            accept=".pdf,image/png,image/jpeg,image/webp"
+                            accept="application/pdf,image/*"
                             ref={el => fileInputRefs.current[`stakeholder_aadhaar_${shIdx}`] = el}
                             style={{ display: 'none' }}
                             onChange={(e) => handleDocumentFile(e, `stakeholder_aadhaar_${shIdx}`, shIdx)}
@@ -2508,11 +2669,21 @@ export default function BranchFranchiseKYCModal({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => triggerFileUpload(`stakeholder_aadhaar_${shIdx}`)}
+                                  onClick={() => {
+                                    updateStakeholderField(shIdx, 'aadhaar_doc', '');
+                                    const errorKey = `stakeholder_${shIdx}_aadhaar_doc`;
+                                    if (validationErrors[errorKey]) {
+                                      setValidationErrors(prev => {
+                                        const updated = { ...prev };
+                                        delete updated[errorKey];
+                                        return updated;
+                                      });
+                                    }
+                                  }}
                                   style={{
                                     background: '#FAF6EE',
                                     border: '1px solid #DAC493',
-                                    color: '#9F7335',
+                                    color: '#B42318',
                                     borderRadius: '6px',
                                     padding: '4px 8px',
                                     fontSize: '11px',
@@ -2520,7 +2691,7 @@ export default function BranchFranchiseKYCModal({
                                     cursor: 'pointer'
                                   }}
                                 >
-                                  Replace
+                                  Delete
                                 </button>
                               </div>
                             </div>
@@ -2701,7 +2872,7 @@ export default function BranchFranchiseKYCModal({
                     </label>
                     <input
                       type="file"
-                      accept=".pdf,image/png,image/jpeg,image/webp"
+                      accept="application/pdf,image/*"
                       ref={el => fileInputRefs.current['firm_pan'] = el}
                       style={{ display: 'none' }}
                       onChange={(e) => handleDocumentFile(e, 'firm_pan')}
@@ -2831,7 +3002,7 @@ export default function BranchFranchiseKYCModal({
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    accept="application/pdf,image/*"
                     ref={el => fileInputRefs.current['incorporation'] = el}
                     style={{ display: 'none' }}
                     onChange={(e) => handleDocumentFile(e, 'incorporation')}
@@ -2928,7 +3099,7 @@ export default function BranchFranchiseKYCModal({
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    accept="application/pdf,image/*"
                     ref={el => fileInputRefs.current['aoa'] = el}
                     style={{ display: 'none' }}
                     onChange={(e) => handleDocumentFile(e, 'aoa')}
@@ -3022,7 +3193,7 @@ export default function BranchFranchiseKYCModal({
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    accept="application/pdf,image/*"
                     ref={el => fileInputRefs.current['moa'] = el}
                     style={{ display: 'none' }}
                     onChange={(e) => handleDocumentFile(e, 'moa')}
@@ -3116,13 +3287,16 @@ export default function BranchFranchiseKYCModal({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px', alignItems: 'flex-start' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    {firmType === 'Proprietor' ? 'Firm GST Number' : 'GST Number'}
+                    {firmType === 'Proprietor' ? 'Firm GST Number' : 'GST Number'} <span style={{ color: '#DC2626' }}>*</span>
                   </label>
                   <input
                     type="text"
                     maxLength={15}
                     value={gstNumber}
-                    onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
+                    onChange={(e) => {
+                      setGstNumber(e.target.value.toUpperCase());
+                      if (validationErrors.gstNumber) setValidationErrors(prev => { const updated = { ...prev }; delete updated.gstNumber; return updated; });
+                    }}
                     placeholder="e.g. 29ABCDE1234F1Z5"
                     style={{
                       width: '100%',
@@ -3146,11 +3320,11 @@ export default function BranchFranchiseKYCModal({
 
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    Upload GST Certificate
+                    Upload GST Certificate <span style={{ color: '#DC2626' }}>*</span>
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    accept="application/pdf,image/*"
                     ref={el => fileInputRefs.current['gst'] = el}
                     style={{ display: 'none' }}
                     onChange={(e) => handleDocumentFile(e, 'gst')}
@@ -3217,7 +3391,7 @@ export default function BranchFranchiseKYCModal({
                         width: '100%',
                         padding: '11px 14px',
                         borderRadius: 'var(--radius-md)',
-                        border: '1.5px dashed #DAC493',
+                        border: `1.5px dashed ${validationErrors.gstDoc ? '#DC2626' : '#DAC493'}`,
                         background: '#FAF6EE',
                         color: '#9F7335',
                         fontSize: '13px',
@@ -3233,6 +3407,7 @@ export default function BranchFranchiseKYCModal({
                       <span>{uploadingDocKey === 'gst' ? 'Uploading...' : 'Upload GST Certificate'}</span>
                     </button>
                   )}
+                  {validationErrors.gstDoc && <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>{validationErrors.gstDoc}</div>}
                 </div>
               </div>
 
@@ -3240,33 +3415,37 @@ export default function BranchFranchiseKYCModal({
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '16px', alignItems: 'flex-start' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    Gumastha License No.
+                    Gumastha License No. <span style={{ color: '#DC2626' }}>*</span>
                   </label>
                   <input
                     type="text"
                     value={gumasthaNumber}
-                    onChange={(e) => setGumasthaNumber(e.target.value)}
+                    onChange={(e) => {
+                      setGumasthaNumber(e.target.value);
+                      if (validationErrors.gumasthaNumber) setValidationErrors(prev => { const updated = { ...prev }; delete updated.gumasthaNumber; return updated; });
+                    }}
                     placeholder="e.g. GUM/2026/KA/7789"
                     style={{
                       width: '100%',
                       padding: '12px 14px',
                       borderRadius: 'var(--radius-md)',
-                      border: '1.5px solid var(--border-color)',
+                      border: `1.5px solid ${validationErrors.gumasthaNumber ? '#DC2626' : 'var(--border-color)'}`,
                       background: 'var(--bg-card-subtle)',
                       outline: 'none',
                       fontSize: '14px',
                       boxSizing: 'border-box'
                     }}
                   />
+                  {validationErrors.gumasthaNumber && <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>{validationErrors.gumasthaNumber}</div>}
                 </div>
 
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    Upload Gumastha Certificate
+                    Upload Gumastha Certificate <span style={{ color: '#DC2626' }}>*</span>
                   </label>
                   <input
                     type="file"
-                    accept=".pdf,image/png,image/jpeg,image/webp"
+                    accept="application/pdf,image/*"
                     ref={el => fileInputRefs.current['gumastha'] = el}
                     style={{ display: 'none' }}
                     onChange={(e) => handleDocumentFile(e, 'gumastha')}
@@ -3333,7 +3512,7 @@ export default function BranchFranchiseKYCModal({
                         width: '100%',
                         padding: '11px 14px',
                         borderRadius: 'var(--radius-md)',
-                        border: '1.5px dashed #DAC493',
+                        border: `1.5px dashed ${validationErrors.gumasthaDoc ? '#DC2626' : '#DAC493'}`,
                         background: '#FAF6EE',
                         color: '#9F7335',
                         fontSize: '13px',
@@ -3349,6 +3528,7 @@ export default function BranchFranchiseKYCModal({
                       <span>{uploadingDocKey === 'gumastha' ? 'Uploading...' : 'Upload Gumastha Certificate'}</span>
                     </button>
                   )}
+                  {validationErrors.gumasthaDoc && <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>{validationErrors.gumasthaDoc}</div>}
                 </div>
               </div>
             </div>
@@ -3536,41 +3716,6 @@ export default function BranchFranchiseKYCModal({
             </div>
           </div>
 
-          {!isEdit && <section style={{ display: 'grid', gap: 18, padding: '22px 20px', border: '1.5px solid #E8D7C0', borderRadius: 14, background: '#FFFEFC' }}>
-            <div>
-              <h3 style={{ margin: '0 0 6px', color: '#302721', fontSize: 16 }}>Optional data setup</h3>
-              <p style={{ margin: 0, color: '#81766B', fontSize: 12.5, lineHeight: 1.55 }}>Choose which shared master data to copy once into this new {relationshipType}. Leave everything off to keep the current setup.</p>
-            </div>
-            <div style={{ display: 'grid', gap: 10 }}>
-              {[
-                [copyServiceCatalog, setCopyServiceCatalog, 'Categories & services', 'Copy the central master categories and services.'],
-                [copyMembershipPlans, setCopyMembershipPlans, 'Membership plans', 'Copy the central master plans, prices, and benefits. Selecting this also copies categories and services needed by complimentary benefits.'],
-                [copyDesignationList, setCopyDesignationList, 'Designations', 'Copy the central master designation options.'],
-                [copyRoleList, setCopyRoleList, 'Team roles', 'Copy the central master role options.']
-              ].map(([checked, setChecked, title, description]) => <label key={title} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '13px 14px', border: `1px solid ${checked ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, background: checked ? '#FBF6EF' : '#FFFFFF', cursor: title === 'Categories & services' && copyMembershipPlans ? 'not-allowed' : 'pointer' }}>
-                <input type="checkbox" disabled={title === 'Categories & services' && copyMembershipPlans} checked={checked} onChange={event => {
-                  setChecked(event.target.checked);
-                  if (title === 'Membership plans' && event.target.checked) setCopyServiceCatalog(true);
-                }} style={{ width: 16, height: 16, marginTop: 2, accentColor: '#A9793C', flex: '0 0 auto' }} />
-                <span><strong style={{ display: 'block', color: '#4B4037', fontSize: 13 }}>{title}</strong><span style={{ display: 'block', marginTop: 4, color: '#81766B', fontSize: 12, lineHeight: 1.45 }}>{description}</span></span>
-              </label>)}
-            </div>
-            {relationshipType === 'branch' && <div style={{ display: 'grid', gap: 10, paddingTop: 14, borderTop: '1px solid #EEE6DC' }}>
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '13px 14px', border: `1px solid ${copyClientProfiles ? '#C99A5A' : '#E9DCCB'}`, borderRadius: 10, background: copyClientProfiles ? '#FBF6EF' : '#FFFFFF', cursor: 'pointer' }}>
-                <input type="checkbox" checked={copyClientProfiles} onChange={event => setCopyClientProfiles(event.target.checked)} style={{ width: 16, height: 16, marginTop: 2, accentColor: '#A9793C', flex: '0 0 auto' }} />
-                <span><strong style={{ display: 'block', color: '#4B4037', fontSize: 13 }}>Copy client profiles from another branch</strong><span style={{ display: 'block', marginTop: 4, color: '#81766B', fontSize: 12, lineHeight: 1.45 }}>One-time copy of client profile and membership details. Past visits remain with their original branch.</span></span>
-              </label>
-              {copyClientProfiles && <label style={{ display: 'grid', gap: 7, color: '#57534E', fontSize: 12, fontWeight: 700 }}>Copy client profiles from
-                <select required value={clientSourceLocationId} onChange={event => setClientSourceLocationId(event.target.value)} style={{ padding: '11px 12px', border: '1px solid #D6D3D1', borderRadius: 8, background: '#FFFFFF', fontSize: 13 }}>
-                  <option value="">Select a source branch</option>
-                  {availableLocations.filter(location => location.type === 'branch' && (location.status || 'Active').toLowerCase() === 'active' && Number(location.location_id) !== Number(locationToEdit?.location_id)).map(location => <option key={location.location_id} value={location.location_id}>{location.name}</option>)}
-                </select>
-              </label>}
-            </div>}
-            {relationshipType === 'franchise' && <p style={{ margin: 0, paddingTop: 12, borderTop: '1px solid #EEE6DC', color: '#81766B', fontSize: 12 }}>Client profile copying is branch-only and is unavailable for franchises.</p>}
-            {copyOptionsError && <div role="alert" style={{ padding: '10px 12px', border: '1px solid #FECACA', borderRadius: 8, background: '#FEF2F2', color: '#9B1C1C', fontSize: 12 }}>{copyOptionsError}</div>}
-          </section>}
-
           {/* Section 5: Submit Action (Matching New Visitor Form Submit) */}
           <div style={{
             marginTop: '32px',
@@ -3633,7 +3778,7 @@ export default function BranchFranchiseKYCModal({
                   <span>{isEdit ? 'Saving Changes...' : 'Saving KYC Record...'}</span>
                 ) : (
                   <>
-                  <span>{isEdit ? 'Save Changes' : 'Submit & Proceed to Create Logins'}</span>
+                  <span>{isEdit ? 'Review Changes' : 'Review & Continue'}</span>
                   {!isEdit && <ArrowRight size={18} />}
                   </>
                 )}
@@ -3641,6 +3786,43 @@ export default function BranchFranchiseKYCModal({
             </div>
           </div>
         </form>
+          </div>
+        )}
+
+        {currentStep === 1 && isReviewing && (
+          <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+            <div style={{ padding: '16px 18px', border: '1px solid #DAC493', borderRadius: 10, background: '#FAF6EE', color: '#6F5A3B' }}>
+              {isEdit
+                ? 'Review the updated details before saving. Your changes will be saved after you verify the one-time code sent to your sign-in mobile number.'
+                : `Review these details before creating the ${relationshipType}. Clicking Create saves the record and queues email and WhatsApp notifications for each stakeholder with valid contact details.`}
+            </div>
+            <section style={{ border: '1px solid #E7D9C5', borderRadius: 12, padding: 22, background: '#FFFFFF' }}>
+              <h3 style={{ margin: '0 0 16px', color: '#8C6228' }}>Business & location</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+                {[
+                  ['Branch / location', branchName], ['Firm name', firmName], ['Type', `${relationshipType} · ${firmType}`],
+                  ['Address', [addressLine1, addressLine2, city, state, pincode].filter(Boolean).join(', ')],
+                  ['Office phone', officePhone || '—'], ['Business mobiles', mobileNumbers.filter(Boolean).join(', ') || '—'],
+                  ['Business emails', emailIds.filter(Boolean).join(', ') || '—'], ['Firm PAN', firmPan || '—'],
+                  ['GST number', gstNumber || '—'], ['Gumastha license', gumasthaNumber || '—'],
+                  ['Bank', [bankName, bankAccountNumber, bankIfscCode].filter(Boolean).join(' · ') || '—']
+                ].map(([label, value]) => <div key={label}><div style={{ fontSize: 11, color: '#80766A', marginBottom: 4 }}>{label}</div><div style={{ fontSize: 13, fontWeight: 650, color: '#302A23', overflowWrap: 'anywhere' }}>{value}</div></div>)}
+              </div>
+            </section>
+            <section style={{ border: '1px solid #E7D9C5', borderRadius: 12, padding: 22, background: '#FFFFFF' }}>
+              <h3 style={{ margin: '0 0 16px', color: '#8C6228' }}>Stakeholders</h3>
+              <div style={{ display: 'grid', gap: 12 }}>
+                {stakeholders.map((person, index) => <div key={`${person.name}-${index}`} style={{ padding: 14, border: '1px solid #EEE7DD', borderRadius: 8 }}>
+                  <strong>{index + 1}. {person.name || 'Unnamed stakeholder'} · {person.role_type}</strong>
+                  <div style={{ marginTop: 6, fontSize: 12.5, color: '#6F6253' }}>Mobile: {(person.mobile_numbers || [person.mobile]).filter(Boolean).join(', ') || '—'} · Email: {(person.email_ids || [person.email]).filter(Boolean).join(', ') || '—'}</div>
+                  <div style={{ marginTop: 4, fontSize: 12, color: '#6F6253' }}>PAN document: {person.pan_doc ? 'Attached' : 'Missing'} · Aadhaar document: {person.aadhaar_doc ? 'Attached' : 'Missing'}</div>
+                </div>)}
+              </div>
+            </section>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', borderTop: '1px solid #E9E1D6', paddingTop: 20 }}>
+              <button type="button" onClick={() => setIsReviewing(false)} style={{ padding: '12px 20px', border: '1px solid #DAC493', borderRadius: 8, background: '#FFFFFF', color: '#805A25', fontWeight: 700, cursor: 'pointer' }}>Edit Details</button>
+              <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="btn-primary" style={{ padding: '12px 28px', borderRadius: 8, fontWeight: 750, cursor: isSubmitting ? 'wait' : 'pointer', opacity: isSubmitting ? .65 : 1 }}>{isSubmitting ? 'Creating…' : isEdit ? 'Submit Changes' : 'Submit & Create'}</button>
+            </div>
           </div>
         )}
 
@@ -3912,6 +4094,8 @@ export default function BranchFranchiseKYCModal({
                             }}
                           />
                         </div>
+                        <PhoneOtpVerification value={adm.phone} verified={isPhoneVerified(adm.phone)} onVerified={markPhoneVerified} />
+                        {adminErrors[`${pfx}phone`] && <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>{adminErrors[`${pfx}phone`]}</div>}
                       </div>
 
                       {/* Password */}
@@ -4123,6 +4307,35 @@ export default function BranchFranchiseKYCModal({
                 : <><strong>{savedLocation?.name || branchName}</strong> has been registered with complete KYC.</>}
               {!isEdit && ' Every registered proprietor, partner, or director can now sign in to this branch with OTP using their registered mobile number.'}
             </p>
+            {!isEdit && <div style={{ width: '100%', maxWidth: 760, margin: '-12px 0 20px', color: '#16704F', fontSize: 13, fontWeight: 650 }}>Email and WhatsApp notifications have been queued for the registered stakeholders.</div>}
+            <section className="registration-print-area" style={{ width: '100%', maxWidth: 760, textAlign: 'left', padding: 22, marginBottom: 22, border: '1px solid #E7D9C5', borderRadius: 12, background: '#FFFFFF' }}>
+              <h3 style={{ margin: '0 0 14px', color: '#8C6228' }}>Registration details</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, fontSize: 13 }}>
+                {[
+                  ['Location', savedLocation?.name || branchName], ['Registration code', savedLocation?.code || '—'],
+                  ['Firm type', `${relationshipType} · ${firmType}`], ['Firm name', firmName],
+                  ['Address', [addressLine1, addressLine2, city, state, pincode].filter(Boolean).join(', ')],
+                  ['Office number', officePhone || '—'], ['Business numbers', mobileNumbers.filter(Boolean).join(', ') || '—'],
+                  ['Business email', emailIds.filter(Boolean).join(', ') || '—'],
+                  ['Firm PAN', `${firmPan || '—'} · ${firmPanDoc ? 'document attached' : 'document missing'}`],
+                  ['GST', `${gstNumber || '—'} · ${gstDoc ? 'certificate attached' : 'certificate missing'}`],
+                  ['Gumastha', `${gumasthaNumber || '—'} · ${gumasthaDoc ? 'certificate attached' : 'certificate missing'}`],
+                  ['Bank', `${bankName || '—'} · account ending ${bankAccountNumber.replace(/\D/g, '').slice(-4) || '—'} · IFSC ${bankIfscCode || '—'}`]
+                ].map(([label, value]) => <div key={label}><strong style={{ display: 'block', color: '#80766A', fontSize: 11, marginBottom: 3 }}>{label}</strong><span style={{ color: '#302A23', overflowWrap: 'anywhere' }}>{value}</span></div>)}
+              </div>
+              <h4 style={{ margin: '20px 0 10px', color: '#8C6228' }}>Stakeholders</h4>
+              {stakeholders.map((person, index) => {
+                const aadhaarDigits = String(person.aadhaar_number || '').replace(/\D/g, '');
+                const maskedAadhaar = aadhaarDigits ? `${'•'.repeat(Math.max(0, aadhaarDigits.length - 4))}${aadhaarDigits.slice(-4)}` : '—';
+                return <div key={`${person.name}-print-${index}`} style={{ padding: '9px 0', borderTop: '1px solid #EEE7DD', fontSize: 12.5 }}><strong>{index + 1}. {person.name} · {person.role_type}</strong><div>{(person.mobile_numbers || [person.mobile]).filter(Boolean).join(', ') || '—'} · {(person.email_ids || [person.email]).filter(Boolean).join(', ') || '—'}</div><div>DOB: {person.dob || '—'} · Marital status: {person.marital_status || '—'} · PAN: {person.pan_number || '—'} · Aadhaar: {maskedAadhaar} · DIN: {person.din_number || '—'}</div><div>PAN document: {person.pan_doc ? 'Attached' : '—'} · Aadhaar document: {person.aadhaar_doc ? 'Attached' : '—'}</div></div>;
+              })}
+            </section>
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 24 }}>
+              <button type="button" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', border: '1px solid #DAC493', borderRadius: 8, background: '#FFFFFF', color: '#805A25', fontWeight: 700, cursor: 'pointer' }}><Printer size={16} /> Print / Save as PDF</button>
+              <button type="button" onClick={downloadRegistrationSummary} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', border: '1px solid #DAC493', borderRadius: 8, background: '#FFFFFF', color: '#805A25', fontWeight: 700, cursor: 'pointer' }}>Download summary</button>
+              <button type="button" onClick={shareRegistrationSummary} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 16px', border: '1px solid #DAC493', borderRadius: 8, background: '#FFFFFF', color: '#805A25', fontWeight: 700, cursor: 'pointer' }}><Share2 size={16} /> Share</button>
+            </div>
+            {shareFeedback && <div role="status" style={{ marginBottom: 18, color: '#6F5A3B', fontSize: 12.5 }}>{shareFeedback}</div>}
             {!isEdit && savedLocation?.startup_data_copy && (savedLocation.startup_data_copy.error || Object.entries(savedLocation.startup_data_copy).some(([key, value]) => key !== 'error' && Number(value) > 0)) && <div style={{ width: '100%', maxWidth: 720, margin: '-8px 0 24px', padding: '14px 16px', border: `1px solid ${savedLocation.startup_data_copy.error ? '#FECACA' : '#D9E9DA'}`, borderRadius: 10, background: savedLocation.startup_data_copy.error ? '#FEF2F2' : '#F3FAF4', color: savedLocation.startup_data_copy.error ? '#9B1C1C' : '#315D3B', textAlign: 'left', fontSize: 12.5 }}>
               {savedLocation.startup_data_copy.error ? `The location was created, but the selected data copy failed: ${savedLocation.startup_data_copy.error}` : <><strong>One-time data copy complete:</strong> {savedLocation.startup_data_copy.categories} categories, {savedLocation.startup_data_copy.services} services, {savedLocation.startup_data_copy.membership_plans} membership plans, {savedLocation.startup_data_copy.designations} designations, {savedLocation.startup_data_copy.team_roles || 0} team roles, and {savedLocation.startup_data_copy.client_profiles} client profiles.</>}
             </div>}

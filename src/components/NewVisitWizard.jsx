@@ -16,6 +16,7 @@ import brandLogoTextImg from '../assets/brand-logo-text.png';
 import LuxuryDatePicker from './LuxuryDatePicker';
 import ServiceTermsModal from './ServiceTermsModal';
 import LoginPreferenceSelector from './LoginPreferenceSelector';
+import { IndianCityDropdown, IndianStateDropdown } from './IndianStateCityFields';
 import VisitorServiceSpotlightCard from './VisitorServiceSpotlightCard';
 import BrandingCustomizer from './BrandingCustomizer';
 import { renderCategoryIcon } from '../utils/categoryIcons';
@@ -3598,7 +3599,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '16px' }}>
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, order: 3 }}>
                     <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                       Pin Code <span style={{ color: '#DC2626' }}>*</span>
                     </label>
@@ -3623,51 +3624,27 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                     />
                   </div>
 
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, order: 2 }}>
                     <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                       City <span style={{ color: '#DC2626' }}>*</span>
                     </label>
-                    <input
-                      type="text"
-                      required
+                    <IndianCityDropdown
+                      state={clientState}
                       value={clientCity}
-                      onChange={(e) => setClientCity(e.target.value)}
-                      placeholder=""
-                      style={{
-                        width: '100%',
-                        maxWidth: '100%',
-                        boxSizing: 'border-box',
-                        padding: '12px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1.5px solid var(--border-color)',
-                        background: 'var(--bg-card-subtle)',
-                        outline: 'none',
-                        fontSize: '14px'
-                      }}
+                      onChange={setClientCity}
+                      selectStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-color)', background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
+                      inputStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-color)', background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px', marginTop: '8px' }}
                     />
                   </div>
 
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, order: 1 }}>
                     <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
                       State <span style={{ color: '#DC2626' }}>*</span>
                     </label>
-                    <input
-                      type="text"
-                      required
+                    <IndianStateDropdown
                       value={clientState}
-                      onChange={(e) => setClientState(e.target.value)}
-                      placeholder=""
-                      style={{
-                        width: '100%',
-                        maxWidth: '100%',
-                        boxSizing: 'border-box',
-                        padding: '12px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1.5px solid var(--border-color)',
-                        background: 'var(--bg-card-subtle)',
-                        outline: 'none',
-                        fontSize: '14px'
-                      }}
+                      onChange={value => { setClientState(value); setClientCity(''); }}
+                      style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: '1.5px solid var(--border-color)', background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
                     />
                   </div>
                 </div>
@@ -5836,7 +5813,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                 const num = String(cat.display_order || idx + 1).padStart(2, '0');
                 const title = (cat.category_name || fallbackItem.title).toUpperCase();
                 const desc = cat.description || fallbackItem.desc;
-                const image = cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : null) || fallbackItem.image;
+                const image = cat.image_url || (cat.icon && cat.icon.includes('/') ? cat.icon : null);
                 const imagePos = parseImgPos(cat.image_position);
                 return {
                   num,
@@ -5866,7 +5843,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                       setStep('sub-services');
                     }
                   }}
-                  className="ritual-category-card"
+                  className={`ritual-category-card${item.image ? '' : ' ritual-category-card-no-image'}`}
                   role="button"
                   tabIndex={0}
                 >
@@ -5886,7 +5863,7 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                     </div>
                   </div>
 
-                  <div className="ritual-card-image-wrap">
+                  {item.image && <div className="ritual-card-image-wrap">
                     <img
                       src={item.image}
                       alt={item.title.replace('\n', ' ')}
@@ -5897,10 +5874,15 @@ export default function NewVisitWizard({ preSelectedClient, initialType, resumeV
                         transformOrigin: 'right center'
                       } : undefined}
                       onError={(e) => {
+                        if (e.currentTarget.dataset.fallbackApplied === 'true') {
+                          e.currentTarget.style.display = 'none';
+                          return;
+                        }
+                        e.currentTarget.dataset.fallbackApplied = 'true';
                         e.currentTarget.src = defaultAestheticCards[idx % defaultAestheticCards.length].image;
                       }}
                     />
-                  </div>
+                  </div>}
                 </div>
               ));
             })()}

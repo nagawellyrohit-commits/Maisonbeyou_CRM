@@ -641,10 +641,38 @@ const DEFAULT_MASTER_PORTAL_BRANDING = {
   master_franchises_title: 'FRANCHISES',
   master_franchises_subtitle: 'monitor franchise partner performance',
   master_franchises_button: 'CONTINUE',
+  master_branch_revenue_title: 'BRANCH REVENUE',
+  master_franchise_revenue_title: 'FRANCHISE REVENUE',
+  master_firm_type_heading: 'Select Firm Type',
+  master_firm_proprietor_title: 'Proprietor',
+  master_firm_proprietor_description: 'individual proprietorship studio operations',
+  master_firm_partnership_title: 'Partnership',
+  master_firm_partnership_description: 'joint partner-owned studio operations',
+  master_firm_pvt_ltd_title: 'Pvt. Ltd.',
+  master_firm_pvt_ltd_description: 'corporate board-governed studio operations',
+  master_firm_llp_title: 'LLP',
+  master_firm_llp_description: 'limited liability partnership studio operations',
+  master_register_branch_label: 'REGISTER BRANCH',
+  master_register_franchise_label: 'REGISTER FRANCHISE',
+  master_firm_page_heading_color: '#D99A64',
+  master_firm_card_fill: '#FFFFFF',
+  master_firm_card_border: '#D99A64',
+  master_firm_card_title_color: '#C28B42',
+  master_firm_card_text_color: '#4B4038',
+  master_firm_icon_fill: '#FAF0E4',
+  master_firm_icon_color: '#A6733D',
+  master_firm_button_fill: '#A0723E',
+  master_firm_button_text: '#FFFFFF',
   master_locations_heading: '',
+  master_add_location_label: '',
   master_back_label: 'Back to Studio Management',
   master_reports_label: 'Reports',
   master_logout_label: 'Sign Out',
+  master_card_heading_font_family: 'Inter, sans-serif',
+  master_card_heading_font_size: 20,
+  master_card_heading_font_style: 'normal',
+  master_card_heading_font_weight: 700,
+  master_card_heading_color: '#A0723E',
   heading_font_family: 'Inter, sans-serif',
   heading_font_size: 26,
   heading_font_style: 'normal',
@@ -721,10 +749,38 @@ function sanitizeMasterPortalBranding(input) {
     master_franchises_title: text('master_franchises_title', 50),
     master_franchises_subtitle: text('master_franchises_subtitle', 120),
     master_franchises_button: text('master_franchises_button', 40),
+    master_branch_revenue_title: text('master_branch_revenue_title', 60),
+    master_franchise_revenue_title: text('master_franchise_revenue_title', 60),
+    master_firm_type_heading: text('master_firm_type_heading', 80),
+    master_firm_proprietor_title: text('master_firm_proprietor_title', 50),
+    master_firm_proprietor_description: text('master_firm_proprietor_description', 120),
+    master_firm_partnership_title: text('master_firm_partnership_title', 50),
+    master_firm_partnership_description: text('master_firm_partnership_description', 120),
+    master_firm_pvt_ltd_title: text('master_firm_pvt_ltd_title', 50),
+    master_firm_pvt_ltd_description: text('master_firm_pvt_ltd_description', 120),
+    master_firm_llp_title: text('master_firm_llp_title', 50),
+    master_firm_llp_description: text('master_firm_llp_description', 120),
+    master_register_branch_label: text('master_register_branch_label', 40),
+    master_register_franchise_label: text('master_register_franchise_label', 40),
+    master_firm_page_heading_color: color('master_firm_page_heading_color'),
+    master_firm_card_fill: color('master_firm_card_fill'),
+    master_firm_card_border: color('master_firm_card_border'),
+    master_firm_card_title_color: color('master_firm_card_title_color'),
+    master_firm_card_text_color: color('master_firm_card_text_color'),
+    master_firm_icon_fill: color('master_firm_icon_fill'),
+    master_firm_icon_color: color('master_firm_icon_color'),
+    master_firm_button_fill: color('master_firm_button_fill'),
+    master_firm_button_text: color('master_firm_button_text'),
     master_locations_heading: text('master_locations_heading', 80),
+    master_add_location_label: text('master_add_location_label', 50),
     master_back_label: text('master_back_label', 60),
     master_reports_label: text('master_reports_label', 40),
     master_logout_label: text('master_logout_label', 40),
+    master_card_heading_font_family: safeFont(source.master_card_heading_font_family),
+    master_card_heading_font_size: Math.min(48, Math.max(12, Number(source.master_card_heading_font_size) || 20)),
+    master_card_heading_font_style: source.master_card_heading_font_style === 'italic' ? 'italic' : 'normal',
+    master_card_heading_font_weight: Math.min(900, Math.max(300, Number(source.master_card_heading_font_weight) || 700)),
+    master_card_heading_color: color('master_card_heading_color'),
     heading_font_family: safeFont(source.heading_font_family),
     heading_font_size: Math.min(48, Math.max(14, Number(source.heading_font_size) || 26)),
     heading_font_style: source.heading_font_style === 'italic' ? 'italic' : 'normal',
@@ -1116,7 +1172,7 @@ function findUserByIdentifier(rawInput, preferredRole = null, explicitLocationId
 
   // 7. Primary login email lookup in LOCATIONS or LOCATION_KYC
   if (!user && cleanInput.includes('@')) {
-    const loc = db.prepare('SELECT location_id FROM LOCATIONS WHERE LOWER(primary_login_email) = ? OR LOWER(email) = ?').get(cleanInput, cleanInput)
+    const loc = db.prepare('SELECT location_id FROM LOCATIONS WHERE LOWER(primary_login_email) = ?').get(cleanInput)
       || db.prepare('SELECT location_id FROM LOCATION_KYC WHERE LOWER(primary_login_email) = ?').get(cleanInput);
     if (loc) {
       user = db.prepare('SELECT * FROM USERS WHERE location_id = ? AND role = ? AND active = 1')
@@ -1465,7 +1521,14 @@ const OTP_RATE_WINDOW_MS = 15 * 60 * 1000;
 const otpRateWindows = new Map();
 const otpResendTimes = new Map();
 const demoLoginOtps = new Map();
+const kycPhoneOtpChallenges = new Map();
+const kycPhoneOtpVerified = new Map();
+const kycPhoneOtpSentAt = new Map();
+const branchEditOtpChallenges = new Map();
+const branchEditOtpVerified = new Map();
+const branchEditOtpSentAt = new Map();
 const DEMO_LOGIN_OTP_TTL_MS = 5 * 60 * 1000;
+const KYC_PHONE_VERIFIED_TTL_MS = 30 * 60 * 1000;
 
 function isDemoOtpEnabled() {
   return String(process.env.OTP_DEMO_MODE || '').toLowerCase() === 'true';
@@ -1522,6 +1585,213 @@ function getOtpLoginContext(req, res) {
   }
   return { identifier, mobile, user };
 }
+
+function kycPhoneProofKey(userId, mobile) {
+  return `${userId}:${mobile}`;
+}
+
+function branchEditOtpProofKey(userId, locationId) {
+  return `${userId}:${locationId}`;
+}
+
+function maskOtpMobile(mobile) {
+  return `+91 ******${String(mobile || '').slice(-4)}`;
+}
+
+function canEditLocationKyc(req, locationId) {
+  if (req.user?.role === 'master_admin') return true;
+  if (req.user?.role !== 'admin' || Number(req.user.location_id) !== Number(locationId)) return false;
+  const loginPhone = normalizeIndianOtpMobile(req.user.phone);
+  if (!loginPhone) return false;
+  const stakeholders = db.prepare('SELECT mobile, mobile_numbers, primary_login_phone FROM LOCATION_STAKEHOLDERS WHERE location_id = ?').all(locationId);
+  return stakeholders.some(stakeholder => [
+    stakeholder.primary_login_phone,
+    stakeholder.mobile,
+    ...parseStoredPhoneList(stakeholder.mobile_numbers)
+  ].some(phone => normalizeIndianOtpMobile(phone) === loginPhone));
+}
+
+app.post('/api/locations/edit-otp/send', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  const locationId = Number(req.body.location_id);
+  if (!Number.isInteger(locationId) || locationId <= 0 || !canEditLocationKyc(req, locationId)) {
+    return res.status(403).json({ error: 'Only a signed-in stakeholder for this branch or a master admin can verify branch detail changes.' });
+  }
+  const mobile = normalizeIndianOtpMobile(req.user.phone);
+  if (!mobile) return res.status(400).json({ error: 'Add a valid mobile number to your signed-in account before editing branch details.' });
+  if (!takeOtpRateLimit(req, mobile, 'branch-edit-otp-send', 5, res)) return;
+  const proofKey = branchEditOtpProofKey(req.user.user_id, locationId);
+  const waitMs = 60 * 1000 - (Date.now() - (branchEditOtpSentAt.get(proofKey) || 0));
+  if (branchEditOtpSentAt.has(proofKey) && waitMs > 0) {
+    const waitSeconds = Math.ceil(waitMs / 1000);
+    res.set('Retry-After', String(waitSeconds));
+    return res.status(429).json({ error: `Please wait ${waitSeconds} seconds before requesting another OTP.` });
+  }
+  if (isDemoOtpEnabled()) {
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    branchEditOtpChallenges.set(proofKey, { otp, expiresAt: Date.now() + DEMO_LOGIN_OTP_TTL_MS });
+    branchEditOtpSentAt.set(proofKey, Date.now());
+    return res.json({ success: true, message: 'Demo OTP generated.', demoOtp: otp, sentTo: maskOtpMobile(mobile) });
+  }
+  try {
+    const result = await sendMsg91Otp(mobile);
+    if (String(result.type || '').toLowerCase() !== 'success') return res.status(502).json({ error: 'MSG91 could not send the OTP. Please try again.' });
+    branchEditOtpSentAt.set(proofKey, Date.now());
+    return res.json({ success: true, message: 'Verification OTP sent to your registered mobile.', sentTo: maskOtpMobile(mobile) });
+  } catch (error) {
+    console.error('Branch edit OTP send error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to send verification OTP.' });
+  }
+});
+
+app.post('/api/locations/edit-otp/verify', authenticateToken, authorizeRoles('admin'), async (req, res) => {
+  const locationId = Number(req.body.location_id);
+  if (!Number.isInteger(locationId) || locationId <= 0 || !canEditLocationKyc(req, locationId)) {
+    return res.status(403).json({ error: 'Only a signed-in stakeholder for this branch or a master admin can verify branch detail changes.' });
+  }
+  const mobile = normalizeIndianOtpMobile(req.user.phone);
+  const otp = String(req.body.otp || '').trim();
+  const otpLength = Number(process.env.MSG91_OTP_LENGTH || 6);
+  if (!mobile) return res.status(400).json({ error: 'Add a valid mobile number to your signed-in account before editing branch details.' });
+  if (!new RegExp(`^\\d{${otpLength}}$`).test(otp)) return res.status(400).json({ error: `Enter the ${otpLength}-digit verification code.` });
+  if (!takeOtpRateLimit(req, mobile, 'branch-edit-otp-verify', 10, res)) return;
+  const proofKey = branchEditOtpProofKey(req.user.user_id, locationId);
+  try {
+    if (isDemoOtpEnabled()) {
+      const challenge = branchEditOtpChallenges.get(proofKey);
+      if (!challenge || challenge.otp !== otp || challenge.expiresAt < Date.now()) return res.status(401).json({ error: 'Incorrect or expired OTP. Request a new code and try again.' });
+      branchEditOtpChallenges.delete(proofKey);
+    } else {
+      const result = await verifyMsg91Otp(mobile, otp);
+      if (!result.httpOk || String(result.type || '').toLowerCase() !== 'success') return res.status(401).json({ error: 'Incorrect or expired OTP. Please check the code and try again.' });
+    }
+    branchEditOtpVerified.set(proofKey, Date.now() + KYC_PHONE_VERIFIED_TTL_MS);
+    branchEditOtpSentAt.delete(proofKey);
+    return res.json({ success: true, message: 'Branch detail editing verified.' });
+  } catch (error) {
+    console.error('Branch edit OTP verify error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to verify OTP.' });
+  }
+});
+
+function getKycPhoneValues(body = {}) {
+  const phones = [body.office_phone, body.primary_login_phone];
+  if (Array.isArray(body.mobile_numbers)) phones.push(...body.mobile_numbers);
+  for (const admin of Array.isArray(body.admins) ? body.admins : []) phones.push(admin?.phone);
+  for (const stakeholder of Array.isArray(body.stakeholders) ? body.stakeholders : []) {
+    phones.push(stakeholder?.mobile, stakeholder?.primary_login_phone);
+    if (Array.isArray(stakeholder?.mobile_numbers)) phones.push(...stakeholder.mobile_numbers);
+  }
+  return [...new Set(phones.map(value => String(value || '').trim()).filter(Boolean))];
+}
+
+function getKycPhoneNumbers(body = {}) {
+  return [...new Set(getKycPhoneValues(body).map(normalizeIndianOtpMobile).filter(Boolean))];
+}
+
+function parseStoredPhoneList(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [value];
+  } catch {
+    return [value];
+  }
+}
+
+function getExistingKycPhones(locationId) {
+  if (!locationId) return new Set();
+  const phones = new Set();
+  const location = db.prepare('SELECT phone, primary_login_phone FROM LOCATIONS WHERE location_id = ?').get(locationId);
+  if (location) [location.phone, location.primary_login_phone].forEach(value => {
+    const normalized = normalizeIndianOtpMobile(value);
+    if (normalized) phones.add(normalized);
+  });
+  const kyc = db.prepare('SELECT mobile_numbers, primary_login_phone FROM LOCATION_KYC WHERE location_id = ?').get(locationId);
+  if (kyc) [...parseStoredPhoneList(kyc.mobile_numbers), kyc.primary_login_phone].forEach(value => {
+    const normalized = normalizeIndianOtpMobile(value);
+    if (normalized) phones.add(normalized);
+  });
+  const stakeholders = db.prepare('SELECT mobile, mobile_numbers, primary_login_phone FROM LOCATION_STAKEHOLDERS WHERE location_id = ?').all(locationId);
+  stakeholders.forEach(stakeholder => [...parseStoredPhoneList(stakeholder.mobile_numbers), stakeholder.mobile, stakeholder.primary_login_phone].forEach(value => {
+    const normalized = normalizeIndianOtpMobile(value);
+    if (normalized) phones.add(normalized);
+  }));
+  return phones;
+}
+
+function getUnverifiedKycPhones(req, body, existingLocationId = null) {
+  const existingPhones = getExistingKycPhones(existingLocationId);
+  return getKycPhoneNumbers(body).filter(mobile => {
+    if (existingPhones.has(mobile)) return false;
+    const expiresAt = kycPhoneOtpVerified.get(kycPhoneProofKey(req.user.user_id, mobile)) || 0;
+    if (expiresAt > Date.now()) return false;
+    if (expiresAt) kycPhoneOtpVerified.delete(kycPhoneProofKey(req.user.user_id, mobile));
+    return true;
+  });
+}
+
+function consumeKycPhoneProofs(req, body) {
+  getKycPhoneNumbers(body).forEach(mobile => kycPhoneOtpVerified.delete(kycPhoneProofKey(req.user.user_id, mobile)));
+}
+
+app.post('/api/kyc/phone-otp/send', authenticateToken, authorizeRoles('master_admin'), async (req, res) => {
+  const mobile = normalizeIndianOtpMobile(req.body.phone);
+  if (!mobile) return res.status(400).json({ error: 'Enter a valid 10-digit Indian mobile number.' });
+  if (!takeOtpRateLimit(req, mobile, 'kyc-phone-send', 5, res)) return;
+  const proofKey = kycPhoneProofKey(req.user.user_id, mobile);
+  const waitMs = 60 * 1000 - (Date.now() - (kycPhoneOtpSentAt.get(proofKey) || 0));
+  if (kycPhoneOtpSentAt.has(proofKey) && waitMs > 0) {
+    const waitSeconds = Math.ceil(waitMs / 1000);
+    res.set('Retry-After', String(waitSeconds));
+    return res.status(429).json({ error: `Please wait ${waitSeconds} seconds before requesting another OTP.` });
+  }
+  if (isDemoOtpEnabled()) {
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    kycPhoneOtpChallenges.set(proofKey, { otp, expiresAt: Date.now() + DEMO_LOGIN_OTP_TTL_MS });
+    kycPhoneOtpSentAt.set(proofKey, Date.now());
+    return res.json({ success: true, message: 'Demo OTP generated.', demoOtp: otp });
+  }
+  try {
+    const result = await sendMsg91Otp(mobile);
+    if (String(result.type || '').toLowerCase() !== 'success') return res.status(502).json({ error: 'MSG91 could not send the OTP. Please try again.' });
+    kycPhoneOtpSentAt.set(proofKey, Date.now());
+    return res.json({ success: true, message: 'Verification OTP sent.' });
+  } catch (error) {
+    console.error('KYC phone OTP send error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to send verification OTP.' });
+  }
+});
+
+app.post('/api/kyc/phone-otp/verify', authenticateToken, authorizeRoles('master_admin'), async (req, res) => {
+  const mobile = normalizeIndianOtpMobile(req.body.phone);
+  const otp = String(req.body.otp || '').trim();
+  const otpLength = Number(process.env.MSG91_OTP_LENGTH || 6);
+  if (!mobile) return res.status(400).json({ error: 'Enter a valid 10-digit Indian mobile number.' });
+  if (!new RegExp(`^\\d{${otpLength}}$`).test(otp)) return res.status(400).json({ error: `Enter the ${otpLength}-digit verification code.` });
+  if (!takeOtpRateLimit(req, mobile, 'kyc-phone-verify', 10, res)) return;
+  const proofKey = kycPhoneProofKey(req.user.user_id, mobile);
+  try {
+    if (isDemoOtpEnabled()) {
+      const challenge = kycPhoneOtpChallenges.get(proofKey);
+      if (!challenge || challenge.otp !== otp || challenge.expiresAt < Date.now()) {
+        return res.status(401).json({ error: 'Incorrect or expired OTP. Request a new code and try again.' });
+      }
+      kycPhoneOtpChallenges.delete(proofKey);
+    } else {
+      const result = await verifyMsg91Otp(mobile, otp);
+      if (!result.httpOk || String(result.type || '').toLowerCase() !== 'success') {
+        return res.status(401).json({ error: 'Incorrect or expired OTP. Please check the code and try again.' });
+      }
+    }
+    kycPhoneOtpVerified.set(proofKey, Date.now() + KYC_PHONE_VERIFIED_TTL_MS);
+    kycPhoneOtpSentAt.delete(proofKey);
+    return res.json({ success: true, message: 'Mobile number verified.' });
+  } catch (error) {
+    console.error('KYC phone OTP verify error:', error.message);
+    return res.status(error.status || 502).json({ error: error.message || 'Unable to verify mobile number.' });
+  }
+});
 
 app.post('/api/auth/otp/send', async (req, res) => {
   const context = getOtpLoginContext(req, res);
@@ -2406,6 +2676,13 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), as
       stakeholders
     } = req.body;
 
+    const invalidPhone = getKycPhoneValues(req.body).find(phone => !normalizeIndianOtpMobile(phone));
+    if (invalidPhone) return res.status(400).json({ error: 'Every entered mobile number must be a valid 10-digit Indian number.' });
+    const unverifiedPhones = getUnverifiedKycPhones(req, req.body);
+    if (unverifiedPhones.length) {
+      return res.status(400).json({ error: `Verify every new mobile number with OTP before saving: ${unverifiedPhones.map(phone => `+${phone}`).join(', ')}` });
+    }
+
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Studio / Location name is required' });
     }
@@ -2469,24 +2746,10 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), as
     }
 
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || '').trim();
-    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || '').trim();
+    const primaryPhone = String(req.body.primary_login_phone || '').trim();
     const officePhone = String(office_phone || '').trim();
-    const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || '')).trim();
-
-    // Backend validation: Ensure single primary preference matches entered lists
-    if (Array.isArray(mobile_numbers) && mobile_numbers.length > 0 && primaryPhone) {
-      const cleanList = mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10));
-      const cleanPrimary = primaryPhone.replace(/\D/g, '').slice(0, 10);
-      if (!cleanList.includes(cleanPrimary)) {
-        return res.status(400).json({ error: 'Primary Login Number must be one of the entered mobile numbers' });
-      }
-    }
-    if (Array.isArray(email_ids) && email_ids.length > 0 && primaryEmail) {
-      const cleanList = email_ids.map(e => (e || '').trim().toLowerCase());
-      if (!cleanList.includes(primaryEmail.toLowerCase())) {
-        return res.status(400).json({ error: 'Primary Login Email must be one of the entered email addresses' });
-      }
-    }
+    const primaryEmail = String(req.body.primary_login_email || '').trim();
+    const locationEmail = String((Array.isArray(email_ids) ? email_ids.find(Boolean) : '') || req.body.email || '').trim();
 
     const insertLocStmt = db.prepare(`
       INSERT INTO LOCATIONS (
@@ -2505,7 +2768,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), as
       (state || '').trim(),
       (pincode || '').trim(),
       officePhone,
-      primaryEmail,
+      locationEmail,
       status || 'Active',
       assignedManager || null,
       (firm_type || '').trim() || null,
@@ -2762,6 +3025,7 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), as
       ipAddress: req.ip || req.connection?.remoteAddress
     });
 
+    consumeKycPhoneProofs(req, req.body);
     res.status(201).json({
       success: true,
       message: `${cleanType === 'branch' ? 'Branch' : 'Franchise'} registered successfully with KYC and dedicated accounts`,
@@ -2784,12 +3048,15 @@ app.post('/api/locations', authenticateToken, authorizeRoles('master_admin'), as
 });
 
 // Update existing location & KYC - Master Admin only (No duplicate creation)
-app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
+app.put('/api/locations/:id', authenticateToken, authorizeRoles('admin'), (req, res) => {
   try {
     const locId = Number(req.params.id);
     const existing = db.prepare('SELECT * FROM LOCATIONS WHERE location_id = ?').get(locId);
     if (!existing) {
       return res.status(404).json({ error: 'Location not found' });
+    }
+    if (!canEditLocationKyc(req, locId)) {
+      return res.status(403).json({ error: 'Only a signed-in stakeholder for this branch or a master admin can edit branch details.' });
     }
 
     const {
@@ -2802,26 +3069,31 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       stakeholders
     } = req.body;
 
+    const kycDetailFields = ['firm_type', 'firm_name', 'address_line1', 'address_line2', 'pincode', 'city', 'state', 'mobile_numbers', 'email_ids', 'office_phone', 'firm_pan', 'firm_pan_doc', 'cin_number', 'incorporation_doc', 'gst_number', 'gst_doc', 'gumastha_number', 'bank_firm_name', 'bank_name', 'bank_account_number', 'bank_ifsc_code', 'stakeholders'];
+    const isKycDetailsUpdate = kycDetailFields.some(field => Object.prototype.hasOwnProperty.call(req.body, field));
+    if (isKycDetailsUpdate) {
+      const invalidPhone = getKycPhoneValues(req.body).find(phone => !normalizeIndianOtpMobile(phone));
+      if (invalidPhone) return res.status(400).json({ error: 'Every entered mobile number must be a valid 10-digit Indian number.' });
+      const editOtpProofKey = branchEditOtpProofKey(req.user.user_id, locId);
+      const editOtpExpiresAt = branchEditOtpVerified.get(editOtpProofKey) || 0;
+      if (editOtpExpiresAt <= Date.now()) {
+        branchEditOtpVerified.delete(editOtpProofKey);
+        return res.status(401).json({ error: 'Verify your identity with an OTP before saving branch detail changes.' });
+      }
+      // Even previously saved contacts must be OTP-verified in the current edit session.
+      const unverifiedPhones = getUnverifiedKycPhones(req, req.body, locId);
+      if (unverifiedPhones.length) {
+        return res.status(400).json({ error: `Verify each changed mobile number with OTP before saving: ${unverifiedPhones.map(phone => `+${phone}`).join(', ')}` });
+      }
+      branchEditOtpVerified.delete(editOtpProofKey);
+    }
+
     const cleanType = (type || existing.type).trim().toLowerCase();
     const fullAddress = [address_line1, address_line2].filter(Boolean).join(', ') || (req.body.address || existing.address || '').trim();
-    const primaryPhone = (req.body.primary_login_phone || (Array.isArray(mobile_numbers) && mobile_numbers[0]) || existing.primary_login_phone || '').trim();
+    const primaryPhone = String(req.body.primary_login_phone || existing.primary_login_phone || '').trim();
     const officePhone = office_phone !== undefined ? String(office_phone || '').trim() : String(existing.phone || '').trim();
-    const primaryEmail = (req.body.primary_login_email || (Array.isArray(email_ids) && email_ids[0]) || (req.body.email || existing.email || '')).trim();
-
-    // Backend validation: Ensure single primary preference matches entered lists
-    if (Array.isArray(mobile_numbers) && mobile_numbers.length > 0 && primaryPhone) {
-      const cleanList = mobile_numbers.map(m => (m || '').replace(/\D/g, '').slice(0, 10));
-      const cleanPrimary = primaryPhone.replace(/\D/g, '').slice(0, 10);
-      if (!cleanList.includes(cleanPrimary)) {
-        return res.status(400).json({ error: 'Primary Login Number must be one of the entered mobile numbers' });
-      }
-    }
-    if (Array.isArray(email_ids) && email_ids.length > 0 && primaryEmail) {
-      const cleanList = email_ids.map(e => (e || '').trim().toLowerCase());
-      if (!cleanList.includes(primaryEmail.toLowerCase())) {
-        return res.status(400).json({ error: 'Primary Login Email must be one of the entered email addresses' });
-      }
-    }
+    const primaryEmail = String(req.body.primary_login_email || existing.primary_login_email || '').trim();
+    const locationEmail = String((Array.isArray(email_ids) ? email_ids.find(Boolean) : '') || req.body.email || existing.email || '').trim();
 
     const updatedName = (name || existing.name).trim();
     const updatedCity = (city !== undefined ? city : existing.city || '').trim();
@@ -2873,7 +3145,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
       (state !== undefined ? state : existing.state || '').trim(),
       (pincode !== undefined ? pincode : existing.pincode || '').trim(),
       officePhone,
-      primaryEmail,
+      locationEmail,
       primaryPhone,
       primaryEmail,
       status || existing.status || 'Active',
@@ -3057,6 +3329,7 @@ app.put('/api/locations/:id', authenticateToken, authorizeRoles('master_admin'),
     const updatedKyc = db.prepare('SELECT * FROM LOCATION_KYC WHERE location_id = ?').get(locId);
     const updatedStakeholders = parseStakeholders(db.prepare('SELECT * FROM LOCATION_STAKEHOLDERS WHERE location_id = ? ORDER BY display_order ASC').all(locId));
 
+    consumeKycPhoneProofs(req, req.body);
     res.json({
       success: true,
       message: 'KYC registration updated successfully',
@@ -3103,6 +3376,12 @@ app.post('/api/locations/:id/admin-users', authenticateToken, authorizeRoles('ma
     const { admins } = req.body;
     if (!Array.isArray(admins) || admins.length === 0) {
       return res.status(400).json({ error: 'At least one admin account is required' });
+    }
+    const invalidPhone = getKycPhoneValues(req.body).find(phone => !normalizeIndianOtpMobile(phone));
+    if (invalidPhone) return res.status(400).json({ error: 'Every entered admin mobile number must be a valid 10-digit Indian number.' });
+    const unverifiedPhones = getUnverifiedKycPhones(req, req.body);
+    if (unverifiedPhones.length) {
+      return res.status(400).json({ error: `Verify every new admin mobile number with OTP before completing setup: ${unverifiedPhones.map(phone => `+${phone}`).join(', ')}` });
     }
 
     const createdAdmins = [];
@@ -3557,6 +3836,7 @@ app.get('/api/admin/audit-logs', authenticateToken, authorizeRoles('master_admin
 // Master Admin Executive Intelligence & Branch Analytics
 app.get('/api/admin/master-reports', authenticateToken, authorizeRoles('master_admin'), (req, res) => {
   try {
+    const locationType = req.query.type === 'franchise' ? 'franchise' : 'branch';
     const branches = db.prepare(`
       SELECT 
         l.location_id,
@@ -3573,9 +3853,9 @@ app.get('/api/admin/master-reports', authenticateToken, authorizeRoles('master_a
         l.created_at
       FROM LOCATIONS l
       LEFT JOIN LOCATION_KYC k ON l.location_id = k.location_id
-      WHERE l.type = 'branch'
+      WHERE l.type = ?
       ORDER BY l.created_at ASC, l.location_id ASC
-    `).all();
+    `).all(locationType);
 
     const firmTypeBreakdown = [
       { type: 'Proprietor', title: 'Sole Proprietorship', count: 0, percentage: 0, totalRevenue: 0, icon: 'User' },
@@ -3668,9 +3948,9 @@ app.get('/api/admin/master-reports', authenticateToken, authorizeRoles('master_a
         SUM(v.total_amount) as total_revenue
       FROM VISITS v
       JOIN LOCATIONS l ON v.location_id = l.location_id
-      WHERE l.type = 'branch'
+      WHERE l.type = ?
       GROUP BY v.location_id, month
-    `).all();
+    `).all(locationType);
 
     const months = [
       { key: '2026-10', label: 'October 2026' },
@@ -3825,14 +4105,17 @@ app.post('/api/kyc/upload', authenticateToken, authorizeRoles('master_admin', 'a
       return res.status(400).json({ error: 'No file was uploaded' });
     }
 
-    const allowedMime = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-    const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
+    const allowedImageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif', '.heic', '.heif'];
+    const allowedImageMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/x-png', 'image/webp', 'image/gif', 'image/bmp', 'image/tiff', 'image/avif', 'image/heic', 'image/heif'];
     const ext = path.extname(req.file.originalname).toLowerCase();
+    const mime = String(req.file.mimetype || '').toLowerCase();
+    const isPdf = ext === '.pdf' && (mime === 'application/pdf' || mime === 'application/octet-stream');
+    const isImage = allowedImageExts.includes(ext) && (allowedImageMimes.includes(mime) || mime === 'application/octet-stream');
 
-    if (!allowedExts.includes(ext) && !allowedMime.includes(req.file.mimetype)) {
+    if (!isPdf && !isImage) {
       // Remove invalid file
       try { fs.unlinkSync(req.file.path); } catch (e) {}
-      return res.status(400).json({ error: 'Invalid document type. Allowed types: PDF, JPG, PNG, WebP.' });
+      return res.status(400).json({ error: 'Invalid document type. Upload a PDF or an image (JPG, PNG, WebP, GIF, BMP, TIFF, AVIF, or HEIC).' });
     }
 
     const fileUrl = `/uploads/${req.file.filename}`;
@@ -6411,10 +6694,15 @@ app.post('/api/admin/categories', authenticateToken, authorizeRoles('admin'), (r
     }
 
     const order = display_order || 0;
-    const resolvedImage = image_url || (icon && icon.includes('/') ? icon : null) || '/services/categories/cat_01_signature_facials.png?v=45';
-    const imgValidation = validateCategoryImageUrlOnDisk(resolvedImage);
-    if (!imgValidation.valid) {
-      return res.status(400).json({ error: imgValidation.error, reason: imgValidation.reason });
+    const hasImageInput = Object.prototype.hasOwnProperty.call(req.body, 'image_url');
+    const resolvedImage = hasImageInput
+      ? (image_url || null)
+      : ((icon && icon.includes('/') ? icon : null) || '/services/categories/cat_01_signature_facials.png?v=45');
+    if (resolvedImage) {
+      const imgValidation = validateCategoryImageUrlOnDisk(resolvedImage);
+      if (!imgValidation.valid) {
+        return res.status(400).json({ error: imgValidation.error, reason: imgValidation.reason });
+      }
     }
     const resolvedIcon = icon || 'Sparkles';
     const resolvedPosition = image_position || null;
@@ -6441,7 +6729,8 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
     const catId = req.params.id;
     const existing = db.prepare('SELECT category_id FROM SERVICE_CATEGORIES WHERE category_id = ? AND location_id = ?').get(catId, locId);
     if (!existing) return res.status(404).json({ error: 'Service category not found in this branch.' });
-    if (image_url) {
+    const hasImageUpdate = Object.prototype.hasOwnProperty.call(req.body, 'image_url');
+    if (hasImageUpdate && image_url) {
       const imgValidation = validateCategoryImageUrlOnDisk(image_url);
       if (!imgValidation.valid) {
         return res.status(400).json({ error: imgValidation.error, reason: imgValidation.reason });
@@ -6453,13 +6742,13 @@ app.put('/api/admin/categories/:id', authenticateToken, authorizeRoles('admin'),
       SET category_name = COALESCE(?, category_name),
           description = COALESCE(?, description),
           icon = COALESCE(?, icon),
-          image_url = COALESCE(?, image_url),
+          image_url = CASE WHEN ? = 1 THEN ? ELSE image_url END,
           image_position = COALESCE(?, image_position),
           display_order = COALESCE(?, display_order),
           active = COALESCE(?, active),
           updated_at = CURRENT_TIMESTAMP
       WHERE category_id = ? AND location_id = ?
-    `).run(category_name, description, icon, image_url, image_position, display_order, active, catId, locId);
+    `).run(category_name, description, icon, hasImageUpdate ? 1 : 0, image_url || null, image_position, display_order, active, catId, locId);
 
     const updated = db.prepare('SELECT * FROM SERVICE_CATEGORIES WHERE category_id = ?').get(catId);
     res.json({ category: updated });

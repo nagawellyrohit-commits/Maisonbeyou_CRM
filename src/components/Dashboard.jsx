@@ -1704,7 +1704,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
       {activeSection === 'team-master' && isAdmin && (
         <div className="animate-fade-in team-master-screen" style={{ display: 'flex', flexDirection: 'column', gap: '22px', paddingTop: '32px' }}>
-          <div role="tablist" aria-label="Other Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 16, padding: '0 2px 12px' }}>
+          <div className="team-master-tabs-grid" role="tablist" aria-label="Other Master sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, padding: '0 2px 12px' }}>
             {[
               { id: 'services', label: 'Services', description: 'Service catalog', icon: Scissors },
               { id: 'membership', label: 'Membership', description: 'Plans & privileges', icon: Crown },

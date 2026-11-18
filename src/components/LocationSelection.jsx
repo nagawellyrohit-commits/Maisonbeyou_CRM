@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import brandLogoImg from '../assets/brand-logo.png';
 import studioBg from '../assets/studio-bg.png';
-import { apiRequest } from '../utils/api';
+import { apiRequest, formatCurrency } from '../utils/api';
 import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import LocationDateFilterModal, { formatISO, formatDisplayDate } from './LocationDateFilterModal';
 import ReportsView from './ReportsView';
@@ -133,6 +133,8 @@ const getReturnTierConfig = (tier = 'Good', dailyIncome = 0) => {
 const FIRM_CARDS = [
   {
     type: 'Proprietor',
+    titleKey: 'master_firm_proprietor_title',
+    descriptionKey: 'master_firm_proprietor_description',
     title: 'Proprietor',
     tagline: 'Sole Proprietorship',
     desc: 'individual proprietorship studio operations',
@@ -140,6 +142,8 @@ const FIRM_CARDS = [
   },
   {
     type: 'Partnership',
+    titleKey: 'master_firm_partnership_title',
+    descriptionKey: 'master_firm_partnership_description',
     title: 'Partnership',
     tagline: 'Partnership Firm',
     desc: 'joint partner-owned studio operations',
@@ -147,6 +151,8 @@ const FIRM_CARDS = [
   },
   {
     type: 'Pvt. Ltd.',
+    titleKey: 'master_firm_pvt_ltd_title',
+    descriptionKey: 'master_firm_pvt_ltd_description',
     title: 'Pvt. Ltd.',
     tagline: 'Private Limited Company',
     desc: 'corporate board-governed studio operations',
@@ -154,6 +160,8 @@ const FIRM_CARDS = [
   },
   {
     type: 'LLP',
+    titleKey: 'master_firm_llp_title',
+    descriptionKey: 'master_firm_llp_description',
     title: 'LLP',
     tagline: 'Limited Liability Partnership',
     desc: 'limited liability partnership studio operations',
@@ -161,12 +169,13 @@ const FIRM_CARDS = [
   }
 ];
 
-export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout, branding, onPreviewBranding, onSaveBranding }) {
+export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout, branding, onPreviewBranding, onSaveBranding, embedded = false }) {
   const isBranch = type === 'branch';
   const typeLabel = isBranch ? 'Branch' : 'Franchise';
   const typePlural = isBranch ? 'Branches' : 'Franchises';
 
   const [locations, setLocations] = useState([]);
+  const [storeTargets, setStoreTargets] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   
@@ -229,7 +238,13 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       }
       const res = await apiRequest(url);
       if (res?.locations) {
-        setLocations(res.locations);
+        const newestFirst = [...res.locations].sort((a, b) => {
+          const dateDifference = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+          return Number.isFinite(dateDifference) && dateDifference !== 0
+            ? dateDifference
+            : (Number(b.location_id) || 0) - (Number(a.location_id) || 0);
+        });
+        setLocations(newestFirst);
       }
     } catch (err) {
       console.error('Failed to load locations:', err);
@@ -244,6 +259,26 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
     setFilterFirmType('All');
     setIsSelectingFirmTypeToAdd(false);
   }, [type]);
+
+  useEffect(() => {
+    if (!locations.length) {
+      setStoreTargets({});
+      return;
+    }
+    let cancelled = false;
+    const monthKey = todayISO.slice(0, 7);
+    Promise.all(locations.map(async location => {
+      try {
+        const target = await apiRequest(`/store-targets?period_type=monthly&period_key=${monthKey}&location_id=${location.location_id}`);
+        return [location.location_id, target];
+      } catch {
+        return [location.location_id, null];
+      }
+    })).then(entries => {
+      if (!cancelled) setStoreTargets(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [locations, todayISO]);
 
   const branchLocations = locations;
 
@@ -312,11 +347,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
   const lowTiersCount = reportLocations.filter(loc => (loc.return_tier || '').toLowerCase() === 'low').length;
 
   return (
-    <div className={`master-portal-themed location-selection-screen ${viewMode === 'locations' ? 'branch-selection-page-light' : ''}`} style={{
+    <div className={`master-portal-themed location-selection-screen ${viewMode === 'locations' ? 'branch-selection-page-light' : ''} ${embedded ? 'embedded-location-selection' : ''}`} style={{
       ...masterPortalCssVariables(branding),
-      minHeight: '100vh',
-      backgroundColor: branding?.master_background_color || '#F7F3ED',
-      backgroundImage: viewMode === 'locations' || viewMode === 'master-data'
+      minHeight: embedded ? 'auto' : '100vh',
+      backgroundColor: embedded ? 'transparent' : (branding?.master_background_color || '#F7F3ED'),
+      backgroundImage: embedded ? 'none' : viewMode === 'locations' || viewMode === 'master-data'
         ? (branding?.master_background_image_url ? `url(${branding.master_background_image_url})` : 'none')
         : `linear-gradient(180deg, rgba(44, 33, 27, 0.78) 0%, rgba(44, 33, 27, 0.70) 280px, rgba(44, 33, 27, 0.65) 100%), url(${studioBg}) center / cover fixed`,
       backgroundSize: 'cover',
@@ -328,6 +363,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       fontFamily: 'var(--font-sans)'
     }}>
       {/* Top Header - Pixel-aligned with Image 1 Navbar */}
+      {!embedded && <>
       <header style={{
         background: 'rgba(255, 255, 255, 0.95)',
         backdropFilter: 'blur(12px)',
@@ -395,6 +431,11 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   <div style={{ fontSize: '11px', color: '#9F7335', fontWeight: '600' }}>Master Administrator</div>
                 </div>
                 <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
+                <button type="button" onClick={() => { setShowUserMenu(false); setViewMode('reports'); }} style={{ width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#9F7335', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', background: 'none', border: 'none', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                  <BarChart3 size={15} />
+                  <span>{branding?.master_reports_label || 'Reports'}</span>
+                </button>
+                <div style={{ height: '1px', background: 'var(--border-color)', margin: '8px 0' }} />
                 <button type="button" onClick={() => { setShowUserMenu(false); openCentralMasterData(); }} style={{ width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 'var(--radius-sm)', fontSize: '13px', color: '#9F7335', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', background: 'none', border: 'none', cursor: 'pointer' }} onMouseEnter={e => { e.currentTarget.style.background = '#FAF6EE'; }} onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
                   <Scissors size={15} />
                   <span>Master data</span>
@@ -436,9 +477,10 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
           </div>
         </div>
       </header>
+      </>}
 
       {/* Main Container - Aligned with Image 1 app-container */}
-      <main className="app-container" style={{ flex: 1, padding: '44px var(--container-padding-x) 60px' }}>
+      <main className="app-container" style={{ flex: 1, maxWidth: embedded ? '1304px' : undefined, padding: embedded ? '40px 0 48px' : '44px var(--container-padding-x) 60px' }}>
         {error && (
           <div style={{
             background: 'var(--danger-bg)',
@@ -460,6 +502,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
         {kycModal.open ? (
           <BranchFranchiseKYCModal
             isOpen={kycModal.open}
+            embedded={embedded}
             onClose={() => setKycModal(prev => ({ ...prev, open: false }))}
             onSuccess={async (savedLoc) => {
               setKycModal(prev => ({ ...prev, open: false }));
@@ -491,13 +534,13 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 fontFamily: 'var(--font-sans)',
                 fontSize: '28px',
                 fontWeight: '500',
-                color: '#FFFFFF',
+                color: 'var(--master-heading, #2C211B)',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
                 margin: 0,
                 textShadow: '0 2px 14px rgba(0,0,0,0.75)'
               }}>
-                Select Firm Type
+                {branding?.master_firm_type_heading || 'Select Firm Type'}
               </h1>
               <div style={{ width: '42px', height: '2px', background: '#C6A36A', borderRadius: '2px', marginTop: '12px' }} />
             </div>
@@ -511,39 +554,59 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
             }}>
               {FIRM_CARDS.map((card) => {
                 const Icon = card.icon;
+                const description = branding?.[card.descriptionKey] || card.desc;
+                const hasOperationsEnding = /\s+operations$/i.test(description);
                 return (
                   <div
                     key={card.type}
                     onClick={() => handleOpenAddModal(card.type)}
-                    className="concierge-luxury-card"
+                    onKeyDown={event => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        handleOpenAddModal(card.type);
+                      }
+                    }}
+                    className="concierge-luxury-card firm-type-registration-card"
+                    role="button"
+                    tabIndex={0}
                     style={{
                       minHeight: '290px',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      width: '100%'
+                      width: '100%',
+                      background: branding?.master_firm_card_fill || '#FFFFFF',
+                      border: `1.5px solid ${branding?.master_firm_card_border || '#D99A64'}`
                     }}
                   >
                     {/* Top Content: Medallion, Title, Description */}
                     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div className="concierge-icon-medallion">
+                      <div className="concierge-icon-medallion" style={{ background: branding?.master_firm_icon_fill || '#FAF0E4', color: branding?.master_firm_icon_color || '#A6733D', borderColor: branding?.master_firm_card_border || '#D99A64' }}>
                         <Icon size={28} strokeWidth={1.8} />
                       </div>
 
                       <h2 className="concierge-card-title">
-                        {card.title.toUpperCase()}
+                        {(branding?.[card.titleKey] || card.title).toUpperCase()}
                       </h2>
 
-                      <p className="concierge-card-desc" style={{ minHeight: '38px', margin: '0 0 20px 0' }}>
-                        {card.desc}
+                      <p className="concierge-card-desc" style={{ minHeight: '38px', margin: '0 0 20px 0', color: branding?.master_firm_card_text_color || '#4B4038' }}>
+                        {hasOperationsEnding ? <>{description.replace(/\s+operations$/i, '')}<br />operations</> : description}
                       </p>
                     </div>
 
                     {/* Luxury Action Button - Warm Gold Finish (Matching Image 1) */}
-                    <div className="concierge-action-btn concierge-action-btn-gold">
-                      <span>{isBranch ? 'REGISTER BRANCH' : 'REGISTER FRANCHISE'}</span>
-                    </div>
+                    <button
+                      type="button"
+                      className="concierge-action-btn concierge-action-btn-gold"
+                      onClick={event => {
+                        event.stopPropagation();
+                        handleOpenAddModal(card.type);
+                      }}
+                      style={{ background: branding?.master_firm_button_fill || '#A0723E', color: branding?.master_firm_button_text || '#FFFFFF', border: 0, cursor: 'pointer' }}
+                    >
+                      <span>{isBranch ? (branding?.master_register_branch_label || 'REGISTER BRANCH') : (branding?.master_register_franchise_label || 'REGISTER FRANCHISE')}</span>
+                    </button>
                   </div>
                 );
               })}
@@ -563,10 +626,10 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                   justifyContent: 'space-between',
                   flexWrap: 'wrap',
                   gap: '16px',
-                  paddingTop: '40px',
+                  paddingTop: embedded ? '0' : '40px',
                   marginBottom: '28px'
                 }}>
-                  {onBack ? (
+                  {onBack && !embedded ? (
                     <button
                       type="button"
                       onClick={onBack}
@@ -577,14 +640,6 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     </button>
                   ) : <div />}
 
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('reports')}
-                    className="btn-luxury-header-action"
-                  >
-                    <BarChart3 size={16} />
-                    <span>{branding?.master_reports_label || 'Reports'}</span>
-                  </button>
                 </div>
 
                 {/* Heading: All Branches */}
@@ -647,6 +702,52 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
             ) : loading ? (
               <div style={{ textAlign: 'center', padding: '64px 20px', color: '#78716C' }}>
                 <div style={{ fontSize: '16px', fontWeight: '600' }}>Loading {typePlural.toLowerCase()}...</div>
+              </div>
+            ) : embedded ? (
+              <div style={{ width: '100%', overflowX: 'auto', background: branding?.master_card_color || '#FFFFFF', border: `1px solid ${branding?.master_border_color || '#E7D8C4'}`, borderRadius: `${Number(branding?.master_card_radius) || 18}px`, boxShadow: '0 5px 20px rgba(87,58,32,.045)' }}>
+                <table style={{ width: '100%', minWidth: 850, borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: `color-mix(in srgb, ${branding?.master_primary_color || '#B88B4A'} 9%, #FFFFFF)`, color: branding?.master_text_color || '#51463D', fontSize: 12 }}>
+                      {[
+                        branding?.master_table_number_heading || 'No.',
+                        branding?.master_table_name_heading || `${typeLabel} Name`,
+                        branding?.master_table_address_heading || 'Full Address',
+                        branding?.master_table_target_heading || 'Store Target',
+                        branding?.master_table_type_heading || `${typeLabel} Type`,
+                        branding?.master_table_status_heading || 'Status',
+                        branding?.master_table_action_heading || 'Action'
+                      ].map(label => <th key={label} style={{ padding: '14px 16px', borderBottom: '1px solid #E7D8C4', fontWeight: 750, whiteSpace: 'nowrap' }}>{label}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr style={{ background: branding?.master_card_color || '#FFFDF9', borderBottom: `1px solid ${branding?.master_border_color || '#EEE6DC'}` }}>
+                      <td colSpan={7} style={{ padding: 0 }}>
+                        <div style={{ width: '100%', minHeight: 64, boxSizing: 'border-box', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 48 }}>
+                          <span style={{ color: '#A97735', fontWeight: 750 }}>+</span>
+                          <button type="button" onClick={() => setIsSelectingFirmTypeToAdd(true)} style={{ flex: 1, minHeight: 40, padding: '9px 14px', border: `1px solid ${branding?.master_primary_color || '#D99A64'}`, borderRadius: 9, background: `color-mix(in srgb, ${branding?.master_primary_color || '#B88B4A'} 10%, #FFFFFF)`, color: branding?.master_primary_color || '#8C6228', fontWeight: 750, cursor: 'pointer' }}>{branding?.master_add_location_label || `+ Add ${typeLabel}`}</button>
+                        </div>
+                      </td>
+                    </tr>
+                    {displayedLocations.map((loc, branchIndex) => {
+                      const locFirmType = loc.kyc?.firm_type || loc.firm_type || 'Proprietor';
+                      const locationName = String(loc.name || '').replace(/^maison\s*beyou\s*[—–-]\s*/i, '').trim() || loc.city || `${typeLabel} Location`;
+                      const target = storeTargets[loc.location_id];
+                      const targetAmount = Number(target?.target_amount) || 0;
+                      const actualAmount = Number(target?.actual_amount) || 0;
+                      const targetStatus = targetAmount > 0 ? (actualAmount >= targetAmount ? 'High' : 'Low') : 'Not Set';
+                      const targetColor = targetStatus === 'High' ? '#13805C' : targetStatus === 'Low' ? '#B54708' : '#786D62';
+                      return <tr key={loc.location_id} style={{ borderBottom: `1px solid ${branding?.master_border_color || '#EEE6DC'}`, color: branding?.master_text_color || '#51463D', fontSize: 13 }}>
+                        <td style={{ padding: '15px 16px', fontWeight: 800 }}>{branchIndex + 1}</td>
+                        <td style={{ padding: '15px 16px', fontWeight: 750, color: '#302820' }}>{typeLabel} - {locationName}</td>
+                        <td style={{ padding: '15px 16px', minWidth: 270, lineHeight: 1.5 }}>{formatStudioAddress(loc)}</td>
+                        <td style={{ padding: '15px 16px', color: targetColor, fontWeight: 750, whiteSpace: 'nowrap' }}>{targetStatus === 'High' ? '↑ ' : targetStatus === 'Low' ? '↓ ' : ''}{targetStatus}{targetAmount > 0 && <div style={{ marginTop: 3, color: '#786D62', fontSize: 11, fontWeight: 500 }}>{formatCurrency(actualAmount)} / {formatCurrency(targetAmount)}</div>}</td>
+                        <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>{locFirmType}</td>
+                        <td style={{ padding: '15px 16px' }}>{loc.status || 'Active'}</td>
+                        <td style={{ padding: '15px 16px' }}><button type="button" onClick={() => onSelectLocation(loc)} aria-label={`Open ${formatStudioTitle(loc)}`} style={{ width: 34, height: 34, display: 'grid', placeItems: 'center', border: '1px solid #D99A64', borderRadius: '50%', background: '#F3EDE4', color: '#9F7335', cursor: 'pointer' }}><ArrowRight size={17} /></button></td>
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
               </div>
             ) : (
               /* Grid of Matching Records */
@@ -754,12 +855,14 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
 
                 {/* 2. LOCATION CARDS */}
                 {displayedLocations.map((loc, branchIndex) => {
-                  const isActive = (loc.status || 'Active').toLowerCase() === 'active';
                   const locFirmType = loc.kyc?.firm_type || loc.firm_type || 'Proprietor';
-                  const officePhone = formatStudioPhone(loc);
-                  const branchManager = formatStudioManager(loc);
-                  const dialPhone = officePhone;
                   const branchBranding = loc.branding || {};
+                  const locationName = String(loc.name || '').replace(/^maison\s*beyou\s*[—–-]\s*/i, '').trim() || loc.city || `${typeLabel} Location`;
+                  const storeTarget = storeTargets[loc.location_id];
+                  const targetAmount = Number(storeTarget?.target_amount) || 0;
+                  const actualAmount = Number(storeTarget?.actual_amount) || 0;
+                  const targetStatus = targetAmount > 0 ? (actualAmount >= targetAmount ? 'High' : 'Low') : 'Not Set';
+                  const targetColor = targetStatus === 'High' ? '#13805C' : targetStatus === 'Low' ? '#B54708' : '#786D62';
                   return (
                     <div
                       key={loc.location_id}
@@ -797,73 +900,9 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                       }}
                     >
                       <div>
-                        {/* Top Badges */}
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          marginBottom: '16px'
-                        }}>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            background: '#F3EDE4',
-                            border: '1px solid #D99A64',
-                            padding: '4px 10px',
-                            borderRadius: '9999px',
-                            fontSize: '11px',
-                            fontWeight: '600',
-                            color: '#2C211B',
-                            letterSpacing: '0.02em',
-                            fontFamily: 'var(--font-sans)'
-                          }}>
-                            <span>{formatStudioCode(loc, branchIndex + 1)}</span>
-                          </span>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                background: '#F3EDE4',
-                                border: '1px solid #D99A64',
-                                padding: '4px 10px',
-                                borderRadius: '9999px',
-                                fontSize: '11px',
-                                fontWeight: '600',
-                                color: '#2C211B',
-                                fontFamily: 'var(--font-sans)'
-                              }}
-                              title={`Registered as ${locFirmType}`}
-                            >
-                              <Shield size={12} color="#C6A36A" />
-                              <span>{locFirmType}</span>
-                            </span>
-
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                              background: '#F3EDE4',
-                              border: '1px solid #D99A64',
-                              padding: '4px 10px',
-                              borderRadius: '9999px',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              color: '#2C211B',
-                              fontFamily: 'var(--font-sans)'
-                            }}>
-                              <span style={{
-                                width: '6px',
-                                height: '6px',
-                                borderRadius: '50%',
-                                background: isActive ? '#796B5D' : '#A89E92'
-                              }} />
-                              <span>{loc.status || 'Active'}</span>
-                            </span>
-                          </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                          <span style={{ width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: '50%', background: '#F3EDE4', border: '1px solid #D99A64', color: '#9F7335', fontSize: 14, fontWeight: 800 }}>{branchIndex + 1}</span>
+                          <span style={{ color: '#796B5D', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em' }}>{loc.status || 'Active'}</span>
                         </div>
 
                         {/* Studio Name */}
@@ -872,12 +911,12 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                           fontSize: '18px',
                           fontWeight: '700',
                           color: branchBranding.heading_color || '#2C211B',
-                          margin: '14px 0 24px 0',
+                          margin: '8px 0 20px 0',
                           lineHeight: 1.35,
                           letterSpacing: '-0.01em',
                           fontFamily: 'var(--font-sans)'
                         }}>
-                          {branchBranding.brand_name || formatStudioTitle(loc)}
+                          {typeLabel} - {locationName}
                         </h3>
 
                         {/* Address / Location */}
@@ -888,30 +927,13 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                           </span>
                         </div>
 
-                        {/* Phone */}
-                        {officePhone ? <a
-                          href={`tel:${String(dialPhone).replace(/[^\d+]/g, '')}`}
-                          style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif", textDecoration: 'none', cursor: 'pointer', transition: 'color 0.15s ease, font-weight 0.15s ease' }}
-                          onMouseEnter={event => {
-                            event.currentTarget.style.color = '#2C211B';
-                            event.currentTarget.style.fontWeight = '700';
-                          }}
-                          onMouseLeave={event => {
-                            event.currentTarget.style.color = '#796B5D';
-                            event.currentTarget.style.fontWeight = '500';
-                          }}
-                        >
-                          <Phone size={14} color="#C6A36A" />
-                          <span>{officePhone}</span>
-                        </a> : <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif" }}>
-                          <Phone size={14} color="#C6A36A" />
-                          <span />
-                        </div>}
-
-                        {/* Manager */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#796B5D', fontSize: '12.5px', fontWeight: 500, marginBottom: '22px', lineHeight: 1.55, letterSpacing: '0.005em', fontFamily: "'Gotham', 'Montserrat', 'Plus Jakarta Sans', sans-serif" }}>
-                          <User size={14} color="#C6A36A" />
-                          <span>Manager: {branchManager}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 16px 22px', fontSize: 13, color: targetColor, fontWeight: 750 }}>
+                          <span>Store target: {targetStatus}</span>
+                          {targetAmount > 0 && <span style={{ color: '#796B5D', fontWeight: 500 }}>({formatCurrency(actualAmount)} / {formatCurrency(targetAmount)})</span>}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#796B5D', fontSize: 13, fontWeight: 600, marginLeft: 22 }}>
+                          <Shield size={14} color="#C6A36A" />
+                          <span>{typeLabel} type: {locFirmType}</span>
                         </div>
                       </div>
                       <button
@@ -954,7 +976,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
       currentFilter={dateFilter}
       onApply={handleApplyDateFilter}
     />
-    <BrandingCustomizer scope="master" section="all_branches" location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
+    {!embedded && <BrandingCustomizer scope="master" section="all_branches" location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />}
   </div>
 );
 }

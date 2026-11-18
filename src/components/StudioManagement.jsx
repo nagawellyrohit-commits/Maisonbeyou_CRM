@@ -1,14 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { Building2, Handshake, LogOut, Menu, Palette } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { LogOut, Menu, Palette } from 'lucide-react';
 import studioBg from '../assets/studio-bg.png';
 import { apiRequest } from '../utils/api';
 import { masterPortalCssVariables } from '../utils/branding';
 import BrandingCustomizer from './BrandingCustomizer';
+import brandLogoImg from '../assets/brand-logo.png';
 
-export default function StudioManagement({ currentUser, onSelectType, onLogout, branding, onPreviewBranding, onSaveBranding }) {
+export default function StudioManagement({ currentUser, onSelectType, onSelectRevenue, onLogout, branding, onPreviewBranding, onSaveBranding }) {
   const [counts, setCounts] = useState({ branchCount: 2, franchiseCount: 2, totalLocations: 4 });
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = event => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setShowMenu(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const fetchSummary = async () => {
     try {
       setLoading(true);
@@ -48,116 +59,68 @@ export default function StudioManagement({ currentUser, onSelectType, onLogout, 
     <div className="master-portal-themed studio-management-screen" style={{
       ...masterPortalCssVariables(branding),
       minHeight: '100vh',
-      backgroundColor: branding?.master_background_color || '#2C211B',
-      backgroundImage: `linear-gradient(rgba(0, 0, 0, ${overlayOpacity}), rgba(0, 0, 0, ${overlayOpacity})), url(${branding?.master_background_image_url || studioBg})`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      backgroundAttachment: 'fixed',
+      backgroundColor: '#F7F3ED',
       display: 'flex',
       flexDirection: 'column',
       fontFamily: 'var(--font-sans)',
       position: 'relative'
     }}>
-      {branding?.master_logo_url && <img src={branding.master_logo_url} alt={branding.brand_name || 'Brand logo'} style={{ position: 'absolute', top: 24, left: 28, height: 58, maxWidth: 220, objectFit: 'contain', zIndex: 5 }} />}
-      <div style={{ position: 'absolute', top: 'clamp(16px, 3vh, 28px)', right: 'clamp(16px, 3vw, 32px)', zIndex: 20 }}>
-        <button type="button" aria-label="Open master portal menu" onClick={() => setShowMenu(value => !value)} style={{ width: 42, height: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 9, color: '#E8D5B5', background: 'rgba(26,20,15,.72)', border: '1px solid rgba(218,196,147,.45)', cursor: 'pointer' }}>
-          <Menu size={19} />
-        </button>
-        {showMenu && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 220, padding: 8, background: '#FFFFFF', border: '1px solid #E5D8C6', borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,.2)' }}>
-          <button type="button" onClick={() => { setShowMenu(false); window.dispatchEvent(new Event('open_master_portal_customizer')); }} style={masterMenuItemStyle}>
-            <Palette size={15} /> Customize
-          </button>
-          <div style={{ height: 1, background: '#E7DED2', margin: '5px 0' }} />
-          <button type="button" onClick={handleLogoutClick} style={{ ...masterMenuItemStyle, color: '#B42318' }}>
-            <LogOut size={15} /> {branding?.master_logout_label || 'Sign Out'}
-          </button>
-        </div>}
-      </div>
+      <header style={{ background: '#FFFFFF', borderBottom: '1px solid #E5D8C6', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 10px rgba(44, 33, 27, 0.04)' }}>
+        <div className="header-container">
+          <img src={branding?.master_logo_url || brandLogoImg} alt={branding?.brand_name || 'Maison BeYou'} className="navbar-brand-logo" />
+          <div ref={menuRef} style={{ position: 'relative', zIndex: 20 }}>
+            <button type="button" aria-label="Open master portal menu" aria-expanded={showMenu} onClick={() => setShowMenu(value => !value)} style={{ width: 40, height: 40, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, color: '#A8793D', background: '#FFFFFF', border: '1px solid #D8BD91', cursor: 'pointer' }}>
+              <Menu size={18} strokeWidth={1.8} />
+            </button>
+            {showMenu && <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 220, padding: 8, background: '#FFFFFF', border: '1px solid #E5D8C6', borderRadius: 10, boxShadow: '0 16px 40px rgba(0,0,0,.2)' }}>
+              <button type="button" onClick={() => { setShowMenu(false); window.dispatchEvent(new Event('open_master_portal_customizer')); }} style={masterMenuItemStyle}>
+                <Palette size={15} /> Customize
+              </button>
+              <div style={{ height: 1, background: '#E7DED2', margin: '5px 0' }} />
+              <button type="button" onClick={handleLogoutClick} style={{ ...masterMenuItemStyle, color: '#B42318' }}>
+                <LogOut size={15} /> {branding?.master_logout_label || 'Sign Out'}
+              </button>
+            </div>}
+          </div>
+        </div>
+      </header>
 
       {/* Main Content Area */}
       <main style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 'clamp(36px, 5vh, 60px) 24px',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
+        padding: 0,
         position: 'relative',
         zIndex: 2,
         width: '100%'
       }}>
-        <>
-        {/* Header matching user reference */}
-        <div className="concierge-header" style={{ marginBottom: 'clamp(28px, 4vh, 42px)' }}>
-          <h1 className="concierge-title" style={{ letterSpacing: '0.14em' }}>
-            {branding?.master_studio_heading || 'STUDIO MANAGEMENT'}
-          </h1>
-
-          <div className="concierge-subtitle-wrap">
-            <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, transparent, #C59A58)' }} />
-            <span className="concierge-subtitle">
-              {branding?.master_studio_subtitle || 'your personalised journey awaits'}
-            </span>
-            <div className="concierge-divider-line" style={{ background: 'linear-gradient(90deg, #C59A58, transparent)' }} />
+        <section className="studio-management-hero" style={{
+          minHeight: `${Math.min(680, Math.max(280, Number(branding?.master_hero_height) || 430))}px`,
+          backgroundColor: branding?.master_background_color || '#2C211B',
+          backgroundImage: `linear-gradient(rgba(0, 0, 0, ${overlayOpacity}), rgba(0, 0, 0, ${overlayOpacity})), url(${branding?.master_background_image_url || studioBg})`,
+          backgroundSize: `100% 100%, ${Math.min(180, Math.max(100, Number(branding?.master_background_width) || 100))}% auto`,
+          backgroundPosition: `center, ${Math.min(100, Math.max(0, Number(branding?.master_background_position_x ?? 50)))}% ${Math.min(100, Math.max(0, Number(branding?.master_background_position_y ?? 52)))}%`
+        }}>
+          <div className="studio-management-hero-content">
+            <span className="studio-management-hero-eyebrow">MAISON BEYOU · MASTER PORTAL</span>
+            <h1>{branding?.master_studio_heading || 'STUDIO MANAGEMENT'}</h1>
+            <div className="studio-management-hero-rule" />
+            <p>{branding?.master_studio_subtitle || 'your personalised journey awaits'}</p>
           </div>
-        </div>
+        </section>
 
-        {/* Selection Cards Grid */}
-        <div className="concierge-cards-grid" style={{ maxWidth: '820px', width: '100%', margin: '0 auto' }}>
-          {/* CARD 1: Branches (Company-Owned) */}
-          <div
-            onClick={() => onSelectType('branch')}
-            className="concierge-luxury-card"
-          >
-            {/* Icon Medallion */}
-            <div className="concierge-icon-medallion">
-              <Building2 size={28} strokeWidth={1.8} />
-            </div>
-
-            {/* Card Title */}
-            <h2 className="concierge-card-title">
-              {branding?.master_branches_title || 'BRANCHES'}
-            </h2>
-
-            {/* Card Subtitle */}
-            <p className="concierge-card-desc">
-              {branding?.master_branches_subtitle || 'manage company-owned studio locations'}
-            </p>
-
-            {/* Luxury Action Button - Gold */}
-            <div className="concierge-action-btn concierge-action-btn-gold">
-              <span>{branding?.master_branches_button || 'GET STARTED'}</span>
-            </div>
+        <nav className="studio-management-nav" aria-label="Studio management sections">
+          <div className="studio-management-breadcrumb"><span>HOME</span><span className="studio-management-breadcrumb-separator">›</span><strong>STUDIO MANAGEMENT</strong></div>
+          <div className="studio-management-nav-links">
+            <button type="button" onClick={() => onSelectType('branch')}>{branding?.master_branches_title || 'BRANCHES'}</button>
+            <button type="button" onClick={() => onSelectType('franchise')}>{branding?.master_franchises_title || 'FRANCHISES'}</button>
+            <button type="button" onClick={() => onSelectRevenue('branch')}>{branding?.master_branch_revenue_title || 'BRANCH REVENUE'}</button>
+            <button type="button" onClick={() => onSelectRevenue('franchise')}>{branding?.master_franchise_revenue_title || 'FRANCHISE REVENUE'}</button>
           </div>
-
-          {/* CARD 2: Franchises (Franchise-Operated) */}
-          <div
-            onClick={() => onSelectType('franchise')}
-            className="concierge-luxury-card"
-          >
-            {/* Icon Medallion */}
-            <div className="concierge-icon-medallion">
-              <Handshake size={28} strokeWidth={1.8} />
-            </div>
-
-            {/* Card Title */}
-            <h2 className="concierge-card-title">
-              {branding?.master_franchises_title || 'FRANCHISES'}
-            </h2>
-
-            {/* Card Subtitle */}
-            <p className="concierge-card-desc">
-              {branding?.master_franchises_subtitle || 'monitor franchise partner performance'}
-            </p>
-
-            {/* Luxury Action Button - Dark */}
-            <div className="concierge-action-btn concierge-action-btn-dark">
-              <span>{branding?.master_franchises_button || 'CONTINUE'}</span>
-            </div>
-          </div>
-        </div>
-        </>
+        </nav>
       </main>
       <BrandingCustomizer scope="master" section="studio_management" showMasterLoginTab location={{ name: 'Master Portal' }} initialBranding={branding} onPreview={onPreviewBranding} onSaved={onSaveBranding} />
     </div>
