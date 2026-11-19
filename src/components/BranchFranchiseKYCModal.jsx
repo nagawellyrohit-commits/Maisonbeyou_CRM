@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import LuxuryDatePicker from './LuxuryDatePicker';
 import LoginPreferenceSelector from './LoginPreferenceSelector';
-import { IndianCityDropdown, IndianStateDropdown } from './IndianStateCityFields';
+import { IndianDistrictDropdown, IndianStateDropdown } from './IndianStateCityFields';
 import { apiRequest } from '../utils/api';
 
 const FIRM_TYPES = ['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'];
@@ -1062,7 +1062,7 @@ export default function BranchFranchiseKYCModal({
       errors.pincode = 'Valid 6-digit Pincode is required';
     }
     if (!city.trim()) {
-      errors.city = 'City is required';
+      errors.city = 'District is required';
     }
     if (!state.trim()) {
       errors.state = 'State is required';
@@ -1398,9 +1398,9 @@ export default function BranchFranchiseKYCModal({
     URL.revokeObjectURL(url);
   };
 
-  return (
-    <div className="animate-fade-in client-info-form-wrapper" style={{ width: '100%', margin: `${embedded ? '48px' : '0'} auto 40px auto`, boxSizing: 'border-box' }}>
-      <div className="card" style={{ padding: 'clamp(28px, 4vw, 40px) clamp(24px, 4vw, 44px)', width: '100%', boxSizing: 'border-box', position: 'relative' }}>
+  const formMarkup = (
+    <div className={embedded ? 'animate-fade-in' : 'animate-fade-in client-info-form-wrapper'} style={embedded ? { position: 'fixed', inset: 0, zIndex: 2500, width: '100%', maxWidth: 'none', height: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', overflowY: 'auto', margin: 0, padding: '24px 20px 40px', boxSizing: 'border-box', background: 'rgba(28, 25, 23, .58)', backdropFilter: 'blur(4px)' } : { width: '100%', margin: '0 auto 40px auto', boxSizing: 'border-box' }}>
+      <div className="card" style={{ padding: 'clamp(24px, 3vw, 36px) clamp(20px, 3vw, 36px)', width: '100%', maxWidth: embedded ? 1304 : undefined, margin: embedded ? '0 auto' : undefined, boxSizing: 'border-box', position: 'relative' }}>
         
         {/* Prominent Modal Header Bar Inside Card */}
         <div style={{
@@ -1674,7 +1674,7 @@ export default function BranchFranchiseKYCModal({
                 />
               </div>
 
-              {/* State, City, Pincode */}
+              {/* State, District, Pincode */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '16px' }}>
                 <div style={{ minWidth: 0, order: 3 }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
@@ -1708,14 +1708,13 @@ export default function BranchFranchiseKYCModal({
 
                 <div style={{ minWidth: 0, order: 2 }}>
                   <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '8px' }}>
-                    City <span style={{ color: '#DC2626' }}>*</span>
+                    District <span style={{ color: '#DC2626' }}>*</span>
                   </label>
-                  <IndianCityDropdown
+                  <IndianDistrictDropdown
                     state={state}
                     value={city}
                     onChange={setCity}
-                    selectStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
-                    inputStyle={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px', marginTop: '8px' }}
+                    style={{ width: '100%', maxWidth: '100%', boxSizing: 'border-box', padding: '12px 14px', borderRadius: 'var(--radius-md)', border: `1.5px solid ${validationErrors.city ? '#DC2626' : 'var(--border-color)'}`, background: 'var(--bg-card-subtle)', outline: 'none', fontSize: '14px' }}
                   />
                   {validationErrors.city && (
                     <div style={{ fontSize: '11.5px', color: '#DC2626', marginTop: '4px' }}>
@@ -4551,4 +4550,6 @@ export default function BranchFranchiseKYCModal({
       ), document.body)}
     </div>
   );
+
+  return embedded ? createPortal(formMarkup, document.body) : formMarkup;
 }

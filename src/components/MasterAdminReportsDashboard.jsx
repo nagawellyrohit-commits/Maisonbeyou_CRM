@@ -33,11 +33,14 @@ import studioBg from '../assets/studio-bg.png';
 import BrandingCustomizer from './BrandingCustomizer';
 import { masterPortalCssVariables } from '../utils/branding';
 
-export default function MasterAdminReportsDashboard({ onBack, type = 'branch', activeSection: activeSectionProp, onSelectType, onSelectRevenue, branding, onPreviewBranding, onSaveBranding, onLogout, hideAnalyticsContent = false, customizerInitialView = 'studio_management' }) {
+export default function MasterAdminReportsDashboard({ onBack, type = 'branch', activeSection: activeSectionProp, onSelectType, onSelectRevenue, onAddLocation, branding, onPreviewBranding, onSaveBranding, onLogout, hideAnalyticsContent = false, customizerInitialView = 'studio_management' }) {
   const locationLabel = type === 'franchise' ? 'Franchise' : 'Branch';
   const activeSection = activeSectionProp || (hideAnalyticsContent ? type : `${type}-revenue`);
   const [showMenu, setShowMenu] = useState(false);
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const [expandedAddType, setExpandedAddType] = useState(null);
   const menuRef = useRef(null);
+  const addMenuRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reportsData, setReportsData] = useState(null);
@@ -59,6 +62,10 @@ export default function MasterAdminReportsDashboard({ onBack, type = 'branch', a
   useEffect(() => {
     const handleClickOutside = event => {
       if (menuRef.current && !menuRef.current.contains(event.target)) setShowMenu(false);
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target)) {
+        setShowAddMenu(false);
+        setExpandedAddType(null);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
   return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -442,6 +449,20 @@ export default function MasterAdminReportsDashboard({ onBack, type = 'branch', a
           <button type="button" className={activeSection === 'franchise' ? 'is-active' : ''} aria-current={activeSection === 'franchise' ? 'page' : undefined} onClick={() => onSelectType?.('franchise')}>{branding?.master_franchises_title || 'FRANCHISES'}</button>
           <button type="button" className={activeSection === 'branch-revenue' ? 'is-active' : ''} aria-current={activeSection === 'branch-revenue' ? 'page' : undefined} onClick={() => onSelectRevenue?.('branch')}>{branding?.master_branch_revenue_title || 'BRANCH REVENUE'}</button>
           <button type="button" className={activeSection === 'franchise-revenue' ? 'is-active' : ''} aria-current={activeSection === 'franchise-revenue' ? 'page' : undefined} onClick={() => onSelectRevenue?.('franchise')}>{branding?.master_franchise_revenue_title || 'FRANCHISE REVENUE'}</button>
+          <div className="master-reports-add-menu-wrap" ref={addMenuRef}>
+            <button type="button" className="master-reports-add-branch" aria-expanded={showAddMenu} onClick={() => { setShowAddMenu(value => !value); setExpandedAddType(null); }}>+ Add Branch</button>
+            {showAddMenu && <div className="master-reports-add-menu" role="menu" aria-label="Add a branch or franchise">
+              {['branch', 'franchise'].map(locationType => <div className="master-reports-add-menu-group" key={locationType}>
+                <div className="master-reports-add-menu-type">
+                  <span>{locationType === 'branch' ? 'Branch' : 'Franchise'}</span>
+                  <button type="button" className="master-reports-add-menu-plus" aria-label={`${expandedAddType === locationType ? 'Hide' : 'Show'} ${locationType} firm types`} aria-expanded={expandedAddType === locationType} onClick={() => setExpandedAddType(current => current === locationType ? null : locationType)}>{expandedAddType === locationType ? '−' : '+'}</button>
+                </div>
+                {expandedAddType === locationType && <div className="master-reports-firm-submenu" role="menu">
+                  {['Proprietor', 'Partnership', 'Pvt. Ltd.', 'LLP'].map(firmType => <button key={firmType} type="button" role="menuitem" onClick={() => { setShowAddMenu(false); setExpandedAddType(null); onAddLocation?.(locationType, firmType); }}>{firmType}</button>)}
+                </div>}
+              </div>)}
+            </div>}
+          </div>
         </div>
       </nav>
 

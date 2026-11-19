@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import indiaLgdDistricts from '../data/india_lgd_districts.json';
 
 const INDIAN_STATES_AND_UTS = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat', 'Haryana',
@@ -23,7 +24,7 @@ const CITIES_BY_STATE = {
   Karnataka: ['Bengaluru', 'Mysuru', 'Mangaluru', 'Hubballi', 'Belagavi', 'Kalaburagi', 'Shivamogga', 'Tumakuru'],
   Kerala: ['Thiruvananthapuram', 'Kochi', 'Kozhikode', 'Thrissur', 'Kollam', 'Kannur', 'Alappuzha'],
   'Madhya Pradesh': ['Bhopal', 'Indore', 'Jabalpur', 'Gwalior', 'Ujjain', 'Sagar', 'Rewa'],
-  Maharashtra: ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Thane', 'Navi Mumbai', 'Chhatrapati Sambhajinagar', 'Kolhapur'],
+  Maharashtra: ['Mumbai', 'Pune', 'Nagpur', 'Nashik', 'Thane', 'Navi Mumbai', 'Chhatrapati Sambhajinagar', 'Kolhapur', 'Amravati', 'Solapur', 'Nanded', 'Jalgaon', 'Akola', 'Latur', 'Dhule', 'Ahilyanagar', 'Chandrapur', 'Parbhani', 'Sangli', 'Satara', 'Ratnagiri', 'Wardha', 'Yavatmal', 'Bhandara', 'Gondia', 'Beed', 'Osmanabad', 'Hingoli', 'Washim', 'Buldhana', 'Palghar', 'Panvel', 'Baramati', 'Ichalkaranji', 'Malegaon', 'Ulhasnagar'],
   Manipur: ['Imphal', 'Thoubal', 'Bishnupur', 'Churachandpur'],
   Meghalaya: ['Shillong', 'Tura', 'Jowai', 'Nongpoh'],
   Mizoram: ['Aizawl', 'Lunglei', 'Champhai', 'Kolasib'],
@@ -48,6 +49,24 @@ const CITIES_BY_STATE = {
   Puducherry: ['Puducherry', 'Karaikal', 'Mahe', 'Yanam']
 };
 
+const normalizeStateName = name => String(name || '').toLowerCase().replace(/^the\s+/, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const districtsByNormalizedState = new Map();
+indiaLgdDistricts.forEach(({ stateName, name }) => {
+  const stateKey = normalizeStateName(stateName);
+  districtsByNormalizedState.set(stateKey, [...(districtsByNormalizedState.get(stateKey) || []), name]);
+});
+const DISTRICTS_BY_STATE = Object.fromEntries(
+  INDIAN_STATES_AND_UTS.map(state => [
+    state,
+    (districtsByNormalizedState.get(normalizeStateName(state)) || []).sort((a, b) => a.localeCompare(b))
+  ])
+);
+
+// Ladakh's district notifications are newer than the bundled LGD snapshot.
+DISTRICTS_BY_STATE.Ladakh = [
+  'Changthang', 'Drass', 'Kargil', 'Leh Ladakh', 'Nubra', 'Sankoo', 'Sham', 'Zanskar'
+];
+
 export function IndianStateDropdown({ value, onChange, style }) {
   const options = value && !INDIAN_STATES_AND_UTS.includes(value)
     ? [value, ...INDIAN_STATES_AND_UTS]
@@ -57,6 +76,18 @@ export function IndianStateDropdown({ value, onChange, style }) {
     <select required value={value || ''} onChange={event => onChange(event.target.value)} style={style}>
       <option value="">Select state</option>
       {options.map(state => <option key={state} value={state}>{state}</option>)}
+    </select>
+  );
+}
+
+export function IndianDistrictDropdown({ state, value, onChange, style }) {
+  const districts = DISTRICTS_BY_STATE[state] || [];
+  const districtListId = `district-suggestions-${String(state || 'none').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+  return (
+    <select required value={value || ''} onChange={event => onChange(event.target.value)} disabled={!state} style={style}>
+      <option value="">{state ? 'Select district' : 'Select a state first'}</option>
+      {districts.map(district => <option key={district} value={district}>{district}</option>)}
     </select>
   );
 }

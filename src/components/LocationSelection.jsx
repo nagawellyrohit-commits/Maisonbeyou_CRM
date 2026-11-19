@@ -169,7 +169,7 @@ const FIRM_CARDS = [
   }
 ];
 
-export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout, branding, onPreviewBranding, onSaveBranding, embedded = false }) {
+export default function LocationSelection({ type = 'branch', currentUser, onSelectLocation, onBack, onLogout, branding, onPreviewBranding, onSaveBranding, embedded = false, openAddRequest = null, onAddRequestHandled }) {
   const isBranch = type === 'branch';
   const typeLabel = isBranch ? 'Branch' : 'Franchise';
   const typePlural = isBranch ? 'Branches' : 'Franchises';
@@ -259,6 +259,20 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
     setFilterFirmType('All');
     setIsSelectingFirmTypeToAdd(false);
   }, [type]);
+
+  useEffect(() => {
+    if (openAddRequest?.requestId && openAddRequest.type === type) {
+      setIsSelectingFirmTypeToAdd(false);
+      setKycModal({
+        open: true,
+        mode: 'create',
+        location: null,
+        defaultType: openAddRequest.type,
+        defaultFirmType: openAddRequest.firmType || 'Proprietor'
+      });
+      onAddRequestHandled?.(openAddRequest.requestId);
+    }
+  }, [openAddRequest, type, onAddRequestHandled]);
 
   useEffect(() => {
     if (!locations.length) {
@@ -720,14 +734,6 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                     </tr>
                   </thead>
                   <tbody>
-                    <tr style={{ background: branding?.master_card_color || '#FFFDF9', borderBottom: `1px solid ${branding?.master_border_color || '#EEE6DC'}` }}>
-                      <td colSpan={7} style={{ padding: 0 }}>
-                        <div style={{ width: '100%', minHeight: 64, boxSizing: 'border-box', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 48 }}>
-                          <span style={{ color: '#A97735', fontWeight: 750 }}>+</span>
-                          <button type="button" onClick={() => setIsSelectingFirmTypeToAdd(true)} style={{ flex: 1, minHeight: 40, padding: '9px 14px', border: `1px solid ${branding?.master_primary_color || '#D99A64'}`, borderRadius: 9, background: `color-mix(in srgb, ${branding?.master_primary_color || '#B88B4A'} 10%, #FFFFFF)`, color: branding?.master_primary_color || '#8C6228', fontWeight: 750, cursor: 'pointer' }}>{branding?.master_add_location_label || `+ Add ${typeLabel}`}</button>
-                        </div>
-                      </td>
-                    </tr>
                     {displayedLocations.map((loc, branchIndex) => {
                       const locFirmType = loc.kyc?.firm_type || loc.firm_type || 'Proprietor';
                       const locationName = String(loc.name || '').replace(/^maison\s*beyou\s*[—–-]\s*/i, '').trim() || loc.city || `${typeLabel} Location`;
