@@ -416,7 +416,7 @@ export default function MasterAdminReportsDashboard({ onBack, type = 'branch', a
   };
 
   return (
-    <div className="master-portal-themed master-admin-reports-dashboard" style={{ ...masterPortalCssVariables(branding), paddingBottom: hideAnalyticsContent ? 0 : '60px' }}>
+    <div className={`master-portal-themed master-admin-reports-dashboard${hideAnalyticsContent ? ' is-directory-shell' : ''}`} style={{ ...masterPortalCssVariables(branding), paddingBottom: hideAnalyticsContent ? 0 : '60px' }}>
       <header className="master-reports-navbar">
         <div className="master-reports-navbar-inner">
           <img src={branding?.master_logo_url || brandLogoImg} alt={branding?.brand_name || 'Maison BeYou'} />
@@ -429,6 +429,26 @@ export default function MasterAdminReportsDashboard({ onBack, type = 'branch', a
           </div>
         </div>
       </header>
+      <aside className="master-crm-sidebar" aria-label="Studio management navigation">
+        <div className="master-crm-workspace-label">WORKSPACE</div>
+        <nav>
+          {[
+            { id: 'branch', label: 'Branches', icon: Building2, action: () => onSelectType?.('branch') },
+            { id: 'franchise', label: 'Franchises', icon: Handshake, action: () => onSelectType?.('franchise') },
+            { id: 'branch-revenue', label: 'Branch revenue', icon: BarChart3, action: () => onSelectRevenue?.('branch') },
+            { id: 'franchise-revenue', label: 'Franchise revenue', icon: TrendingUp, action: () => onSelectRevenue?.('franchise') }
+          ].map(item => {
+            const Icon = item.icon;
+            const active = activeSection === item.id || (item.id === 'branch' && activeSection === 'branch_details');
+            return (
+              <button key={item.id} type="button" className={`master-crm-sidebar-link${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined} onClick={item.action}>
+                <Icon size={17} strokeWidth={1.9} aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
       <section className="master-reports-hero" style={{
         minHeight: `${Math.min(680, Math.max(280, Number(branding?.master_hero_height) || 430))}px`,
         backgroundColor: branding?.master_background_color || '#2C211B',

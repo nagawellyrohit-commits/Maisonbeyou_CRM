@@ -22,6 +22,7 @@ import BranchFranchiseKYCModal from './BranchFranchiseKYCModal';
 import BranchUserManagement from './BranchUserManagement';
 import BrandingCustomizer from './BrandingCustomizer';
 import { canAccessModule } from '../utils/permissions';
+import defaultBrandLogo from '../assets/brand-logo.png';
 
 const roleDashboardButtonStyle = {
   width: '100%',
@@ -35,7 +36,7 @@ const roleDashboardButtonStyle = {
   cursor: 'pointer'
 };
 
-export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard, branding, onPreviewBranding, onSaveBranding, requestedSection, onRequestedSectionHandled, requestedPaymentVisit, onPaymentFlowComplete }) {
+export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, onBackToDashboard, onNavigateTab, activeLocation, onSwitchLocation, onBackToMasterDashboard, branding, onPreviewBranding, onSaveBranding, requestedSection, onRequestedSectionHandled, onActiveSectionChange, requestedPaymentVisit, onPaymentFlowComplete }) {
   const isActualAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
   const [currentLocation, setCurrentLocation] = useState(activeLocation);
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
@@ -143,9 +144,17 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
 
   useEffect(() => {
     if (!requestedSection) return;
-    setActiveSection(requestedSection);
+    if (requestedSection === 'branch_details') {
+      setIsKycModalOpen(true);
+    } else {
+      setActiveSection(requestedSection);
+    }
     onRequestedSectionHandled?.();
   }, [requestedSection, onRequestedSectionHandled]);
+
+  useEffect(() => {
+    onActiveSectionChange?.(activeSection);
+  }, [activeSection, onActiveSectionChange]);
 
   // Staff allocation & Payment verification state for Reception
   const [staffList, setStaffList] = useState([]);
@@ -619,7 +628,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
     <div className="animate-fade-in dashboard-reference-style" style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
 
       {(isOriginalMasterAdmin && onSwitchLocation) || activeSection === 'team-master' ? (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '14px', marginBottom: activeSection === 'team-master' ? '14px' : '-6px' }}>
+        <div className="admin-master-back-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '14px', marginBottom: activeSection === 'team-master' ? '14px' : '-6px' }}>
           {isOriginalMasterAdmin && onSwitchLocation ? <button
             type="button"
             className="dashboard-reference-button"
@@ -962,6 +971,16 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
                   })}
 
                   <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
+                  {onSwitchLocation && (
+                    <button
+                      type="button"
+                      onClick={() => { setShowAdminMenu(false); onSwitchLocation(); }}
+                      style={{ width: '100%', textAlign: 'left', padding: '9px 12px', borderRadius: 'var(--radius-sm)', fontSize: '13.5px', fontWeight: '600', color: '#44403C', background: 'transparent', display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', border: 'none' }}
+                    >
+                      <ArrowLeft size={16} color="#B88B4A" />
+                      <span>Back</span>
+                    </button>
+                  )}
                   {isActualAdmin && activeLocation?.location_id && (
                     <button
                       type="button"
@@ -1026,8 +1045,34 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
         </div>
       </div>
 
+      <section className={`admin-dashboard-workspace${isAdmin ? ' is-admin-workspace' : ''}`}>
+      {isAdmin && (
+        <header className="admin-module-board-header">
+          <div className="admin-module-brand"><img src={branding?.logo_url || defaultBrandLogo} alt={`${branding?.brand_name || 'Maison BeYou'} logo`} /></div>
+          <div className="admin-module-header-actions">
+            <button
+              type="button"
+              className="admin-module-book"
+              onClick={() => activeSection === 'visits' ? onNavigateTab?.('appointments') : setActiveSection('visits')}
+            >
+              {activeSection === 'visits' ? 'Book Appointment' : 'Back'}
+            </button>
+            <button
+              type="button"
+              className="admin-module-menu-button"
+              aria-label="Open menu"
+              aria-expanded={showAdminMenu}
+              onClick={event => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setAdminMenuPosition({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+                setShowAdminMenu(value => !value);
+              }}
+            ><Menu size={18} /></button>
+          </div>
+        </header>
+      )}
       {/* Today's Summary Grid (Section 3 Requirement) */}
-      {activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && activeSection !== 'gift-vouchers' && activeSection !== 'store-targets' && activeSection !== 'day-cash' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
+      {!isAdmin && activeSection !== 'team-master' && activeSection !== 'reports' && activeSection !== 'clients' && activeSection !== 'gift-vouchers' && activeSection !== 'store-targets' && activeSection !== 'day-cash' && (hasModuleAccess('dashboard') || hasModuleAccess('clients') || hasModuleAccess('membership') || hasModuleAccess('visits')) && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '52px', marginBottom: '36px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1226,7 +1271,33 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
       )}
 
       {/* Dynamic Section 3: Today's Visits Table or Selected Sub-Module */}
-      {activeSection === 'visits' && hasModuleAccess('visits') && (
+      {isAdmin && activeSection === 'visits' && (
+        <section className="admin-module-board" aria-label="Studio modules">
+          <div className="admin-module-tiles">
+            <button className="admin-module-tile admin-module-banner" onClick={() => setActiveSection('reports')}>Today’s Overview</button>
+            <button className="admin-module-tile tile-services" onClick={() => setActiveSection('services')}>Service Categories</button>
+            <button className="admin-module-tile tile-vouchers" onClick={() => setActiveSection('gift-vouchers')}>Gift Vouchers</button>
+            <button className="admin-module-tile tile-outlets" onClick={() => setActiveSection('team-master')}>Outlets</button>
+            <button className="admin-module-tile tile-revenue" onClick={() => setActiveSection('reports')}>Revenue</button>
+            <button className="admin-module-tile tile-types" onClick={() => setActiveSection('services')}>Service Types</button>
+            <button className="admin-module-tile tile-membership-value" onClick={() => setActiveSection('membership')}>Membership Value Redeemed</button>
+            <button className="admin-module-tile tile-branches" onClick={() => setActiveSection('team-master')}>Branches</button>
+            <button className="admin-module-tile tile-franchises" onClick={() => setActiveSection('team-master')}>Franchises</button>
+            <button className="admin-module-tile tile-memberships" onClick={() => setActiveSection('membership')}>Memberships</button>
+            <button className="admin-module-tile tile-team" onClick={() => setActiveSection('team-master')}>Team</button>
+            <button className="admin-module-tile tile-clients" onClick={() => setActiveSection('clients')}>Clients</button>
+            <button className="admin-module-tile tile-reports" onClick={() => setActiveSection('reports')}>Reports</button>
+            <button className="admin-module-tile tile-equipment" onClick={() => setActiveSection('team-master')}>Equipments</button>
+            <button className="admin-module-tile tile-vendors" onClick={() => setActiveSection('services')}>Vendors</button>
+            <button className="admin-module-tile tile-products" onClick={() => setActiveSection('services')}>Products</button>
+            <button className="admin-module-tile tile-opex" onClick={() => setActiveSection('reports')}>OPEX</button>
+            <button className="admin-module-tile tile-salaries" onClick={() => setActiveSection('team-master')}>Salaries</button>
+            <button className="admin-module-tile tile-payments" onClick={() => setActiveSection('reports')}>Payments</button>
+          </div>
+        </section>
+      )}
+
+      {activeSection === 'visits' && hasModuleAccess('visits') && !isAdmin && (
       <div className="card dashboard-visits-panel" style={{ overflow: 'hidden' }}>
         <div style={{
           padding: '20px 24px',
@@ -1779,6 +1850,7 @@ export default function Dashboard({ currentUser, onOpenClient, onOpenReceipt, on
           <ReportsView onOpenClient={onOpenClient} branding={branding} />
         </div>
       )}
+      </section>
 
       {/* Floating Action Toast */}
       {actionToast && (

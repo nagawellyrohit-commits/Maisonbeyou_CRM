@@ -323,7 +323,7 @@ export default function ClientProfile({ clientId, onBack, onOpenReceipt }) {
       </div>
 
       {/* Client Profile Header (Section 19 Requirement) */}
-      <div className="card" style={{
+      <div className="card client-profile-hero" style={{
         padding: '32px',
         background: 'linear-gradient(135deg, #FAF7F2 0%, #FFFFFF 100%)',
         border: '1.5px solid var(--primary-border)'

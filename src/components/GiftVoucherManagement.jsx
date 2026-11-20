@@ -430,7 +430,7 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
 
   if (loading && !vouchers.length) return <div style={{ padding: 24, color: '#786D62' }}><LoaderCircle size={16} /> Loading vouchers…</div>;
   const summary = report.totals || {};
-  return <div style={{ display: 'grid', gap: 16 }}>
+  return <div className="gift-voucher-management" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16 }}>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
       <div><h2 style={{ margin: 0, color: '#302820', fontSize: 24 }}>Gift vouchers</h2><p style={{ margin: '5px 0 0', color: '#786D62', fontSize: 13 }}>One voucher registry shared across participating Maison Beyou locations.</p></div>
       {isMaster && view !== 'create' && <label style={{ ...labelStyle, minWidth: 210 }}>Branch report filter<select value={filterBranch} onChange={event => setFilterBranch(event.target.value)} style={fieldStyle}><option value="all">All branches</option>{branches.map(branch => <option key={branch.location_id} value={branch.location_id}>{branch.name} · {branch.type}</option>)}</select></label>}
@@ -438,7 +438,7 @@ export default function GiftVoucherManagement({ currentUser, activeLocation }) {
     {(error || notice) && <div role={error ? 'alert' : 'status'} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 11, borderRadius: 9, background: error ? '#FEF2F2' : '#F0FDF4', color: error ? '#991B1B' : '#166534', fontSize: 13 }}><AlertCircle size={16} />{error || notice}<button type="button" onClick={() => { setError(''); setNotice(''); }} style={{ marginLeft: 'auto', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}><X size={14} /></button></div>}
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><div role="tablist" aria-label="Gift voucher sections" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{tabs.map(([id, label, Icon]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => { setView(id); setError(''); setNotice(''); }} style={{ ...outlineButton, background: view === id ? '#FAF6EE' : '#FFFFFF', borderColor: view === id ? '#B88B4A' : '#E7D8C4' }}><Icon size={15} />{label}</button>)}</div><button type="button" style={{ ...primaryButton, marginLeft: 'auto' }} onClick={() => { setView('create'); setError(''); setNotice(''); }}><Plus size={15} />Create voucher</button></div>
 
-    {view === 'dashboard' && <div style={{ display: 'grid', gap: 14 }}>
+    {view === 'dashboard' && <div className="gift-voucher-dashboard-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 14 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10 }}>{[
         ['Active', summary.active || 0], ['Partially redeemed', summary.partially_redeemed || 0], ['Fully redeemed', summary.fully_redeemed || 0], ['Expired', summary.expired || 0], ['Redeemed value', formatCurrency(summary.redeemed_value || 0)]
       ].map(([label, value]) => <Metric key={label} label={label} value={value} />)}</div>

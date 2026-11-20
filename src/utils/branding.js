@@ -98,7 +98,7 @@ export const DEFAULT_LOCATION_BRANDING = {
   login_logo_height: 52,
   login_mobile_label: 'Registered Mobile Number',
   login_mobile_placeholder: 'Enter phone number',
-  login_button_label: 'Continue to Studio Portal',
+  login_button_label: 'Access Studio',
   login_footer_text: 'Maison BeYou Luxury Aesthetic Clinic & Salon',
   logo_url: '',
   background_color: '#F7F2E9',
@@ -206,7 +206,7 @@ export const DEFAULT_MASTER_PORTAL_BRANDING = {
   login_logo_height: 52,
   login_mobile_label: 'Registered Mobile Number',
   login_mobile_placeholder: 'Enter phone number',
-  login_button_label: 'Continue to Studio Portal',
+  login_button_label: 'Access Studio',
   login_footer_text: 'Maison BeYou Luxury Aesthetic Clinic & Salon'
 };
 

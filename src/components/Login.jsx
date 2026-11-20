@@ -17,7 +17,9 @@ import {
 import { setStoredToken, setStoredUser, setStoredLocation } from '../utils/api';
 import { brandingCssVariables, DEFAULT_LOCATION_BRANDING } from '../utils/branding';
 import brandLogoImg from '../assets/brand-logo.png';
-import loginBg from '../assets/login-bg.jpg';
+import brandLogoIcon from '../assets/brand-logo-icon.png';
+import brandLogoText from '../assets/brand-logo-text.png';
+import loginBg from '../assets/login-studio-bg.jpg';
 
 function getMsg91Phone(identifier) {
   const digits = String(identifier || '').replace(/\D/g, '');
@@ -40,6 +42,17 @@ async function readApiResponse(res, action) {
 }
 
 export default function Login({ onLoginSuccess, masterPortalBranding }) {
+  // Keep the reference composition at its designed size on large screens;
+  // only scale down when the available viewport is smaller than the target.
+  const getLoginScale = () => Math.min(1, window.innerWidth / 1319, window.innerHeight / 743);
+  const [loginScale, setLoginScale] = useState(getLoginScale);
+
+  useEffect(() => {
+    const updateLoginScale = () => setLoginScale(getLoginScale());
+    window.addEventListener('resize', updateLoginScale);
+    return () => window.removeEventListener('resize', updateLoginScale);
+  }, []);
+
   // Mobile / Phone or ID input
   const [identifier, setIdentifier] = useState('');
   
@@ -80,11 +93,14 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
   const loginBranding = accountBranding
     ? { ...accountBranding, ...masterPortalBranding }
     : { ...DEFAULT_LOCATION_BRANDING, ...masterPortalBranding };
-  const loginCardOpacity = Math.min(100, Math.max(40, Number(loginBranding.login_card_opacity) || 96)) / 100;
-  const loginCardColor = loginBranding.login_card_color || '#FFFCF7';
-  const loginCardBackground = /^#[0-9a-f]{6}$/i.test(loginCardColor)
-    ? `rgba(${parseInt(loginCardColor.slice(1, 3), 16)}, ${parseInt(loginCardColor.slice(3, 5), 16)}, ${parseInt(loginCardColor.slice(5, 7), 16)}, ${loginCardOpacity})`
-    : loginCardColor;
+  const isLegacyDefaultCardColor = !loginBranding.login_card_color || ['#FFFCF7', '#FFFFFF', '#FAF7F2', '#645243', '#F7EFE6', '#F2E3D3'].includes(String(loginBranding.login_card_color).toUpperCase());
+  const loginCardOpacity = Math.min(100, Math.max(40, Number(loginBranding.login_card_opacity) || 36)) / 100;
+  const loginCardColor = isLegacyDefaultCardColor ? 'transparent' : loginBranding.login_card_color;
+  const loginCardBackground = isLegacyDefaultCardColor
+    ? 'linear-gradient(155deg, rgba(255, 253, 250, 0.50) 0%, rgba(244, 229, 214, 0.34) 45%, rgba(226, 203, 181, 0.42) 82%, rgba(246, 234, 222, 0.46) 100%)'
+    : (/^#[0-9a-f]{6}$/i.test(loginCardColor)
+      ? `rgba(${parseInt(loginCardColor.slice(1, 3), 16)}, ${parseInt(loginCardColor.slice(3, 5), 16)}, ${parseInt(loginCardColor.slice(5, 7), 16)}, ${loginCardOpacity})`
+      : loginCardColor);
 
   // Auto-detect account whenever phone number or identifier changes
   useEffect(() => {
@@ -258,17 +274,24 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
   const getRoleIcon = (role) => {
     switch (role) {
       case 'master_admin':
-        return <Crown size={18} color="#FFFFFF" />;
+        return <Crown size={18} color="#9F7335" />;
       case 'admin':
-        return <Building2 size={18} color="#FFFFFF" />;
+        return <Building2 size={18} color="#9F7335" />;
       case 'reception':
-        return <Store size={18} color="#FFFFFF" />;
+        return <Store size={18} color="#9F7335" />;
       case 'visitor':
       default:
-        return <Laptop size={18} color="#FFFFFF" />;
+        return <Laptop size={18} color="#9F7335" />;
     }
   };
 
+  const cardRadiusPx = (!loginBranding.login_card_radius || Number(loginBranding.login_card_radius) === 22)
+    ? 36
+    : Number(loginBranding.login_card_radius);
+  const buttonRadiusPx = (!loginBranding.login_button_radius || Number(loginBranding.login_button_radius) === 12)
+    ? 9999
+    : Number(loginBranding.login_button_radius);
+  const customBgImage = loginBranding.login_background_image_url || loginBranding.background_image_url || '';
 
   return (
     <div className="brand-login-shell" style={{
@@ -278,51 +301,92 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundImage: loginBranding.login_background_image_url || loginBranding.background_image_url
-        ? `url(${loginBranding.login_background_image_url || loginBranding.background_image_url})`
-        : `url(${loginBg})`,
+      backgroundImage: customBgImage
+        ? `url(${customBgImage})`
+        : undefined,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundRepeat: 'no-repeat',
-      backgroundAttachment: 'fixed',
-      padding: '24px 16px',
+      padding: 'clamp(20px, 3vh, 36px) clamp(16px, 3vw, 40px)',
       position: 'relative',
-      backgroundColor: loginBranding.login_background_color || loginBranding.background_color
+      overflow: 'hidden',
+      backgroundColor: '#EFE1D3'
     }}>
-      <div style={{
+      {/* Diffused studio light beams and tonal backdrop behind the glass card */}
+      {!customBgImage && (
+        <div
+          aria-hidden="true"
+          className="luxury-login-ambient-backdrop"
+        />
+      )}
+
+      <div className="login-glass-card luxury-glass-card" style={{
         width: '100%',
-        maxWidth: `${Math.min(760, Math.max(320, Number(loginBranding.login_card_width) || 520))}px`,
+        maxWidth: (Number(loginBranding.login_card_width) && Number(loginBranding.login_card_width) !== 520)
+          ? `${Math.min(920, Math.max(320, Number(loginBranding.login_card_width)))}px`
+          : 'clamp(480px, 44.5vw, 590px)',
+        minHeight: 'clamp(395px, 36.5vw, 482px)',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
         background: loginCardBackground,
-        backdropFilter: 'blur(24px)',
-        WebkitBackdropFilter: 'blur(24px)',
-        borderRadius: `${loginBranding.login_card_radius ?? loginBranding.card_radius}px`,
-        boxShadow: '0 25px 60px -15px rgba(90, 60, 20, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.8) inset, 0 10px 30px -5px rgba(0, 0, 0, 0.05)',
-        border: `${Math.max(0, Number(loginBranding.login_card_border_width ?? loginBranding.card_border_width) || 0)}px solid ${loginBranding.login_card_border_color || loginBranding.card_border_color}`,
-        backgroundColor: loginCardBackground,
-        padding: `${Math.min(80, Math.max(16, Number(loginBranding.login_card_padding) || 42))}px 40px`,
+        borderRadius: `${cardRadiusPx}px`,
+        padding: (Number(loginBranding.login_card_padding) && Number(loginBranding.login_card_padding) !== 42)
+          ? `${Math.min(100, Math.max(16, Number(loginBranding.login_card_padding)))}px`
+          : 'clamp(48px, 4.1vw, 54px) clamp(40px, 3.83vw, 50.5px) clamp(30px, 2.95vw, 39px)',
         position: 'relative',
-        color: loginBranding.text_color
+        zIndex: 1,
+        color: '#382519',
+        transform: `translateY(${-10.8 * loginScale}px) scale(${loginScale})`,
+        transformOrigin: 'center center'
       }}>
         {/* Brand Crest */}
-        <div style={{ textAlign: 'center', marginBottom: '34px' }}>
-          <img 
-            src={loginBranding.login_logo_url || loginBranding.logo_url || brandLogoImg}
-            alt={loginBranding.brand_name || 'Maison BeYou Logo'}
-            style={{
-              height: `${Math.min(160, Math.max(24, Number(loginBranding.login_logo_height) || 52))}px`,
-              width: 'auto',
-              maxWidth: '220px',
-              objectFit: 'contain'
-            }}
-          />
-          {loginBranding.brand_name && detectedAccount?.found && (
-            <div style={{ marginTop: 8, color: loginBranding.login_heading_color || loginBranding.heading_color, fontSize: 16, fontWeight: 700 }}>{loginBranding.brand_name}</div>
+        <div style={{ textAlign: 'center', lineHeight: 0, marginBottom: 'clamp(32px, 4.05vw, 53px)', position: 'relative', zIndex: 2 }}>
+          {loginBranding.login_logo_url || loginBranding.logo_url ? (
+            <img 
+              src={loginBranding.login_logo_url || loginBranding.logo_url || brandLogoImg}
+              alt={loginBranding.brand_name || 'Maison BeYou Logo'}
+              style={{
+                height: (Number(loginBranding.login_logo_height) && Number(loginBranding.login_logo_height) !== 52)
+                  ? `${Math.min(180, Math.max(24, Number(loginBranding.login_logo_height)))}px`
+                  : 'clamp(60px, 5.6vw, 76px)',
+                width: 'auto',
+                maxWidth: '300px',
+                objectFit: 'contain'
+              }}
+            />
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 'clamp(18px, 2.05vw, 27px)' }}>
+              <img
+                src={brandLogoIcon}
+                alt=""
+                style={{
+                  height: (Number(loginBranding.login_logo_height) && Number(loginBranding.login_logo_height) !== 52)
+                    ? `${Math.min(180, Math.max(24, Number(loginBranding.login_logo_height)))}px`
+                    : 'clamp(60px, 5.6vw, 74px)',
+                  width: 'auto',
+                  objectFit: 'contain'
+                }}
+              />
+              <img
+                src={brandLogoText}
+                alt={loginBranding.brand_name || 'Maison BeYou'}
+                style={{
+                  height: (Number(loginBranding.login_logo_height) && Number(loginBranding.login_logo_height) !== 52)
+                    ? `${Math.round(Math.min(180, Math.max(24, Number(loginBranding.login_logo_height))) * 0.78)}px`
+                    : 'clamp(46px, 4.7vw, 62px)',
+                  width: 'auto',
+                  objectFit: 'contain',
+                  filter: 'brightness(0) saturate(100%) invert(11%) sepia(32%) saturate(1380%) hue-rotate(342deg) brightness(93%) contrast(96%)'
+                }}
+              />
+            </div>
           )}
         </div>
 
         {/* Success Alert */}
         {successMsg && (
-          <div style={{
+          <div className="login-success-alert" style={{
             background: 'linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%)',
             border: '1px solid #86EFAC',
             color: '#166534',
@@ -343,7 +407,7 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
 
         {/* Error Alert */}
         {error && (
-          <div style={{
+          <div className="login-error-alert" style={{
             background: '#FEF2F2',
             border: '1px solid #FECACA',
             color: '#991B1B',
@@ -361,100 +425,104 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '32px', position: 'relative', zIndex: 1 }}>
           {/* STEP 1: Phone / Mobile Input */}
           {!otpSent ? (
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '11px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '700', color: loginBranding.login_subtext_color || loginBranding.subtext_color }}>
+              <div style={{ display: 'flex', alignItems: 'center', marginBottom: '13px', paddingLeft: '11px' }}>
+                <label htmlFor="login-mobile-input" style={{ fontSize: 'clamp(16px, 1.3vw, 18px)', fontWeight: '500', color: '#382519', letterSpacing: '-0.005em' }}>
                   {loginBranding.login_mobile_label || 'Registered Mobile Number'}
                 </label>
               </div>
 
               <div style={{ position: 'relative' }}>
-                <Phone size={17} color={loginBranding.login_primary_color || loginBranding.primary_color} style={{ position: 'absolute', left: '14px', top: '14px' }} />
+                <Phone size={20} strokeWidth={1.8} color="rgba(56, 37, 25, 0.82)" style={{ position: 'absolute', left: '24px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', zIndex: 2 }} />
+                <span aria-hidden="true" style={{ position: 'absolute', left: '64px', top: '50%', transform: 'translateY(-50%)', height: '22px', borderLeft: '1px solid rgba(255, 255, 255, 0.78)', pointerEvents: 'none', zIndex: 2 }} />
                 <input
+                  id="login-mobile-input"
                   className="login-phone-input"
-                  type="text"
+                  type="tel"
+                  inputMode="numeric"
+                  maxLength={10}
                   value={identifier}
                   placeholder={loginBranding.login_mobile_placeholder || 'Enter phone number'}
                   onChange={(e) => {
-                    setIdentifier(e.target.value);
+                    const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 10);
+                    setIdentifier(digitsOnly);
                     setError('');
                   }}
-                  autoFocus
                   required
                   style={{
                     width: '100%',
-                    padding: '15px 14px 15px 42px',
-                    borderRadius: '12px',
-                    border: `1.5px solid ${loginBranding.login_input_border_color || '#DAC493'}`,
-                    background: '#FFFFFF',
+                    padding: '18.5px 26px 18.5px 70px',
+                    borderRadius: '9999px',
+                    border: '1.5px solid rgba(255, 253, 250, 0.76)',
+                    background: 'linear-gradient(90deg, rgba(255, 252, 248, 0.44) 0%, rgba(238, 222, 207, 0.34) 100%)',
                     outline: 'none',
-                    fontSize: '14.5px',
-                    fontWeight: '600',
-                    color: loginBranding.login_text_color || loginBranding.text_color,
-                    boxShadow: '0 2px 8px rgba(184, 139, 74, 0.08)'
+                    fontSize: 'clamp(17px, 1.4vw, 20px)',
+                    fontWeight: '400',
+                    color: '#382519',
+                    letterSpacing: '0.01em',
+                    boxShadow: '0 4px 12px rgba(112, 82, 56, 0.06), inset 0 1px 3px rgba(128, 94, 64, 0.07), inset 0 -1px 1px rgba(255, 255, 255, 0.55)'
                   }}
                 />
               </div>
 
               {/* Live Account Detection Badge */}
               {isDetecting && (
-                <div style={{ fontSize: '11.5px', color: '#8C6228', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '11.5px', color: '#6E523B', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <RotateCw size={12} className="spin" />
                   <span>Checking registered account...</span>
                 </div>
               )}
 
               {detectedAccount?.found && detectedAccount.type === 'single' && (
-                <div style={{
-                  marginTop: '12px',
-                  background: detectedAccount.isMasterAdmin 
-                    ? 'linear-gradient(135deg, #FAF4E6 0%, #F5E8D0 100%)' 
-                    : 'linear-gradient(135deg, #FAF6EE 0%, #F3EDE0 100%)',
-                  border: '1.5px solid #DAC493',
-                  borderRadius: '12px',
-                  padding: '12px 14px',
+                <div className="login-detected-account" style={{
+                  marginTop: '14px',
+                  background: 'rgba(255, 251, 246, 0.52)',
+                  border: '1.5px solid rgba(255, 252, 248, 0.82)',
+                  borderRadius: '18px',
+                  padding: '12px 16px',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '12px',
-                  boxShadow: '0 3px 10px rgba(140, 98, 40, 0.08)'
+                  gap: '14px',
+                  boxShadow: '0 4px 14px rgba(140, 108, 78, 0.08)'
                 }}>
                   <div style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '10px',
-                  background: 'linear-gradient(135deg, #C9A56F 0%, #B88B4A 100%)',
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '11px',
+                    background: 'rgba(213, 164, 107, 0.18)',
+                    border: '1px solid rgba(184, 139, 74, 0.36)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    flexShrink: 0,
-                    boxShadow: '0 2px 6px rgba(140, 98, 40, 0.25)'
+                    flexShrink: 0
                   }}>
                     {getRoleIcon(detectedAccount.user?.role)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#382519' }}>
                         {detectedAccount.roleLabel}
                       </span>
                       <span style={{
-                        fontSize: '10px',
-                        fontWeight: '700',
-                        background: '#EEDBBE',
-                        color: '#6A491A',
-                        padding: '1px 6px',
-                        borderRadius: '6px',
-                        textTransform: 'uppercase'
+                        fontSize: '9.5px',
+                        fontWeight: '800',
+                        background: 'linear-gradient(135deg, #F6E6CE 0%, #E7C89E 100%)',
+                        color: '#46311C',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em'
                       }}>
                         Verified
                       </span>
                     </div>
                     <div style={{
                       fontSize: '12px',
-                      color: '#8C6228',
-                      fontWeight: '600',
+                      color: '#6E523B',
+                      fontWeight: '500',
                       marginTop: '2px',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -467,24 +535,23 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
               )}
 
               {detectedAccount?.found && detectedAccount.type === 'multiple' && (
-                <div style={{
-                  marginTop: '12px',
-                  background: '#FAF6EE',
-                  border: '1.5px solid #DAC493',
-                  borderRadius: '12px',
-                  padding: '12px 14px',
-                  boxShadow: '0 3px 10px rgba(140, 98, 40, 0.08)'
+                <div className="login-detected-account" style={{
+                  marginTop: '14px',
+                  background: 'rgba(255, 251, 246, 0.56)',
+                  border: '1.5px solid rgba(255, 252, 248, 0.82)',
+                  borderRadius: '18px',
+                  padding: '14px 16px'
                 }}>
-                  <div style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', marginBottom: '2px' }}>
+                  <div style={{ fontSize: '10.5px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '2px' }}>
                     Identified Studio Branch
                   </div>
-                  <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917', marginBottom: '10px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#382519', marginBottom: '10px' }}>
                     {detectedAccount.branchName}
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#57534E', fontWeight: '600', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '11.5px', color: '#6E523B', fontWeight: '500', marginBottom: '8px' }}>
                     Select desk to access for this session:
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${detectedAccount.accounts?.length || 3}, 1fr)`, gap: '6px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${detectedAccount.accounts?.length || 3}, 1fr)`, gap: '8px' }}>
                     {detectedAccount.accounts?.map((acc) => {
                       const isSelected = selectedAccountId === acc.user_id;
                       return (
@@ -495,21 +562,20 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                             setSelectedAccountId(acc.user_id);
                           }}
                           style={{
-                            padding: '8px 4px',
-                            borderRadius: '8px',
-                            border: isSelected ? '1.5px solid #B88B4A' : '1px solid #E2D7C5',
-                            background: isSelected ? '#FAF3E3' : '#FFFFFF',
+                            padding: '9px 6px',
+                            borderRadius: '12px',
+                            border: isSelected ? '1.5px solid #C89658' : '1px solid rgba(184, 139, 74, 0.25)',
+                            background: isSelected ? 'rgba(246, 224, 194, 0.65)' : 'rgba(255, 255, 255, 0.45)',
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
                             gap: '3px',
-                            cursor: 'pointer',
-                            boxShadow: isSelected ? '0 2px 6px rgba(184, 139, 74, 0.15)' : 'none'
+                            cursor: 'pointer'
                           }}
                         >
-                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: isSelected ? '#8C6228' : '#44403C' }}>{acc.roleLabel}</span>
-                          <span style={{ fontSize: '10px', color: '#78716C' }}>{acc.name}</span>
-                          <span style={{ fontSize: '9px', color: '#A8A29E' }}>{acc.branch_name || detectedAccount.branchName}</span>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#382519' }}>{acc.roleLabel}</span>
+                          <span style={{ fontSize: '10px', color: '#6E523B' }}>{acc.name}</span>
+                          <span style={{ fontSize: '9px', color: '#8A725E' }}>{acc.branch_name || detectedAccount.branchName}</span>
                         </button>
                       );
                     })}
@@ -522,23 +588,23 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {/* Target Desk Summary Header */}
               <div style={{
-                background: 'linear-gradient(135deg, #FAF6EE 0%, #F5E8D0 100%)',
-                border: '1.5px solid #DAC493',
-                borderRadius: '12px',
-                padding: '12px 14px',
+                background: 'rgba(255, 251, 246, 0.56)',
+                border: '1.5px solid rgba(255, 252, 248, 0.84)',
+                borderRadius: '18px',
+                padding: '13px 16px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: '10px'
               }}>
                 <div>
-                  <div style={{ fontSize: '11px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase' }}>
+                  <div style={{ fontSize: '10.5px', color: '#8C6228', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                     Signing in as
                   </div>
-                  <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#1C1917', marginTop: '2px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: '700', color: '#382519', marginTop: '2px' }}>
                     {resolvedRoleLabel}
                   </div>
-                  <div style={{ fontSize: '11.5px', color: '#57534E', fontWeight: '600' }}>
+                  <div style={{ fontSize: '12px', color: '#6E523B', fontWeight: '500' }}>
                     {resolvedBranchName}
                   </div>
                 </div>
@@ -552,13 +618,13 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                     setSuccessMsg('');
                   }}
                   style={{
-                    background: '#FFFFFF',
-                    border: '1px solid #DAC493',
-                    padding: '5px 10px',
-                    borderRadius: '8px',
+                    background: 'rgba(255, 255, 255, 0.65)',
+                    border: '1px solid rgba(184, 139, 74, 0.38)',
+                    padding: '6px 12px',
+                    borderRadius: '9999px',
                     fontSize: '11px',
-                    fontWeight: '700',
-                    color: '#8C6228',
+                    fontWeight: '600',
+                    color: '#382519',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap'
                   }}
@@ -569,8 +635,8 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
 
               {/* OTP Input Field */}
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={{ fontSize: '12.5px', fontWeight: '700', color: '#1C1917' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: '500', color: '#382519' }}>
                     Enter 6-Digit OTP Code
                   </label>
                   {otpCooldown > 0 ? (
@@ -588,7 +654,7 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                         padding: '0',
                         fontSize: '11.5px',
                         fontWeight: '700',
-                        color: '#9F7335',
+                        color: '#8C6228',
                         cursor: sendingOtp ? 'not-allowed' : 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -602,7 +668,7 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                 </div>
 
                 <div style={{ position: 'relative' }}>
-                  <ShieldCheck size={16} color="#9F7335" style={{ position: 'absolute', left: '14px', top: '13px', pointerEvents: 'none' }} />
+                  <ShieldCheck size={16} color="#382519" style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', zIndex: 2 }} />
                   <input
                     ref={otpInputRef}
                     type={showOtp ? 'text' : 'password'}
@@ -616,14 +682,14 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                     required
                     style={{
                       width: '100%',
-                      padding: '11px 42px 11px 40px',
-                      borderRadius: '10px',
-                      border: '1.5px solid #B88B4A',
-                      background: '#FFFFFF',
+                      padding: '14px 44px 14px 46px',
+                      borderRadius: '9999px',
+                      border: '1.5px solid rgba(255, 253, 250, 0.88)',
+                      background: 'rgba(255, 252, 249, 0.62)',
                       outline: 'none',
                       fontSize: '16px',
                       fontWeight: '700',
-                      color: '#1C1917',
+                      color: '#382519',
                       letterSpacing: '0.25em'
                     }}
                   />
@@ -632,14 +698,14 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
                     onClick={() => setShowOtp(!showOtp)}
                     style={{
                       position: 'absolute',
-                      right: '10px',
+                      right: '14px',
                       top: '50%',
                       transform: 'translateY(-50%)',
                       background: 'none',
                       border: 'none',
                       padding: '6px',
                       cursor: 'pointer',
-                      color: showOtp ? '#9F7335' : '#A89885'
+                      color: '#6E523B'
                     }}
                   >
                     {showOtp ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -653,43 +719,43 @@ export default function Login({ onLoginSuccess, masterPortalBranding }) {
           {/* Action Button */}
           <button
             type="submit"
+            className="luxury-gold-button"
             disabled={loading || sendingOtp}
             style={{
               width: '100%',
-              padding: '16px 18px',
-              fontSize: '14px',
+              padding: '17px 26px',
+              fontSize: 'clamp(18px, 1.5vw, 20px)',
               fontWeight: '700',
-              marginTop: '14px',
-              background: loginBranding.login_primary_color || loginBranding.primary_color,
-              color: loginBranding.login_button_text_color || '#FFFFFF',
-              border: 'none',
-              borderRadius: `${loginBranding.login_button_radius ?? 12}px`,
+              letterSpacing: '-0.01em',
+              marginTop: '2px',
+              borderRadius: `${buttonRadiusPx}px`,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
+              gap: '9px',
               cursor: (loading || sendingOtp) ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 14px rgba(184, 139, 74, 0.18)',
-              transition: 'all 0.2s ease'
+              transition: 'transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease'
             }}
           >
             {loading ? 'Verifying...' : sendingOtp ? 'Sending Code...' : (
               <>
-                {otpSent ? 'Verify & Open Desk' : (loginBranding.login_button_label || 'Continue to Studio Portal')}
-                <ArrowRight size={16} />
+                {otpSent ? 'Verify & Open Desk' : ((!loginBranding.login_button_label || loginBranding.login_button_label === 'Continue to Studio Portal') ? 'Access Studio' : loginBranding.login_button_label)}
+                <ArrowRight size={18} strokeWidth={2.2} />
               </>
             )}
           </button>
         </form>
 
-
-        {/* Footer */}
+        {/* Centered Bottom Line matching Reference */}
         <div style={{
-          marginTop: '25px',
+          marginTop: 'clamp(25px, 2.6vw, 34px)',
           textAlign: 'center',
-          fontSize: '11px',
-          color: loginBranding.login_subtext_color || loginBranding.subtext_color,
-          opacity: 0.8
+          fontSize: 'clamp(15px, 1.25vw, 16.5px)',
+          fontWeight: '500',
+          color: 'rgba(56, 37, 25, 0.88)',
+          letterSpacing: '-0.005em',
+          position: 'relative',
+          zIndex: 2
         }}>
           <span>{loginBranding.login_footer_text || 'Maison BeYou Luxury Aesthetic Clinic & Salon'}</span>
         </div>

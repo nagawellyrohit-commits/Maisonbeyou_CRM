@@ -657,7 +657,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 </div>
 
                 {/* Heading: All Branches */}
-                <div style={{ marginBottom: '36px' }}>
+                <div className={embedded ? 'directory-branches-heading' : undefined} style={{ marginBottom: '36px' }}>
                   <h1 style={{
                     fontFamily: 'var(--font-sans)',
                     fontSize: '28px',
@@ -718,8 +718,8 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                 <div style={{ fontSize: '16px', fontWeight: '600' }}>Loading {typePlural.toLowerCase()}...</div>
               </div>
             ) : embedded ? (
-              <div style={{ width: '100%', overflowX: 'auto', background: branding?.master_card_color || '#FFFFFF', border: `1px solid ${branding?.master_border_color || '#E7D8C4'}`, borderRadius: `${Number(branding?.master_card_radius) || 18}px`, boxShadow: '0 5px 20px rgba(87,58,32,.045)' }}>
-                <table style={{ width: '100%', minWidth: 850, borderCollapse: 'collapse', textAlign: 'left' }}>
+              <div className="directory-branches-table-wrap" style={{ width: '100%', overflowX: 'auto', background: branding?.master_card_color || '#FFFFFF', border: `1px solid ${branding?.master_border_color || '#E7D8C4'}`, borderRadius: `${Number(branding?.master_card_radius) || 18}px`, boxShadow: '0 5px 20px rgba(87,58,32,.045)' }}>
+                <table className="directory-branches-table" style={{ width: '100%', minWidth: 850, borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead>
                     <tr style={{ background: `color-mix(in srgb, ${branding?.master_primary_color || '#B88B4A'} 9%, #FFFFFF)`, color: branding?.master_text_color || '#51463D', fontSize: 12 }}>
                       {[
@@ -746,7 +746,7 @@ export default function LocationSelection({ type = 'branch', currentUser, onSele
                         <td style={{ padding: '15px 16px', fontWeight: 800 }}>{branchIndex + 1}</td>
                         <td style={{ padding: '15px 16px', fontWeight: 750, color: '#302820' }}>{typeLabel} - {locationName}</td>
                         <td style={{ padding: '15px 16px', minWidth: 270, lineHeight: 1.5 }}>{formatStudioAddress(loc)}</td>
-                        <td style={{ padding: '15px 16px', color: targetColor, fontWeight: 750, whiteSpace: 'nowrap' }}>{targetStatus === 'High' ? '↑ ' : targetStatus === 'Low' ? '↓ ' : ''}{targetStatus}{targetAmount > 0 && <div style={{ marginTop: 3, color: '#786D62', fontSize: 11, fontWeight: 500 }}>{formatCurrency(actualAmount)} / {formatCurrency(targetAmount)}</div>}</td>
+                        <td className={`directory-target-${targetStatus.toLowerCase().replace(/\s+/g, '-')}`} style={{ padding: '15px 16px', color: targetColor, fontWeight: 750, whiteSpace: 'nowrap' }}>{targetStatus === 'High' ? '↑ ' : targetStatus === 'Low' ? '↓ ' : ''}{targetStatus}{targetAmount > 0 && <div style={{ marginTop: 3, color: '#786D62', fontSize: 11, fontWeight: 500 }}>{formatCurrency(actualAmount)} / {formatCurrency(targetAmount)}</div>}</td>
                         <td style={{ padding: '15px 16px', whiteSpace: 'nowrap' }}>{locFirmType}</td>
                         <td style={{ padding: '15px 16px' }}>{loc.status || 'Active'}</td>
                         <td style={{ padding: '15px 16px' }}><button type="button" onClick={() => onSelectLocation(loc)} aria-label={`Open ${formatStudioTitle(loc)}`} style={{ width: 34, height: 34, display: 'grid', placeItems: 'center', border: '1px solid #D99A64', borderRadius: '50%', background: '#F3EDE4', color: '#9F7335', cursor: 'pointer' }}><ArrowRight size={17} /></button></td>

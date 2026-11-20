@@ -1,0 +1,3335 @@
+/* Maison BeYou CRM: shared visual system inspired by the supplied pastel CRM reference. */
+:root {
+  --bg-main: #F5F4F8;
+  --bg-card: #FFFFFF;
+  --bg-card-subtle: #F7F6FA;
+  --bg-surface: #F1EFF6;
+  --border-color: #E9E7EF;
+  --border-light: #EFEDF3;
+  --text-main: #24232D;
+  --text-muted: #777582;
+  --text-light: #898795;
+  --primary: #8672D4;
+  --primary-hover: #715CC1;
+  --primary-dark: #282330;
+  --primary-subtle: #EFEAFF;
+  --primary-border: #DCCFFF;
+  --success-text: #476D36;
+  --success-bg: #E5F3D6;
+  --success-border: #D3E9BD;
+  --warning-text: #986A2B;
+  --warning-bg: #FFF2D8;
+  --warning-border: #F3DFB5;
+  --danger-text: #A64E56;
+  --danger-bg: #FCEBED;
+  --danger-border: #F3D4D8;
+  --shadow-sm: 0 2px 8px rgba(39, 34, 54, .035);
+  --shadow-md: 0 8px 24px rgba(39, 34, 54, .065);
+  --shadow-lg: 0 18px 44px rgba(39, 34, 54, .12);
+  --shadow-gold: 0 8px 20px rgba(134, 114, 212, .16);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --container-max-width: 1480px;
+  --container-padding-x: 32px;
+}
+
+body {
+  background: #F5F4F8;
+  color: #24232D;
+}
+
+.app-shell.app-branded {
+  background: #F5F4F8 !important;
+  color: #24232D;
+  min-height: 100vh;
+}
+
+/* App header becomes the compact top bar; logo lives in the persistent sidebar. */
+.crm-topbar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 70 !important;
+  flex: 0 0 72px;
+  height: 72px;
+  background: #FFFFFF !important;
+  border: 0 !important;
+  border-bottom: 1px solid #ECEAF1 !important;
+  box-shadow: 0 2px 10px rgba(39, 34, 54, .025) !important;
+}
+
+.crm-topbar .header-container {
+  width: 100%;
+  max-width: none;
+  height: 72px;
+  padding: 0 32px;
+  justify-content: flex-end;
+}
+
+.crm-topbar-brand {
+  display: none !important;
+}
+
+.crm-topbar .navbar-user-pill {
+  border-color: #ECEAF1;
+  background: #FFFFFF;
+  border-radius: 13px;
+  padding: 5px 10px;
+  gap: 10px;
+}
+
+.crm-topbar .navbar-user-avatar {
+  background: #EAE2FF !important;
+  color: #6C57B7 !important;
+}
+
+.crm-topbar .navbar-user-role {
+  color: #8170C9;
+}
+
+.crm-topbar button[aria-label="Open account menu"] {
+  border-color: #E3DDF3 !important;
+  color: #7664BE !important;
+  border-radius: 12px !important;
+}
+
+.crm-workspace {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: calc(100vh - 72px);
+  background: #F5F4F8;
+}
+
+.crm-sidebar {
+  position: sticky;
+  top: 72px;
+  z-index: 20;
+  display: flex;
+  flex: 0 0 232px;
+  flex-direction: column;
+  width: 232px;
+  height: calc(100vh - 72px);
+  min-height: 520px;
+  padding: 22px 14px 14px;
+  box-sizing: border-box;
+  background: #FFFFFF;
+  border-right: 1px solid #ECEAF1;
+}
+
+.crm-sidebar-brand {
+  padding: 2px 8px 22px;
+}
+
+.crm-sidebar-brand > img {
+  display: block;
+  width: 154px;
+  max-width: 100%;
+  height: 48px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.crm-sidebar-location {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 14px;
+  padding: 9px 10px;
+  border: 1px solid #EFEDF3;
+  border-radius: 11px;
+  background: #FAF9FC;
+  color: #575461;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.crm-sidebar-location > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crm-sidebar-location-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #A3D67E;
+  box-shadow: 0 0 0 3px #EDF7E5;
+}
+
+.crm-sidebar-caption {
+  padding: 0 11px 9px;
+  color: #A09DAA;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.crm-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.crm-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #5F5C69;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .16s ease, color .16s ease, transform .16s ease;
+}
+
+.crm-sidebar-link svg {
+  flex: 0 0 17px;
+  color: #777382;
+}
+
+.crm-sidebar-link:hover {
+  background: #F6F3FC;
+  color: #534493;
+}
+
+.crm-sidebar-link.is-active {
+  background: #EAE2FF;
+  color: #57449D;
+  font-weight: 700;
+}
+
+.crm-sidebar-link.is-active svg {
+  color: #735FC1;
+}
+
+.crm-sidebar-spacer {
+  flex: 1 1 auto;
+  min-height: 24px;
+}
+
+.crm-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 8px 4px;
+  border-top: 1px solid #F0EEF4;
+  color: #777582;
+}
+
+.crm-sidebar-avatar {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #E7E0F8;
+  color: #6E59BA;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.crm-sidebar-user-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.crm-sidebar-user-copy strong {
+  overflow: hidden;
+  color: #34323C;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crm-sidebar-user-copy small {
+  color: #92909C;
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.crm-sidebar-user > svg {
+  color: #A5A2AF;
+}
+
+.crm-page-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #F5F4F8;
+}
+
+.crm-page-content > .app-container {
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 28px 32px 46px;
+}
+
+/* Reusable page surfaces, tables, fields, and actions. */
+.app-shell .card,
+.app-shell .dashboard-summary-grid > .card,
+.app-shell .dashboard-reference-style .card {
+  border-color: #EAE8F0 !important;
+  border-radius: 18px !important;
+  background: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(39, 34, 54, .035) !important;
+}
+
+.app-shell .card:hover {
+  border-color: #DDD7EB !important;
+  box-shadow: 0 9px 24px rgba(39, 34, 54, .06) !important;
+}
+
+.app-shell table {
+  border-color: #EAE8F0 !important;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.app-shell th {
+  background: #F6F4F9 !important;
+  color: #605D6B !important;
+  border-color: #ECEAF1 !important;
+}
+
+.app-shell td {
+  border-color: #EFEDF3 !important;
+  color: #55525F;
+}
+
+.app-shell input:not([type="checkbox"]):not([type="radio"]),
+.app-shell select,
+.app-shell textarea {
+  border-color: #E5E2EC !important;
+  border-radius: 10px !important;
+  background-color: #FAF9FC !important;
+  color: #34323C !important;
+  box-shadow: none;
+}
+
+.app-shell input:not([type="checkbox"]):not([type="radio"]):focus,
+.app-shell select:focus,
+.app-shell textarea:focus {
+  border-color: #A896E5 !important;
+  outline: 3px solid rgba(173, 156, 229, .17) !important;
+}
+
+.app-shell input::placeholder,
+.app-shell textarea::placeholder {
+  color: #A09DAA !important;
+}
+
+.app-shell .badge-gold,
+.app-shell .badge-neutral {
+  background: #F0ECFA !important;
+  border-color: #E0D9F2 !important;
+  color: #6655A8 !important;
+}
+
+.app-shell .badge-paid {
+  background: #E6F3D9 !important;
+  border-color: #D7EAC5 !important;
+  color: #4F713C !important;
+}
+
+.app-shell .btn-primary,
+.app-shell button[style*="linear-gradient(135deg, #B88B4A"],
+.app-shell button[style*="linear-gradient(135deg, #C6A36A"] {
+  background: #8773D4 !important;
+  border-color: #8773D4 !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 5px 14px rgba(135, 115, 212, .2) !important;
+}
+
+.app-shell .btn-primary:hover,
+.app-shell button[style*="linear-gradient(135deg, #B88B4A"]:hover,
+.app-shell button[style*="linear-gradient(135deg, #C6A36A"]:hover {
+  background: #735FC1 !important;
+  border-color: #735FC1 !important;
+}
+
+.app-shell h1,
+.app-shell h2,
+.app-shell h3 {
+  color: #292731;
+}
+
+.app-shell .dashboard-reference-style {
+  gap: 22px !important;
+}
+
+.app-shell .dashboard-summary-grid {
+  gap: 14px !important;
+}
+
+.app-shell .dashboard-summary-grid > .card {
+  min-height: 132px !important;
+  padding: 18px 19px !important;
+}
+
+.app-shell .team-master-tabs-grid > button {
+  border-color: #E7E3EF !important;
+  border-radius: 18px !important;
+  background: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(39, 34, 54, .035) !important;
+}
+
+.app-shell .team-master-tabs-grid > button[aria-selected="true"] {
+  border-color: #DCCFFF !important;
+  background: #F0ECFA !important;
+}
+
+/* Keep the location-admin and standalone portal screens on the same system. */
+.master-portal-themed,
+.master-reports-screen {
+  background: #F5F4F8 !important;
+  color: #24232D !important;
+}
+
+.master-portal-themed .card,
+.master-reports-screen .card {
+  border-color: #EAE8F0 !important;
+  border-radius: 18px !important;
+  background: #FFFFFF !important;
+  box-shadow: 0 3px 12px rgba(39, 34, 54, .035) !important;
+}
+
+.app-shell .reports-container > .card,
+.app-shell .reports-kpi-grid > div {
+  background: #74736F !important;
+  border-color: #5D5B57 !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+.app-shell .reports-container > .card :is(h1,h2,h3,h4,p,label,span,small,strong,div),
+.app-shell .reports-kpi-grid > div :is(h1,h2,h3,h4,p,label,span,small,strong,div) {
+  color: #FFFFFF !important;
+}
+
+.app-shell .reports-container > .card button,
+.app-shell .reports-kpi-grid > div button,
+.app-shell .reports-kpi-grid > div [role="button"] {
+  background: #5C5A56 !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+}
+
+.master-portal-themed input:not([type="checkbox"]),
+.master-portal-themed select,
+.master-portal-themed textarea,
+.master-reports-screen input:not([type="checkbox"]),
+.master-reports-screen select,
+.master-reports-screen textarea {
+  border-color: #E5E2EC !important;
+  border-radius: 10px !important;
+  background: #FAF9FC !important;
+}
+
+@media (max-width: 980px) {
+  .crm-sidebar {
+    flex-basis: 76px;
+    width: 76px;
+    padding: 18px 9px 12px;
+  }
+
+  .crm-sidebar-brand {
+    padding: 2px 3px 18px;
+  }
+
+  .crm-sidebar-brand > img {
+    width: 50px;
+    height: 38px;
+    object-fit: cover;
+    object-position: left center;
+  }
+
+  .crm-sidebar-location {
+    justify-content: center;
+    padding: 9px 4px;
+  }
+
+  .crm-sidebar-location > span:last-child,
+  .crm-sidebar-caption,
+  .crm-sidebar-link > span,
+  .crm-sidebar-user-copy,
+  .crm-sidebar-user > svg {
+    display: none;
+  }
+
+  .crm-sidebar-link {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .crm-sidebar-user {
+    justify-content: center;
+    padding: 10px 0 4px;
+  }
+
+  .crm-page-content > .app-container {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+}
+
+@media (max-width: 680px) {
+  .crm-topbar,
+  .crm-topbar .header-container {
+    height: 62px;
+    flex-basis: 62px;
+  }
+
+  .crm-topbar .header-container {
+    padding: 0 14px;
+  }
+
+  .crm-topbar .navbar-user-info,
+  .crm-topbar .navbar-user-chevron {
+    display: none;
+  }
+
+  .crm-workspace {
+    min-height: calc(100vh - 62px);
+    flex-direction: column;
+  }
+
+  .crm-sidebar {
+    position: sticky;
+    top: 62px;
+    z-index: 60;
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border-right: 0;
+    border-bottom: 1px solid #ECEAF1;
+  }
+
+  .crm-sidebar-brand,
+  .crm-sidebar-caption,
+  .crm-sidebar-spacer,
+  .crm-sidebar-user {
+    display: none;
+  }
+
+  .crm-sidebar-nav {
+    flex-direction: row;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .crm-sidebar-link {
+    width: auto;
+    min-width: 42px;
+    min-height: 40px;
+    flex: 0 0 auto;
+    padding: 0 11px;
+  }
+
+  .crm-sidebar-link > span {
+    display: inline;
+    font-size: 10px;
+  }
+
+  .crm-sidebar-link svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .crm-sidebar-link:not(.is-active) > span {
+    display: none;
+  }
+
+  .crm-page-content > .app-container {
+    padding: 20px 14px 34px;
+  }
+}
+
+/* Keep the admin landing view at the compact reference size. */
+.dashboard-module-shell .crm-topbar,
+.dashboard-module-shell .crm-sidebar {
+  display: none !important;
+}
+
+.dashboard-module-shell .crm-workspace,
+.dashboard-module-shell .crm-page-content {
+  min-height: 100vh;
+  width: 100%;
+  background: #fff !important;
+}
+
+.dashboard-module-shell .crm-workspace { display: block; }
+.dashboard-module-shell .crm-page-content > .app-container { padding: 24px !important; }
+.dashboard-module-shell .dashboard-reference-style { gap: 0 !important; }
+.dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace {
+  width: min(1100px, 92vw) !important;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  background: #373634 !important;
+}
+.dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 480px;
+  padding: 22px !important;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: #fff !important;
+  color: #292731;
+}
+.dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in > * {
+  min-width: 0;
+  max-width: 100%;
+}
+.dashboard-module-shell .gift-voucher-management {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.dashboard-module-shell .gift-voucher-dashboard-grid,
+.dashboard-module-shell .gift-voucher-dashboard-grid > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.dashboard-module-shell .admin-master-back-row { display: none !important; }
+.dashboard-tiles-only .admin-dashboard-workspace {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: min(1100px, 92vw);
+  min-height: 0;
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  background: #373634 !important;
+}
+.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  width: min(1100px, 92vw) !important;
+}
+.dashboard-tiles-only .admin-module-board-header {
+  display: flex;
+  width: 100%;
+  min-height: 68px;
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+.dashboard-tiles-only .admin-module-board {
+  width: 100%;
+  margin: 0 auto;
+  padding: 12px;
+  border-radius: 16px;
+  background: #4a4946;
+}
+
+.dashboard-tiles-only .admin-module-tiles {
+  grid-template-rows: repeat(4, clamp(114px, 10vw, 145px)) clamp(50px, 4.5vw, 65px);
+  gap: clamp(16px, 1.4vw, 21px);
+}
+
+.dashboard-tiles-only .admin-module-tile {
+  font-size: clamp(15px, 1.05vw, 17px);
+}
+
+@media (max-width: 700px) {
+  .dashboard-module-shell .crm-page-content > .app-container { padding: 14px !important; }
+  .dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace { width: 100% !important; }
+  .dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in { padding: 14px !important; }
+}
+
+/* Compact dark module launcher based on the supplied dashboard reference. */
+.admin-module-board {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 auto 10px;
+  padding: 12px;
+  border-radius: 17px;
+  background: #4a4946;
+  color: #fff;
+}
+
+.admin-module-board-header {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  margin-bottom: 12px;
+  border-radius: 14px;
+  background: #373634;
+}
+
+.admin-module-brand {
+  display: grid;
+  width: 160px;
+  height: 58px;
+  padding: 7px 12px;
+  box-sizing: border-box;
+  border: 1px solid #648cff;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.admin-module-brand img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.admin-module-book {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #514f4c;
+  color: #fff;
+  cursor: pointer;
+}
+
+.admin-module-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-module-menu-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #66635f;
+  border-radius: 9px;
+  background: #514f4c;
+  color: #fff;
+  cursor: pointer;
+}
+
+.admin-module-menu-button:hover { background: #625f5b; }
+
+.admin-module-home-button {
+  padding: 8px 12px;
+  border: 1px solid #66635f;
+  border-radius: 9px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+}
+
+.admin-dashboard-workspace.is-admin-workspace {
+  width: 100%;
+  min-height: 520px;
+  padding: 0 16px 16px;
+  box-sizing: border-box;
+  border-radius: 16px;
+  background: #393836;
+}
+
+.admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) {
+  background: #393836;
+}
+
+.admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in {
+  padding: 22px 4px !important;
+}
+
+.admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) .card {
+  background: #fff;
+}
+
+.admin-module-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: 114px 114px 114px 114px 50px;
+  grid-template-areas:
+    "banner banner banner banner banner banner"
+    "services vouchers outlets outlets revenue revenue"
+    "types value branches franchises revenue revenue"
+    "members value team clients clients reports"
+    "equipment vendors products opex salaries payments";
+  gap: 16px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #4a4946;
+}
+
+.admin-module-tile {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 14px;
+  background: #706f6a;
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  transition: background .16s ease, transform .16s ease;
+}
+
+.admin-module-tile:hover { background: #807e78; transform: translateY(-1px); }
+.admin-module-banner { grid-area: banner; }
+.tile-services { grid-area: services; }
+.tile-vouchers { grid-area: vouchers; }
+.tile-outlets { grid-area: outlets; }
+.tile-revenue { grid-area: revenue; }
+.tile-types { grid-area: types; }
+.tile-membership-value { grid-area: value; }
+.tile-branches { grid-area: branches; }
+.tile-franchises { grid-area: franchises; }
+.tile-memberships { grid-area: members; }
+.tile-team { grid-area: team; }
+.tile-clients { grid-area: clients; }
+.tile-reports { grid-area: reports; }
+.tile-equipment { grid-area: equipment; }
+.tile-vendors { grid-area: vendors; }
+.tile-products { grid-area: products; }
+.tile-opex { grid-area: opex; }
+.tile-salaries { grid-area: salaries; }
+.tile-payments { grid-area: payments; }
+
+@media (max-width: 700px) {
+  .admin-module-board { margin-top: -10px; padding: 8px; }
+  .admin-module-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: 100px;
+    grid-auto-rows: 92px;
+    grid-template-areas: none;
+    gap: 10px;
+    padding: 8px;
+  }
+  .admin-dashboard-workspace.is-admin-workspace { padding: 0 8px 8px; }
+  .admin-module-board-header { min-height: 62px; padding: 0 8px; }
+  .admin-module-brand { width: 138px; height: 50px; }
+  .admin-module-home-button { font-size: 12px; padding: 7px 8px; }
+  .admin-module-tile { grid-area: auto !important; }
+  .admin-module-banner { grid-column: 1 / -1; }
+  .tile-revenue, .tile-membership-value { grid-row: span 2; }
+}
+
+/* Fix the inherited full-bleed centering used by the old hero layout. */
+.master-admin-reports-dashboard {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-navbar {
+  left: 0 !important;
+  transform: none !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-section-nav {
+  left: auto !important;
+  width: 100% !important;
+  transform: none !important;
+}
+
+.master-reports-screen .embedded-location-selection > .app-container {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 28px !important;
+  box-sizing: border-box;
+}
+
+.master-reports-screen .embedded-location-selection .master-data-content {
+  width: 100% !important;
+  max-width: none !important;
+  margin-right: 0 !important;
+  margin-left: 0 !important;
+}
+
+/* Studio Management uses the same app frame as the CRM reference. */
+.master-reports-screen {
+  box-sizing: border-box;
+  padding-left: 218px !important;
+  min-height: 100vh;
+  background: #f4f3f7 !important;
+}
+
+.master-admin-reports-dashboard {
+  position: relative;
+  min-height: 100vh;
+  padding: 0 0 42px !important;
+  background: #f4f3f7 !important;
+}
+
+.master-admin-reports-dashboard.is-directory-shell {
+  min-height: 0;
+  padding-bottom: 0 !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-navbar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 100;
+  width: 218px;
+  height: 100vh;
+  padding: 24px 14px;
+  box-sizing: border-box;
+  background: #fff;
+  border-right: 1px solid #e9e6f0;
+}
+
+.master-reports-navbar-inner {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
+}
+
+.master-reports-navbar-inner > img {
+  width: 148px;
+  max-width: 100%;
+  height: 48px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.master-reports-navbar-menu {
+  position: absolute;
+  right: 14px;
+  bottom: 20px;
+}
+
+.master-crm-sidebar {
+  position: fixed;
+  z-index: 101;
+  top: 100px;
+  left: 0;
+  width: 218px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.master-crm-workspace-label {
+  padding: 0 11px 9px;
+  color: #a09daa;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .12em;
+}
+
+.master-crm-sidebar nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.master-crm-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #5f5c69;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.master-crm-sidebar-link:hover,
+.master-crm-sidebar-link.is-active {
+  background: #eae2ff;
+  color: #57449d;
+}
+
+.master-admin-reports-dashboard > .master-reports-hero {
+  display: none !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 80;
+  width: 100%;
+  min-height: 68px;
+  margin: 0;
+  padding: 0 28px;
+  box-sizing: border-box;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #e9e6f0;
+  box-shadow: 0 2px 10px rgba(39, 34, 54, .025);
+}
+
+.master-admin-reports-dashboard .master-reports-breadcrumb {
+  margin-right: auto;
+}
+
+.master-admin-reports-dashboard .master-reports-section-links > button:not(.master-reports-add-branch) {
+  display: none !important;
+}
+
+.master-admin-reports-dashboard .master-reports-section-links {
+  gap: 0;
+}
+
+.master-admin-reports-dashboard .master-reports-add-branch {
+  border-radius: 10px !important;
+  background: #f8f7fb !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-section-nav + div {
+  margin: 24px 28px !important;
+}
+
+.master-admin-reports-dashboard > .master-reports-section-nav ~ *:not(.master-reports-section-nav) {
+  max-width: none;
+}
+
+.master-reports-screen .embedded-location-selection {
+  width: auto !important;
+  max-width: none !important;
+  min-height: calc(100vh - 68px) !important;
+  margin: 0 !important;
+  padding: 28px !important;
+  box-sizing: border-box;
+  background: #f4f3f7 !important;
+}
+
+@media (max-width: 760px) {
+  .master-reports-screen {
+    padding-left: 0 !important;
+    padding-top: 116px !important;
+  }
+
+  .master-admin-reports-dashboard > .master-reports-navbar {
+    inset: 0 0 auto;
+    width: 100%;
+    height: 62px;
+    padding: 7px 14px;
+    border-right: 0;
+    border-bottom: 1px solid #e9e6f0;
+  }
+
+  .master-reports-navbar-inner {
+    height: 48px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .master-reports-navbar-inner > img {
+    width: 125px;
+    height: 42px;
+  }
+
+  .master-reports-navbar-menu {
+    position: relative;
+    right: auto;
+    bottom: auto;
+  }
+
+  .master-crm-sidebar {
+    top: 62px;
+    width: 100%;
+    padding: 7px 10px;
+    background: #fff;
+    border-bottom: 1px solid #e9e6f0;
+  }
+
+  .master-crm-workspace-label {
+    display: none;
+  }
+
+  .master-crm-sidebar nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .master-crm-sidebar-link {
+    width: auto;
+    flex: 0 0 auto;
+    min-height: 40px;
+  }
+
+  .master-admin-reports-dashboard > .master-reports-section-nav {
+    top: 110px;
+    padding: 0 14px;
+  }
+
+  .master-reports-screen .embedded-location-selection {
+    padding: 18px 14px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crm-sidebar-link,
+  .crm-sidebar-link:hover {
+    transition: none;
+  }
+}
+
+/* Maison BeYou warm optical-glass treatment for the embedded branch directory. */
+.master-reports-screen:has(.master-admin-reports-dashboard.is-directory-shell) {
+  background:
+    radial-gradient(ellipse at 24% 18%, rgba(255,255,255,.78), transparent 44%),
+    radial-gradient(ellipse at 83% 72%, rgba(207,157,104,.20), transparent 38%),
+    linear-gradient(132deg, #f8ede4 0%, #ead8c5 54%, #f5e8da 100%) !important;
+}
+
+.master-admin-reports-dashboard.is-directory-shell {
+  background: transparent !important;
+  color: #402817;
+}
+
+.master-admin-reports-dashboard.is-directory-shell > .master-reports-navbar {
+  background: linear-gradient(145deg, rgba(255,252,247,.78), rgba(245,229,212,.58)) !important;
+  border-right: 1px solid rgba(255,255,255,.78) !important;
+  box-shadow: 8px 0 32px rgba(91,56,28,.08), inset -1px 0 rgba(197,143,78,.22);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-crm-workspace-label {
+  color: #9e7954;
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-crm-sidebar-link {
+  color: #654832;
+  border: 1px solid transparent;
+  transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-crm-sidebar-link:hover,
+.master-admin-reports-dashboard.is-directory-shell .master-crm-sidebar-link.is-active {
+  background: linear-gradient(135deg, rgba(255,255,255,.82), rgba(237,207,169,.58));
+  color: #4d2c16;
+  border-color: rgba(255,255,255,.9);
+  box-shadow: inset 0 1px rgba(255,255,255,.9), 0 5px 16px rgba(103,67,36,.09);
+}
+
+.master-admin-reports-dashboard.is-directory-shell > .master-reports-section-nav {
+  background: linear-gradient(100deg, rgba(255,251,246,.82), rgba(246,230,211,.70)) !important;
+  border-bottom: 1px solid rgba(255,255,255,.85) !important;
+  box-shadow: 0 8px 24px rgba(104,69,39,.06), inset 0 -1px rgba(193,141,81,.14) !important;
+  backdrop-filter: blur(20px) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-reports-breadcrumb {
+  color: #9a795a;
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-reports-breadcrumb strong {
+  color: #4c2e1c;
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-reports-add-branch {
+  border: 1px solid rgba(255,255,255,.88) !important;
+  background: linear-gradient(110deg, #ffe0a7, #d99a49) !important;
+  color: #462a13 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.9), 0 5px 14px rgba(111,70,28,.18) !important;
+}
+
+.master-admin-reports-dashboard.is-directory-shell .master-reports-add-branch:hover {
+  filter: saturate(1.06) brightness(1.025);
+  transform: translateY(-1px);
+}
+
+.master-reports-screen .embedded-location-selection {
+  background: transparent !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-heading {
+  margin-bottom: 24px !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-heading h1 {
+  color: #452b19 !important;
+  font-family: var(--font-sans), Arial, sans-serif !important;
+  font-size: 27px !important;
+  font-weight: 650 !important;
+  letter-spacing: .035em !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table-wrap {
+  overflow: hidden !important;
+  border: 1px solid rgba(255,255,255,.9) !important;
+  border-radius: 22px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.50), rgba(247,226,202,.30)),
+    rgba(255,250,244,.30) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 0 0 1px rgba(222,177,123,.26),
+    0 20px 48px rgba(85,52,25,.14),
+    0 3px 10px rgba(255,255,255,.48) !important;
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table {
+  color: #4d3423 !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table thead tr {
+  background: linear-gradient(100deg, rgba(255,255,255,.56), rgba(225,184,133,.35)) !important;
+  color: #543821 !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table th {
+  padding: 17px 16px !important;
+  border-bottom: 1px solid rgba(255,255,255,.9) !important;
+  color: #563a22 !important;
+  font-size: 12px !important;
+  font-weight: 750 !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table tbody tr {
+  background: rgba(255,252,248,.22) !important;
+  color: #563d2d !important;
+  border-bottom: 1px solid rgba(255,255,255,.66) !important;
+  transition: background .18s ease;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table tbody tr:nth-child(even) {
+  background: rgba(229,199,165,.20) !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table tbody tr:hover {
+  background: rgba(255,255,255,.48) !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table td {
+  padding: 16px !important;
+  border-bottom: 1px solid rgba(255,255,255,.48) !important;
+  color: #563d2d !important;
+  font-size: 13px !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table td:nth-child(2) {
+  color: #412916 !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table td.directory-target-high {
+  color: #248058 !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table td.directory-target-low {
+  color: #ad651d !important;
+}
+
+.master-reports-screen .embedded-location-selection .directory-branches-table td button {
+  border: 1px solid rgba(255,255,255,.94) !important;
+  background: linear-gradient(135deg, #ffe1ad, #dba04e) !important;
+  color: #563617 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.9), 0 4px 10px rgba(96,59,25,.14);
+}
+
+@media (max-width: 760px) {
+  .master-admin-reports-dashboard.is-directory-shell > .master-reports-navbar,
+  .master-admin-reports-dashboard.is-directory-shell .master-crm-sidebar {
+    background: rgba(255,250,244,.88) !important;
+  }
+
+  .master-reports-screen .embedded-location-selection .directory-branches-table-wrap {
+    overflow-x: auto !important;
+  }
+}
+
+/* Carry the dark frame and quiet white workspace across every CRM tab. */
+.app-shell.app-branded:not(.dashboard-module-shell) {
+  --bg-main: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-subtle: #F5F5F3;
+  --bg-surface: #F0F0EE;
+  --border-color: #E4E3DF;
+  --border-light: #ECEBE8;
+  --text-main: #302F2C;
+  --text-muted: #777570;
+  --primary: #66645F;
+  --primary-hover: #4A4946;
+  --primary-dark: #292826;
+  --primary-subtle: #F0F0EE;
+  --primary-border: #D8D7D2;
+  background: #FFFFFF !important;
+  color: #302F2C;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar {
+  align-self: center;
+  width: min(1100px, calc(100% - 32px));
+  height: 80px;
+  flex: 0 0 80px;
+  margin-top: 16px;
+  box-sizing: border-box;
+  border: 0 !important;
+  border-radius: 16px 16px 0 0;
+  background: #373634 !important;
+  box-shadow: none !important;
+}
+
+.app-shell .ritual-category-card {
+  background-color: #74736F !important;
+  border-color: #5D5B57 !important;
+  box-shadow: none !important;
+}
+
+.app-shell .ritual-card-num,
+.app-shell .ritual-card-title,
+.app-shell .ritual-card-desc,
+.app-shell .ritual-card-action { color: #FFFFFF !important; }
+
+.app-shell .ritual-card-divider { background-color: #A5A39D !important; }
+
+.app-shell .service-category-admin-header,
+.app-shell .service-category-admin-number,
+.app-shell .service-category-admin-image {
+  background-color: #5C5A56 !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar .header-container {
+  height: 80px;
+  padding: 0 18px;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar-brand {
+  display: flex !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar-brand > div > img {
+  width: 160px;
+  height: 58px;
+  padding: 6px 10px;
+  box-sizing: border-box;
+  border: 1px solid #648CFF;
+  border-radius: 12px;
+  background: #FFFFFF;
+  object-fit: contain;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar .navbar-user-pill {
+  border-color: #66635F;
+  background: #514F4C;
+  color: #FFFFFF;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar .navbar-user-name,
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar .navbar-user-chevron {
+  color: #FFFFFF !important;
+}
+
+.crm-header-booking {
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: #514F4C;
+  color: #FFFFFF;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.crm-header-booking:hover { background: #625F5B; }
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-workspace {
+  align-self: center;
+  width: min(1100px, calc(100% - 32px));
+  min-height: calc(100vh - 96px);
+  flex: 1 1 auto;
+  gap: 12px;
+  padding: 0 12px 12px;
+  box-sizing: border-box;
+  border-radius: 0 0 16px 16px;
+  background: #373634;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar {
+  position: sticky;
+  top: 12px;
+  flex: 0 0 190px;
+  width: 190px;
+  height: calc(100vh - 116px);
+  min-height: 400px;
+  padding: 14px 10px;
+  border: 0;
+  border-radius: 13px;
+  background: #4A4946;
+  color: #FFFFFF;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-brand { display: none; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-caption { color: #C3C1BC; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-link { color: #F5F4F1; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-link svg { color: #D0CEC8; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-link:hover,
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-link.is-active { background: #706F6A; color: #FFFFFF; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-link.is-active svg { color: #FFFFFF; }
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar-user { border-top-color: #66635F; color: #FFFFFF; }
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content {
+  min-width: 0;
+  margin: 0;
+  border-radius: 13px;
+  background: #FFFFFF;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content > .app-container {
+  width: 100%;
+  max-width: none;
+  padding: 24px !important;
+  box-sizing: border-box;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .card {
+  border-color: #E4E3DF !important;
+  border-radius: 14px !important;
+  background: #FFFFFF !important;
+  box-shadow: 0 2px 8px rgba(35, 34, 31, .035) !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .btn-primary {
+  background: #4A4946 !important;
+  border-color: #4A4946 !important;
+  color: #FFFFFF !important;
+}
+
+@media (max-width: 760px) {
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar,
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-workspace {
+    width: calc(100% - 16px);
+  }
+
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar {
+    flex: 0 0 62px;
+    width: 62px;
+    min-height: 0;
+    height: auto;
+    padding: 8px 5px;
+  }
+
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content > .app-container {
+    padding: 16px 12px !important;
+  }
+}
+
+/* Whole-workspace pass: carry the reference's soft, compact CRM language
+   across existing screens while leaving their data and controls untouched. */
+.app-shell.app-branded {
+  background: #f4f3f7 !important;
+}
+
+.crm-sidebar {
+  flex-basis: 208px;
+  width: 208px;
+  padding: 18px 12px 12px;
+}
+
+.crm-sidebar-brand > img {
+  width: 142px;
+  height: 44px;
+}
+
+.crm-page-content > .app-container {
+  padding: 28px 30px 42px !important;
+}
+
+.app-shell .animate-fade-in > h1,
+.app-shell .animate-fade-in > h2,
+.app-shell .animate-fade-in > div > h1,
+.app-shell .animate-fade-in > div > h2 {
+  letter-spacing: -.025em;
+}
+
+.app-shell .card,
+.master-portal-themed .card,
+.master-reports-screen .card {
+  border-radius: 16px !important;
+  box-shadow: 0 3px 14px rgba(43, 38, 61, .045) !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(4n + 1) {
+  background: #fff !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(4n + 2) {
+  background: #f0ecff !important;
+  border-color: #e4dcff !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(4n + 3) {
+  background: #e9f4d9 !important;
+  border-color: #dcebc8 !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) {
+  background: #292632 !important;
+  border-color: #292632 !important;
+  color: #fff !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) h1,
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) h2,
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) h3,
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) p,
+.app-shell .dashboard-summary-grid > .card:nth-child(4n) span {
+  color: inherit;
+}
+
+.app-shell .client-profile-hero {
+  background: linear-gradient(120deg, #d6cafa 0%, #c8b8f3 100%) !important;
+  border-color: #c3b1ef !important;
+  color: #282330;
+}
+
+.app-shell .client-profile-hero h1 {
+  color: #282330 !important;
+  font-size: clamp(28px, 3vw, 40px) !important;
+  letter-spacing: -.045em;
+}
+
+.app-shell .client-profile-hero > div {
+  max-width: 100%;
+}
+
+.app-shell .client-profile-hero [style*="#B88B4A"] {
+  color: #6551a8 !important;
+}
+
+.app-shell .client-profile-hero button {
+  border-radius: 999px !important;
+}
+
+.app-shell .client-profile-hero ~ .card,
+.app-shell .client-profile-hero ~ section.card {
+  background: #fff !important;
+}
+
+.app-shell table {
+  background: #fff !important;
+  border: 1px solid #e9e6f0 !important;
+  border-radius: 15px !important;
+}
+
+.app-shell tbody tr:hover {
+  background: #f8f6fc !important;
+}
+
+.app-shell .tab-active,
+.app-shell [aria-selected="true"]:not([role="option"]),
+.app-shell [data-state="active"] {
+  color: #6551a8 !important;
+}
+
+.app-shell button:not(.crm-sidebar-link):not([disabled]) {
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.app-shell button:not(.crm-sidebar-link):not([disabled]):hover {
+  box-shadow: 0 4px 12px rgba(75, 62, 116, .09);
+}
+
+.app-shell [role="dialog"],
+.app-shell .modal-content,
+.app-shell .modal-card,
+.master-portal-themed [role="dialog"],
+.master-reports-screen [role="dialog"] {
+  border-color: #e7e3ee !important;
+  border-radius: 20px !important;
+  box-shadow: 0 24px 70px rgba(35, 31, 47, .2) !important;
+}
+
+.app-shell .badge,
+.master-portal-themed .badge,
+.master-reports-screen .badge {
+  border-radius: 999px;
+}
+
+.app-shell hr {
+  border-color: #eeecf2 !important;
+}
+
+.master-portal-themed,
+.master-reports-screen {
+  min-height: 100vh;
+  background: #f4f3f7 !important;
+}
+
+@media (max-width: 980px) {
+  .crm-sidebar {
+    flex-basis: 70px;
+    width: 70px;
+  }
+
+  .crm-page-content > .app-container {
+    padding: 24px 22px 36px !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .crm-sidebar {
+    width: 100%;
+  }
+
+  .crm-page-content > .app-container {
+    padding: 18px 14px 30px !important;
+  }
+
+  .app-shell .dashboard-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Final shared Maison BeYou charcoal and warm-grey design system. */
+:root {
+  --bg-main: #353432;
+  --bg-card: #FFFFFF;
+  --bg-card-subtle: #F2F1EF;
+  --bg-surface: #EAE9E6;
+  --border-color: #D8D7D2;
+  --border-light: #E6E5E1;
+  --text-main: #302F2C;
+  --text-muted: #716F6A;
+  --text-light: #85837E;
+  --primary: #74736F;
+  --primary-hover: #5C5A56;
+  --primary-dark: #353432;
+  --primary-subtle: #F0EFED;
+  --primary-border: #D2D1CC;
+  --success-text: #38634A;
+  --success-bg: #E8F0EA;
+  --success-border: #CAD9CE;
+  --warning-text: #765C32;
+  --warning-bg: #F4EEDF;
+  --warning-border: #E4D7B9;
+  --danger-text: #8C4542;
+  --danger-bg: #F5E8E6;
+  --danger-border: #E7CBC7;
+  --shadow-sm: 0 1px 3px rgba(25, 24, 22, .05);
+  --shadow-md: 0 4px 12px rgba(25, 24, 22, .07);
+  --shadow-lg: 0 12px 28px rgba(25, 24, 22, .14);
+  --shadow-gold: 0 4px 12px rgba(25, 24, 22, .08);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+}
+
+body {
+  background: #FFFFFF !important;
+  color: #302F2C;
+}
+
+.app-shell.app-branded {
+  background: #FFFFFF !important;
+  color: #302F2C;
+}
+
+/* Main app frame, shared by admin, staff, manager and visitor screens. */
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar {
+  background: #353432 !important;
+  border-radius: 16px 16px 0 0;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-workspace {
+  background: #353432 !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-sidebar {
+  background: #484744 !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content {
+  background: #FFFFFF !important;
+}
+
+.app-shell .crm-sidebar-link.is-active {
+  background: #74736F !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell .crm-sidebar-link:hover {
+  background: #5C5A56 !important;
+  color: #FFFFFF !important;
+}
+
+/* Master and location portals use the same neutral canvas and surfaces. */
+.master-portal-themed,
+.master-reports-screen {
+  background: #F2F1EF !important;
+  color: #302F2C !important;
+}
+
+.master-portal-themed .card,
+.master-reports-screen .card {
+  background: #FFFFFF !important;
+  border-color: #D8D7D2 !important;
+  color: #302F2C !important;
+  box-shadow: 0 2px 8px rgba(25, 24, 22, .045) !important;
+}
+
+.master-portal-themed input:not([type="checkbox"]):not([type="radio"]),
+.master-portal-themed select,
+.master-portal-themed textarea,
+.master-reports-screen input:not([type="checkbox"]):not([type="radio"]),
+.master-reports-screen select,
+.master-reports-screen textarea {
+  background: #F6F5F3 !important;
+  border-color: #D8D7D2 !important;
+  color: #302F2C !important;
+}
+
+/* Standard content cards and summaries. */
+.app-shell .card,
+.app-shell .dashboard-summary-grid > .card,
+.app-shell .dashboard-reference-style .card,
+.app-shell .membership-plan-card,
+.app-shell .client-directory-table-card {
+  background: #FFFFFF !important;
+  border-color: #D8D7D2 !important;
+  border-radius: 14px !important;
+  color: #302F2C;
+  box-shadow: 0 2px 8px rgba(25, 24, 22, .045) !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(n) {
+  background: #FFFFFF !important;
+  border-color: #D8D7D2 !important;
+  color: #302F2C !important;
+}
+
+.app-shell .dashboard-summary-grid > .card:nth-child(n) :is(h1,h2,h3,p,span,small,strong,div) {
+  color: inherit;
+}
+
+.app-shell .client-profile-hero {
+  background: #5C5A56 !important;
+  border-color: #5C5A56 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell .client-profile-hero :is(h1,h2,h3,p,span,strong,small) {
+  color: #FFFFFF !important;
+}
+
+/* Tables stay legible and retain their existing horizontal-scroll behavior. */
+.app-shell table,
+.master-portal-themed table,
+.master-reports-screen table {
+  background: #FFFFFF !important;
+  border-color: #D8D7D2 !important;
+  color: #302F2C;
+}
+
+.app-shell thead th,
+.master-portal-themed thead th,
+.master-reports-screen thead th {
+  background: #EAE9E6 !important;
+  border-color: #D8D7D2 !important;
+  color: #403F3B !important;
+}
+
+.app-shell tbody td,
+.master-portal-themed tbody td,
+.master-reports-screen tbody td {
+  border-color: #E6E5E1 !important;
+  color: #514F4A;
+}
+
+.app-shell tbody tr:hover { background: #F5F4F2 !important; }
+
+/* Consistent fields, focus treatment, and placeholder contrast. */
+.app-shell input:not([type="checkbox"]):not([type="radio"]),
+.app-shell select,
+.app-shell textarea,
+.master-portal-themed input:not([type="checkbox"]):not([type="radio"]),
+.master-portal-themed select,
+.master-portal-themed textarea,
+.master-reports-screen input:not([type="checkbox"]):not([type="radio"]),
+.master-reports-screen select,
+.master-reports-screen textarea {
+  background-color: #F6F5F3 !important;
+  border-color: #D4D3CE !important;
+  border-radius: 9px !important;
+  color: #302F2C !important;
+  box-shadow: none !important;
+}
+
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus,
+.master-portal-themed input:focus,
+.master-portal-themed select:focus,
+.master-portal-themed textarea:focus,
+.master-reports-screen input:focus,
+.master-reports-screen select:focus,
+.master-reports-screen textarea:focus {
+  border-color: #74736F !important;
+  outline: 3px solid rgba(116, 115, 111, .16) !important;
+}
+
+.app-shell input::placeholder,
+.app-shell textarea::placeholder { color: #85837E !important; }
+
+/* Shared neutral actions. Status badges keep muted semantic colors. */
+.app-shell .btn-primary,
+.app-shell .tenant-accent-button,
+.app-shell .concierge-action-btn-gold,
+.app-shell .btn-luxury-header-action,
+.master-portal-themed .btn-primary,
+.master-reports-screen .btn-primary {
+  background: #74736F !important;
+  border-color: #74736F !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+.app-shell .btn-primary:hover,
+.app-shell .tenant-accent-button:hover,
+.app-shell .concierge-action-btn-gold:hover,
+.master-portal-themed .btn-primary:hover,
+.master-reports-screen .btn-primary:hover {
+  background: #5C5A56 !important;
+  border-color: #5C5A56 !important;
+}
+
+.app-shell .btn-secondary,
+.master-portal-themed .btn-secondary,
+.master-reports-screen .btn-secondary {
+  background: #FFFFFF !important;
+  border-color: #D4D3CE !important;
+  color: #403F3B !important;
+}
+
+.app-shell .badge-gold,
+.app-shell .badge-neutral {
+  background: #EAE9E6 !important;
+  border-color: #D8D7D2 !important;
+  color: #4A4946 !important;
+}
+
+.app-shell .badge-paid {
+  background: #E8F0EA !important;
+  border-color: #CAD9CE !important;
+  color: #38634A !important;
+}
+
+.app-shell .tab-active,
+.app-shell [aria-selected="true"]:not([role="option"]),
+.app-shell [data-state="active"] {
+  color: #4A4946 !important;
+}
+
+.app-shell hr,
+.master-portal-themed hr,
+.master-reports-screen hr { border-color: #E6E5E1 !important; }
+
+/* Modal, drawer, and floating menu surfaces. */
+.app-shell [role="dialog"],
+.app-shell .modal-content,
+.app-shell .modal-card,
+.master-portal-themed [role="dialog"],
+.master-reports-screen [role="dialog"] {
+  border-color: #D8D7D2 !important;
+  border-radius: 16px !important;
+  background: #FFFFFF !important;
+  color: #302F2C;
+  box-shadow: 0 18px 48px rgba(25, 24, 22, .18) !important;
+}
+
+/* The CRM launch tiles remain the signature warm-grey surface. */
+.admin-module-board { background: #484744 !important; }
+.admin-module-board-header { background: #353432 !important; }
+.admin-module-tile { background: #74736F !important; color: #FFFFFF !important; }
+.admin-module-tile:hover { background: #5C5A56 !important; }
+
+@media (max-width: 760px) {
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-workspace {
+    min-height: calc(100vh - 96px);
+    padding: 0 8px 8px;
+  }
+
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar .header-container {
+    padding: 0 10px;
+  }
+
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-topbar-brand > div > img {
+    width: 132px;
+    height: 50px;
+  }
+}
+
+/* Darken the actual module work areas, not just the frame around them. */
+:root {
+  --bg-main: #353432;
+  --bg-card: #74736F;
+  --bg-card-subtle: #5C5A56;
+  --bg-surface: #5C5A56;
+  --border-color: #5D5B57;
+  --border-light: #676560;
+  --text-main: #FFFFFF;
+  --text-muted: #D5D3CF;
+  --text-light: #C4C2BD;
+  --primary: #74736F;
+  --primary-hover: #85837E;
+  --primary-dark: #353432;
+  --primary-subtle: #5C5A56;
+  --primary-border: #77746F;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content,
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content > .app-container {
+  background: #484744 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell .crm-page-content :is(h1,h2,h3,h4,h5,p,label,small,strong,span,div,li,td,th),
+.master-portal-themed :is(h1,h2,h3,h4,h5,p,label,small,strong,span,div,li,td,th),
+.master-reports-screen :is(h1,h2,h3,h4,h5,p,label,small,strong,span,div,li,td,th) {
+  color: #FFFFFF !important;
+}
+
+.app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content {
+  border-radius: 13px;
+}
+
+.app-shell .admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in,
+.dashboard-module-shell .admin-dashboard-workspace.is-admin-workspace:not(:has(.admin-module-board)) > .animate-fade-in {
+  background: #484744 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell :is(h1,h2,h3,h4,h5,p,label),
+.master-portal-themed :is(h1,h2,h3,h4,h5,p,label),
+.master-reports-screen :is(h1,h2,h3,h4,h5,p,label) {
+  color: #FFFFFF;
+}
+
+.app-shell .card,
+.app-shell .dashboard-summary-grid > .card,
+.app-shell .dashboard-visits-panel,
+.app-shell .client-directory-table-card,
+.app-shell .team-master-tabs-grid > button,
+.app-shell .membership-plan-card,
+.app-shell .service-category-card,
+.app-shell .concierge-luxury-card,
+.app-shell .concierge-card,
+.master-portal-themed .card,
+.master-reports-screen .card {
+  background-color: #74736F !important;
+  border-color: #5D5B57 !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+.app-shell .crm-page-content section[style*="border"],
+.master-portal-themed section[style*="border"],
+.master-reports-screen section[style*="border"],
+.app-shell .gift-voucher-management > div[style*="border"] {
+  background-color: #74736F !important;
+  border-color: #5D5B57 !important;
+  color: #FFFFFF !important;
+}
+
+/* Keep light content surfaces readable inside the global dark CRM shell. */
+.app-shell .gift-voucher-management .gift-voucher-dashboard-grid > div:first-child > div {
+  background: #FFFFFF !important;
+  border-color: #E7D8C4 !important;
+}
+.app-shell .gift-voucher-management .gift-voucher-dashboard-grid > div:first-child > div > div {
+  color: #786D62 !important;
+}
+.app-shell .gift-voucher-management .gift-voucher-dashboard-grid > div:first-child > div > div:last-child {
+  color: #302820 !important;
+}
+
+/* The service cards use white image fades, so their copy must stay dark. */
+.app-shell .service-category-admin-header .service-category-admin-copy h2 {
+  color: #6F4E2D !important;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, .9);
+}
+.app-shell .service-category-admin-header .service-category-admin-copy > div:last-child {
+  color: #40372F !important;
+}
+.app-shell .service-category-admin-header .service-category-admin-number {
+  color: #FFFFFF !important;
+}
+
+/* Hierarchy controls are intentionally on a white panel within the dark page. */
+.app-shell .team-master-screen .team-hierarchy-position-form > label,
+.app-shell .team-master-screen .team-hierarchy-position-form > label > span,
+.app-shell .team-master-screen .team-hierarchy-position-form legend,
+.app-shell .team-master-screen .team-hierarchy-position-form label,
+.app-shell .team-master-screen .team-master-screen,
+.app-shell .team-master-screen [aria-label="Configured designation hierarchy"],
+.app-shell .team-master-screen [aria-label="Configured designation hierarchy"] span,
+.app-shell .team-master-screen [aria-label="Configured designation hierarchy"] strong {
+  color: #40372F !important;
+}
+.app-shell .team-master-screen div[style*="background: #FFFFFF"] > div > strong,
+.app-shell .team-master-screen div[style*="background: #FFFFFF"] > div > p,
+.app-shell .team-master-screen div[style*="background: #FFFFFF"] > div > span,
+.app-shell .team-master-screen div[style*="background: #FFFFFF"] > strong {
+  color: #40372F !important;
+}
+.app-shell .team-master-screen .team-hierarchy-position-form select,
+.app-shell .team-master-screen .team-hierarchy-position-form input:not([type="checkbox"]):not([type="radio"]) {
+  background: #FFFFFF !important;
+  border-color: #D8CDBD !important;
+  color: #40372F !important;
+}
+.app-shell .team-master-screen .team-hierarchy-position-form option {
+  background: #FFFFFF !important;
+  color: #40372F !important;
+}
+
+/* Frosted glass treatment for the service category gallery. */
+.app-shell .service-category-admin-card {
+  background: rgba(232, 230, 220, .12) !important;
+  border: 1px solid rgba(255, 255, 255, .58) !important;
+  box-shadow: 0 14px 34px rgba(18, 16, 13, .24), inset 0 1px 0 rgba(255, 255, 255, .62), inset 0 -1px 0 rgba(255, 255, 255, .15) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+.app-shell .service-category-admin-header {
+  background: rgba(255, 255, 255, .08) !important;
+}
+.app-shell .service-category-admin-header::after {
+  background: linear-gradient(105deg, rgba(238, 236, 227, .70) 0%, rgba(228, 228, 220, .56) 38%, rgba(221, 222, 216, .27) 66%, rgba(221, 222, 216, .02) 100%) !important;
+  -webkit-backdrop-filter: blur(13px) saturate(135%);
+  backdrop-filter: blur(13px) saturate(135%);
+}
+.app-shell .service-category-admin-number {
+  background: rgba(64, 57, 49, .78) !important;
+  border: 1px solid rgba(255, 255, 255, .42) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .18);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.app-shell .service-category-admin-toggle-wrap > div {
+  background: rgba(255, 253, 249, .72) !important;
+  border: 1px solid rgba(255, 255, 255, .72) !important;
+  box-shadow: 0 4px 14px rgba(36, 29, 20, .12), inset 0 1px 0 rgba(255, 255, 255, .75);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(12px) saturate(130%);
+}
+
+/* Glass treatment for the admin dashboard launcher; layout stays defined above. */
+.app-shell.dashboard-tiles-only .crm-workspace,
+.app-shell.dashboard-tiles-only .crm-page-content {
+  background:
+    linear-gradient(135deg, rgba(13, 14, 16, .70), rgba(37, 39, 42, .42)),
+    url('/studio-bg.png') center / cover fixed !important;
+}
+.app-shell.dashboard-tiles-only .crm-page-content > .app-container {
+  background: transparent !important;
+}
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border: 1px solid rgba(236, 239, 242, .30) !important;
+  background: rgba(38, 40, 43, .48) !important;
+  box-shadow: 0 24px 60px rgba(8, 9, 11, .38), inset 0 1px 0 rgba(255, 255, 255, .24) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+.app-shell .admin-module-board {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .24) !important;
+  background:
+    radial-gradient(ellipse at 18% 10%, rgba(255, 255, 255, .12), transparent 42%),
+    radial-gradient(ellipse at 88% 88%, rgba(205, 178, 139, .11), transparent 44%),
+    rgba(228, 226, 218, .10) !important;
+  box-shadow: 0 18px 44px rgba(20, 19, 17, .22), inset 0 1px 0 rgba(255, 255, 255, .25) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(135%);
+  backdrop-filter: blur(24px) saturate(135%);
+}
+.app-shell .admin-module-board-header {
+  border: 1px solid rgba(255, 255, 255, .23);
+  background: linear-gradient(110deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .055)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .26), 0 8px 22px rgba(0, 0, 0, .10);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+.app-shell .admin-module-tiles {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.app-shell .admin-module-board .admin-module-tile {
+  border: 1px solid rgba(255, 255, 255, .30) !important;
+  background: linear-gradient(145deg, rgba(255, 255, 255, .27), rgba(255, 255, 255, .095)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), inset 0 -1px 0 rgba(255, 255, 255, .08), 0 8px 20px rgba(20, 19, 17, .11) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  backdrop-filter: blur(18px) saturate(135%);
+}
+.app-shell .admin-module-board .admin-module-tile:hover {
+  background: linear-gradient(145deg, rgba(255, 255, 255, .29), rgba(255, 255, 255, .12)) !important;
+  border-color: rgba(255, 255, 255, .48) !important;
+}
+
+.app-shell .card :is(h1,h2,h3,h4,h5,p,label,span,small,strong,td,th),
+.app-shell .dashboard-visits-panel :is(h1,h2,h3,h4,h5,p,label,span,small,strong,td,th),
+.app-shell .client-directory-table-card :is(h1,h2,h3,h4,h5,p,label,span,small,strong),
+.app-shell .team-master-tabs-grid > button :is(span,strong),
+.master-portal-themed .card :is(h1,h2,h3,h4,h5,p,label,span,small,strong,td,th),
+.master-reports-screen .card :is(h1,h2,h3,h4,h5,p,label,span,small,strong,td,th) {
+  color: #FFFFFF !important;
+}
+
+.app-shell table,
+.master-portal-themed table,
+.master-reports-screen table {
+  background-color: #5C5A56 !important;
+  border-color: #676560 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell thead th,
+.master-portal-themed thead th,
+.master-reports-screen thead th {
+  background: #484744 !important;
+  border-color: #676560 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell tbody td,
+.master-portal-themed tbody td,
+.master-reports-screen tbody td {
+  background: #5C5A56 !important;
+  border-color: #706E69 !important;
+  color: #F5F4F1 !important;
+}
+
+.app-shell tbody tr:hover td { background: #696762 !important; }
+
+.app-shell input:not([type="checkbox"]):not([type="radio"]),
+.app-shell select,
+.app-shell textarea,
+.master-portal-themed input:not([type="checkbox"]):not([type="radio"]),
+.master-portal-themed select,
+.master-portal-themed textarea,
+.master-reports-screen input:not([type="checkbox"]):not([type="radio"]),
+.master-reports-screen select,
+.master-reports-screen textarea {
+  background-color: #55534F !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell option,
+.master-portal-themed option,
+.master-reports-screen option {
+  background: #55534F;
+  color: #FFFFFF;
+}
+
+.app-shell input::placeholder,
+.app-shell textarea::placeholder { color: #D5D3CF !important; }
+
+.app-shell .btn-primary,
+.app-shell .btn-secondary,
+.app-shell .tenant-accent-button,
+.app-shell .concierge-action-btn-gold,
+.app-shell .concierge-action-btn-dark,
+.app-shell .btn-luxury-header-action,
+.master-portal-themed .btn-primary,
+.master-portal-themed .btn-secondary,
+.master-reports-screen .btn-primary,
+.master-reports-screen .btn-secondary {
+  background: #74736F !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+.app-shell .crm-page-content button:not(.crm-sidebar-link),
+.master-portal-themed button:not(.crm-sidebar-link),
+.master-reports-screen button:not(.crm-sidebar-link) {
+  background-color: #74736F !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+  box-shadow: none !important;
+}
+
+.app-shell .crm-page-content button:not(.crm-sidebar-link):hover,
+.master-portal-themed button:not(.crm-sidebar-link):hover,
+.master-reports-screen button:not(.crm-sidebar-link):hover {
+  background-color: #5C5A56 !important;
+}
+
+.app-shell .crm-page-content button[aria-selected="true"],
+.master-portal-themed button[aria-selected="true"],
+.master-reports-screen button[aria-selected="true"] {
+  background-color: #5C5A56 !important;
+  border-color: #9A9892 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell .badge-paid,
+.app-shell .badge-success,
+.app-shell [style*="#EAF5EC"],
+.master-portal-themed [style*="#EAF5EC"],
+.master-reports-screen [style*="#EAF5EC"] {
+  background-color: #526458 !important;
+  border-color: #718276 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell [style*="#FFF5E5"],
+.master-portal-themed [style*="#FFF5E5"],
+.master-reports-screen [style*="#FFF5E5"] {
+  background-color: #74664E !important;
+  border-color: #95866A !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell [style*="#FEF2F2"],
+.master-portal-themed [style*="#FEF2F2"],
+.master-reports-screen [style*="#FEF2F2"] {
+  background-color: #755452 !important;
+  border-color: #92706E !important;
+  color: #FFFFFF !important;
+}
+
+.brand-login-shell > div:not([data-preserve-brand-surface]) {
+  background: linear-gradient(155deg, rgba(255, 253, 250, 0.50) 0%, rgba(244, 229, 214, 0.34) 45%, rgba(226, 203, 181, 0.42) 82%, rgba(246, 234, 222, 0.46) 100%) !important;
+  border-color: rgba(255, 253, 249, 0.74) !important;
+  color: #382519 !important;
+  box-shadow:
+    0 28px 54px -10px rgba(98, 68, 44, 0.24),
+    0 44px 88px -12px rgba(112, 80, 54, 0.18),
+    0 12px 24px -6px rgba(92, 62, 38, 0.12),
+    inset 0 2px 3px rgba(255, 255, 255, 0.80),
+    inset 0 -2px 4px rgba(255, 252, 245, 0.64),
+    inset 2px 0 4px rgba(255, 255, 255, 0.52),
+    inset -2px 0 4px rgba(245, 224, 198, 0.44) !important;
+}
+
+.brand-login-shell > div :is(h1,h2,h3,h4,p,label,span,small,strong) {
+  color: #382519 !important;
+}
+
+.brand-login-shell input:not([type="checkbox"]):not([type="radio"]),
+.brand-login-shell select,
+.brand-login-shell textarea {
+  background: linear-gradient(90deg, rgba(255, 252, 248, 0.44) 0%, rgba(238, 222, 207, 0.34) 100%) !important;
+  border-color: rgba(255, 253, 250, 0.76) !important;
+  color: #382519 !important;
+}
+
+.brand-login-shell input::placeholder { color: rgba(92, 68, 50, 0.56) !important; }
+
+.brand-login-shell button[type="submit"] {
+  background: linear-gradient(98deg, #F8E5C6 0%, #FCECD2 28%, #EBC388 68%, #DDA963 100%) !important;
+  border: 1px solid rgba(255, 248, 232, 0.78) !important;
+  color: #2B1A10 !important;
+}
+
+.app-shell .btn-primary:hover,
+.app-shell .btn-secondary:hover,
+.app-shell .tenant-accent-button:hover,
+.app-shell .concierge-action-btn-gold:hover,
+.master-portal-themed .btn-primary:hover,
+.master-reports-screen .btn-primary:hover {
+  background: #5C5A56 !important;
+}
+
+.app-shell [aria-selected="true"]:not([role="option"]),
+.app-shell [data-state="active"],
+.app-shell .tab-active {
+  background-color: #5C5A56 !important;
+  border-color: #77746F !important;
+  color: #FFFFFF !important;
+}
+
+.master-portal-themed,
+.master-reports-screen {
+  background: #353432 !important;
+  color: #FFFFFF !important;
+}
+
+.master-portal-themed input:focus,
+.master-portal-themed select:focus,
+.master-portal-themed textarea:focus,
+.master-reports-screen input:focus,
+.master-reports-screen select:focus,
+.master-reports-screen textarea:focus,
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus {
+  border-color: #A5A39D !important;
+  outline: 3px solid rgba(213, 211, 207, .18) !important;
+}
+
+.app-shell [role="dialog"],
+.app-shell .modal-content,
+.app-shell .modal-card,
+.master-portal-themed [role="dialog"],
+.master-reports-screen [role="dialog"] {
+  background: #484744 !important;
+  border-color: #676560 !important;
+  color: #FFFFFF !important;
+}
+
+.app-shell [role="dialog"] :is(h1,h2,h3,h4,p,label,span,small,strong),
+.app-shell .modal-content :is(h1,h2,h3,h4,p,label,span,small,strong),
+.app-shell .modal-card :is(h1,h2,h3,h4,p,label,span,small,strong),
+.master-portal-themed [role="dialog"] :is(h1,h2,h3,h4,p,label,span,small,strong),
+.master-reports-screen [role="dialog"] :is(h1,h2,h3,h4,p,label,span,small,strong) {
+  color: #FFFFFF !important;
+}
+
+@media (max-width: 760px) {
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content,
+  .app-shell.app-branded:not(.dashboard-module-shell) .crm-page-content > .app-container {
+    background: #484744 !important;
+  }
+}
+
+/* Final dashboard glass overrides: keep the launcher cards visibly frosted after theme button rules. */
+.app-shell.dashboard-tiles-only .crm-workspace,
+.app-shell.dashboard-tiles-only .crm-page-content {
+  background:
+    linear-gradient(135deg, rgba(23, 22, 20, .48), rgba(62, 55, 46, .20)),
+    url('/studio-bg.png') center / cover fixed !important;
+}
+.app-shell.dashboard-tiles-only .crm-page-content > .app-container {
+  background: transparent !important;
+}
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border: 1px solid rgba(255, 255, 255, .30) !important;
+  background: rgba(47, 45, 42, .30) !important;
+  box-shadow: 0 24px 60px rgba(12, 11, 10, .30), inset 0 1px 0 rgba(255, 255, 255, .24) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+.app-shell.dashboard-tiles-only .admin-module-board {
+  border: 1px solid rgba(236, 239, 242, .32) !important;
+  background: linear-gradient(135deg, rgba(210, 214, 218, .16), rgba(34, 36, 39, .32)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 12px 30px rgba(0, 0, 0, .13) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+}
+.app-shell.dashboard-tiles-only .admin-module-board-header {
+  border: 1px solid rgba(236, 239, 242, .36) !important;
+  background: linear-gradient(110deg, rgba(205, 209, 214, .22), rgba(80, 83, 87, .18)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 8px 22px rgba(0, 0, 0, .10) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+}
+.app-shell.dashboard-tiles-only .admin-module-tiles {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile:hover {
+  border: 1px solid rgba(236, 239, 242, .36) !important;
+  background: linear-gradient(145deg, rgba(146, 150, 154, .58), rgba(57, 60, 64, .74)) !important;
+  color: #FFFFFF !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .42), inset 0 -1px 0 rgba(228, 232, 236, .12), 0 10px 24px rgba(8, 9, 11, .24) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+}
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255, 255, 255, .62) !important;
+  background: linear-gradient(145deg, rgba(183, 187, 191, .70), rgba(79, 82, 86, .82)) !important;
+}
+
+/* ==========================================================================
+   MAISON BEYOU OPTICAL GLASS LOGIN SCREEN (TARGET REFERENCE MATCH)
+   ========================================================================== */
+.brand-login-shell {
+  background:
+    radial-gradient(ellipse 52% 46% at 20% 16%, rgba(255, 252, 248, 0.78) 0%, rgba(255, 252, 248, 0) 72%),
+    radial-gradient(ellipse 48% 40% at 50% 62%, rgba(168, 132, 98, 0.18) 0%, rgba(168, 132, 98, 0) 74%),
+    linear-gradient(125deg, #F7EFE7 0%, #EADAC9 32%, #F4ECE2 54%, #E9D9C8 78%, #E2CFB9 100%) !important;
+  background-color: #EFE3D6 !important;
+}
+
+.luxury-login-ambient-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255, 254, 252, 0.58) 0%,
+      rgba(255, 252, 248, 0.22) 20%,
+      rgba(204, 174, 146, 0.30) 34%,
+      rgba(255, 252, 248, 0.56) 50%,
+      rgba(212, 184, 158, 0.28) 70%,
+      rgba(198, 168, 140, 0.34) 100%
+    ),
+    radial-gradient(ellipse 24% 32% at 37% 33%, rgba(255, 255, 255, 0.68) 0%, rgba(255, 255, 255, 0) 74%),
+    radial-gradient(ellipse 38% 24% at 51% 77%, rgba(118, 82, 50, 0.22) 0%, rgba(118, 82, 50, 0) 76%);
+}
+
+.brand-login-shell > div.login-glass-card,
+.brand-login-shell .login-glass-card,
+.luxury-glass-card {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 58px !important;
+  background:
+    radial-gradient(ellipse 72% 70% at 42% 36%, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0) 76%),
+    linear-gradient(
+      155deg,
+      rgba(255, 253, 250, 0.17) 0%,
+      rgba(242, 223, 203, 0.22) 42%,
+      rgba(190, 142, 101, 0.32) 84%,
+      rgba(246, 234, 222, 0.20) 100%
+    ),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 252, 246, 0.94) 36%, rgba(230, 189, 137, 0.58) 68%, rgba(255, 255, 255, 0.96) 100%) !important;
+  background-clip: padding-box, padding-box, border-box !important;
+  background-color: transparent !important;
+  backdrop-filter: blur(16px) saturate(138%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(138%) !important;
+  border: 2px solid transparent !important;
+  color: #382519 !important;
+  box-shadow:
+    0 28px 54px -10px rgba(98, 68, 44, 0.28),
+    0 44px 88px -12px rgba(112, 80, 54, 0.22),
+    0 12px 24px -6px rgba(92, 62, 38, 0.12),
+    0 0 22px rgba(255, 247, 233, 0.38),
+    inset 0 1px 2px rgba(255, 255, 255, 0.96),
+    inset 0 -3px 6px rgba(255, 252, 245, 0.88),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.36),
+    inset 0 0 0 4px rgba(255, 252, 244, 0.13),
+    inset 0 0 0 7px rgba(199, 147, 91, 0.10),
+    inset 0 -1px 0 rgba(217, 161, 80, 0.24),
+    inset 2px 0 6px rgba(255, 255, 255, 0.90),
+    inset -2px 0 6px rgba(245, 224, 198, 0.72) !important;
+}
+
+.luxury-glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 49px;
+  border: 1.5px solid rgba(255, 255, 252, 0.92);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.10) 12%, rgba(255, 255, 255, 0) 30%),
+    radial-gradient(ellipse 30% 24% at 13% 8%, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0) 8%, rgba(255, 255, 255, 0) 94%, rgba(248, 211, 154, 0.18) 100%),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.36) 0%, rgba(255, 255, 255, 0) 7%);
+  box-shadow:
+    inset 0 1.5px 5px rgba(255, 255, 255, 0.78),
+    inset 0 -1.5px 5px rgba(255, 248, 236, 0.66),
+    inset 18px 0 18px -14px rgba(255, 255, 255, 0.48),
+    inset -14px 0 18px -12px rgba(255, 228, 186, 0.40),
+    0 0 10px rgba(255, 242, 218, 0.22);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.luxury-glass-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: screen;
+  opacity: 0.72;
+  background:
+    /* Soft window reflections stay near the upper-left, as in the target. */
+    linear-gradient(135deg, rgba(255, 255, 255, 0.36) 0%, rgba(255, 255, 255, 0.14) 12%, rgba(255, 255, 255, 0.025) 23%, rgba(255, 255, 255, 0) 34%),
+    radial-gradient(ellipse 26% 22% at 14% 10%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.08) 48%, rgba(255, 255, 255, 0) 100%),
+    /* A fine, soft vertical reflection along the glass's left edge. */
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.72) 0%,
+      rgba(255, 255, 255, 0.26) 1.5%,
+      rgba(255, 255, 255, 0.02) 4%,
+      rgba(255, 255, 255, 0) 8%,
+      rgba(255, 255, 255, 0.14) 13%,
+      rgba(255, 255, 255, 0.03) 17%,
+      rgba(255, 255, 255, 0) 22%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.82) 0%,
+      rgba(255, 255, 255, 0.20) 1.8%,
+      rgba(255, 255, 255, 0) 5.5%,
+      rgba(255, 255, 255, 0) 94%,
+      rgba(255, 251, 242, 0.24) 97%,
+      rgba(255, 251, 242, 0.68) 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.66) 0%,
+      rgba(255, 255, 255, 0.14) 1.5%,
+      rgba(255, 255, 255, 0) 4.5%,
+      rgba(255, 255, 255, 0) 95%,
+      rgba(225, 174, 96, 0.14) 98%,
+      rgba(255, 248, 227, 0.72) 100%
+    ),
+    /* Subtle bottom internal caustic refraction rim */
+    linear-gradient(
+      0deg,
+      rgba(255, 252, 246, 0.78) 0%,
+      rgba(255, 252, 246, 0.26) 2%,
+      rgba(255, 252, 246, 0) 8%
+    ),
+    /* Warm champagne optical edge specular glints matching target reference */
+    radial-gradient(ellipse 18% 4% at 47% 0.6%, rgba(255, 250, 235, 0.88) 0%, rgba(255, 250, 235, 0) 100%),
+    radial-gradient(ellipse 16% 4.5% at 85% 0.8%, rgba(255, 248, 226, 0.90) 0%, rgba(255, 248, 226, 0) 100%),
+    radial-gradient(ellipse 3.8% 18% at 99.4% 42%, rgba(255, 245, 218, 0.92) 0%, rgba(255, 245, 218, 0) 100%),
+    radial-gradient(ellipse 18% 3.8% at 56% 99.4%, rgba(255, 246, 220, 0.90) 0%, rgba(255, 246, 220, 0) 100%);
+}
+
+.brand-login-shell > div:not([data-preserve-brand-surface]) > div:first-child {
+  width: auto;
+  margin-right: auto !important;
+  margin-left: auto !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.brand-login-shell > div :is(h1,h2,h3,h4,p,label,span,small,strong),
+.brand-login-shell > div:not([data-preserve-brand-surface]) :is(h1,h2,h3,h4,p,label,span,small,strong) {
+  color: #382519 !important;
+}
+
+.brand-login-shell input:not([type="checkbox"]):not([type="radio"]),
+.brand-login-shell select,
+.brand-login-shell textarea,
+.brand-login-shell > div:not([data-preserve-brand-surface]) input:not([type="checkbox"]):not([type="radio"]),
+.brand-login-shell .login-glass-card .login-phone-input {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 252, 248, 0.18) 0%,
+    rgba(238, 222, 207, 0.14) 100%
+  ) !important;
+  background-color: transparent !important;
+  border: 1.5px solid rgba(255, 253, 250, 0.88) !important;
+  color: #382519 !important;
+  box-shadow:
+    0 4px 12px rgba(112, 82, 56, 0.06),
+    inset 0 1px 3px rgba(128, 94, 64, 0.04),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.86) !important;
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.brand-login-shell .login-glass-card .login-phone-input:focus {
+  border-color: rgba(255, 253, 250, 0.92) !important;
+  box-shadow:
+    0 6px 16px rgba(112, 82, 56, 0.08),
+    0 0 0 3px rgba(213, 164, 107, 0.18),
+    inset 0 1px 2px rgba(132, 98, 68, 0.06) !important;
+}
+
+.brand-login-shell input::placeholder,
+.brand-login-shell > div:not([data-preserve-brand-surface]) input::placeholder,
+.brand-login-shell .login-glass-card .login-phone-input::placeholder {
+  color: rgba(88, 62, 44, 0.56) !important;
+}
+
+.brand-login-shell button[type="submit"],
+.brand-login-shell > div:not([data-preserve-brand-surface]) button[type="submit"],
+.brand-login-shell .login-glass-card button[type="submit"],
+.luxury-gold-button {
+  background: linear-gradient(
+    98deg,
+    #F5C271 0%,
+    #FFE0AC 34%,
+    #F4C477 68%,
+    #E4AA4C 100%
+  ) !important;
+  border: 1px solid rgba(255, 248, 232, 0.78) !important;
+  color: #2B1A10 !important;
+  box-shadow:
+    0 10px 22px -4px rgba(108, 72, 38, 0.26),
+    0 4px 8px -2px rgba(108, 72, 38, 0.14),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.75) !important;
+}
+
+.brand-login-shell .login-glass-card button[type="submit"]:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 14px 28px -6px rgba(112, 78, 46, 0.22),
+    0 6px 12px -2px rgba(112, 78, 46, 0.10),
+    inset 0 1px 1px rgba(255, 255, 255, 0.72) !important;
+}
+
+.brand-login-shell .login-glass-card button[type="submit"]:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.brand-login-shell .login-glass-card button[type="submit"] span {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: #2B1A10 !important;
+}
+
+/* The branch directory uses a light page surface, so keep its title dark. */
+.master-portal-themed.location-selection-screen.branch-selection-page-light h1 {
+  color: #302820 !important;
+}
+.brand-login-shell .login-glass-card .login-detected-account {
+  background: rgba(255, 251, 246, 0.54) !important;
+  border: 1.5px solid rgba(255, 252, 248, 0.84) !important;
+  box-shadow: 0 4px 14px rgba(140, 108, 78, 0.08) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.brand-login-shell .login-glass-card .login-detected-account > div:first-child {
+  background: rgba(213, 164, 107, 0.18) !important;
+  border: 1px solid rgba(184, 139, 74, 0.36) !important;
+  box-shadow: none !important;
+}
+.brand-login-shell .login-glass-card .login-detected-account > div:not(:first-child) > div:last-child {
+  color: #6E523B !important;
+}
+.brand-login-shell .login-glass-card .login-detected-account > div:not(:first-child) span:first-child {
+  color: #382519 !important;
+}
+.brand-login-shell .login-glass-card .login-detected-account span:nth-child(2) {
+  background: linear-gradient(135deg, #F6E6CE 0%, #E8CCA4 100%) !important;
+  color: #4A3622 !important;
+}
+
+/* The global CRM table theme is charcoal; the branch directory is warm glass. */
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table,
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table tbody,
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table tr,
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table th,
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table td {
+  background-color: transparent !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table thead tr {
+  background: linear-gradient(100deg, rgba(255,255,255,.70), rgba(226,185,136,.40)) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table tbody tr {
+  background: rgba(255,252,248,.25) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table tbody tr:nth-child(even) {
+  background: rgba(231,202,170,.22) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table tbody tr:hover {
+  background: rgba(255,255,255,.48) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table th {
+  color: #563a22 !important;
+  border-color: rgba(255,255,255,.82) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table td {
+  color: #563d2d !important;
+  border-color: rgba(255,255,255,.58) !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table td:nth-child(2) {
+  color: #412916 !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table td.directory-target-high {
+  color: #248058 !important;
+}
+
+.master-reports-screen .master-admin-reports-dashboard.is-directory-shell .embedded-location-selection .directory-branches-table td.directory-target-low {
+  color: #ad651d !important;
+}
+
+/* Dashboard launcher: match the login's warm optical glass and remove the room photo. */
+.app-shell.dashboard-tiles-only {
+  background:
+    radial-gradient(ellipse 58% 46% at 18% 12%, rgba(255,255,255,.88), transparent 74%),
+    radial-gradient(ellipse 52% 44% at 78% 76%, rgba(211,177,144,.10), transparent 75%),
+    linear-gradient(128deg, #fcf9f6 0%, #f5ece3 38%, #fbf7f2 62%, #f1e7dc 100%) !important;
+  background-color: #faf7f3 !important;
+}
+
+.app-shell.dashboard-tiles-only .crm-workspace,
+.app-shell.dashboard-tiles-only .crm-page-content {
+  background:
+    radial-gradient(ellipse 58% 46% at 18% 12%, rgba(255,255,255,.88), transparent 74%),
+    radial-gradient(ellipse 52% 44% at 78% 76%, rgba(211,177,144,.10), transparent 75%),
+    linear-gradient(128deg, #fcf9f6 0%, #f5ece3 38%, #fbf7f2 62%, #f1e7dc 100%) !important;
+}
+
+.app-shell.dashboard-tiles-only .crm-page-content > .app-container {
+  background: transparent !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border: 1px solid rgba(255,255,255,.74) !important;
+  border-radius: 30px !important;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.32), rgba(247,228,207,.20)),
+    rgba(255,250,244,.16) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    inset 0 0 0 1px rgba(211,167,119,.16),
+    0 24px 60px rgba(96,62,34,.14) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(145%);
+  backdrop-filter: blur(24px) saturate(145%);
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board {
+  border: 1px solid rgba(255,255,255,.82) !important;
+  border-radius: 26px !important;
+  background:
+    radial-gradient(ellipse 78% 58% at 17% 12%, rgba(255,255,255,.40), transparent 72%),
+    linear-gradient(145deg, rgba(255,253,249,.42), rgba(235,208,178,.24)),
+    rgba(255,250,244,.24) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 0 0 1px rgba(214,171,122,.24),
+    0 18px 42px rgba(97,63,35,.13) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header {
+  border: 1px solid rgba(255,255,255,.80) !important;
+  border-radius: 20px !important;
+  background: linear-gradient(115deg, rgba(255,255,255,.44), rgba(235,210,183,.24)) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.92), 0 8px 20px rgba(97,63,35,.08) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  backdrop-filter: blur(18px) saturate(145%);
+}
+
+.app-shell.dashboard-tiles-only .admin-module-brand {
+  border: 1px solid rgba(255,255,255,.88) !important;
+  border-radius: 16px !important;
+  background: rgba(255,251,246,.48) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 4px 14px rgba(107,75,47,.09) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile:hover {
+  border: 1px solid rgba(255,255,255,.90) !important;
+  border-radius: 20px !important;
+  background:
+    radial-gradient(ellipse 86% 62% at 20% 6%, rgba(255,255,255,.42), transparent 70%),
+    linear-gradient(145deg, rgba(255,253,249,.48), rgba(237,214,189,.30)),
+    rgba(255,250,244,.22) !important;
+  color: #442b19 !important;
+  text-shadow: 0 1px rgba(255,255,255,.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(210,166,117,.18),
+    0 10px 24px rgba(93,60,34,.10) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+  backdrop-filter: blur(20px) saturate(145%);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.98) !important;
+  background:
+    radial-gradient(ellipse 86% 62% at 20% 6%, rgba(255,255,255,.58), transparent 70%),
+    linear-gradient(145deg, rgba(255,253,249,.60), rgba(237,214,189,.38)),
+    rgba(255,250,244,.30) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(210,166,117,.24),
+    0 14px 28px rgba(93,60,34,.15) !important;
+  transform: translateY(-2px);
+}
+
+.app-shell.dashboard-tiles-only .admin-module-book,
+.app-shell.dashboard-tiles-only .admin-module-menu-button {
+  border: 1px solid rgba(255,255,255,.86) !important;
+  background: linear-gradient(110deg, #ffe1ac, #dba052) !important;
+  color: #442b19 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.92), 0 5px 14px rgba(93,60,34,.12) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-menu-button {
+  background: rgba(255,251,246,.42) !important;
+}
+
+@media (max-width: 700px) {
+  .app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+    border-radius: 24px !important;
+  }
+
+  .app-shell.dashboard-tiles-only .admin-module-board {
+    border-radius: 22px !important;
+  }
+
+  .app-shell.dashboard-tiles-only .admin-module-board .admin-module-tile {
+    border-radius: 17px !important;
+  }
+}
+
+/* Remove only the outer frame around the dashboard header and inner module panel. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-menu-button {
+  width: 38px !important;
+  height: 38px !important;
+  border: 1px solid rgba(255,255,255,.94) !important;
+  border-radius: 11px !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(235,203,166,.54)) !important;
+  color: #58391f !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(203,154,100,.20),
+    0 5px 13px rgba(95,62,34,.12) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(145%);
+  backdrop-filter: blur(16px) saturate(145%);
+  transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-menu-button:hover {
+  border-color: rgba(255,255,255,.98) !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(239,211,177,.70)) !important;
+  color: #472b16 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(203,154,100,.28),
+    0 7px 16px rgba(95,62,34,.16) !important;
+  transform: translateY(-1px);
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-menu-button:focus-visible {
+  outline: 2px solid #b77c36 !important;
+  outline-offset: 3px;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book {
+  border: 1px solid rgba(255,255,255,.94) !important;
+  border-radius: 11px !important;
+  background: linear-gradient(110deg, #ffe1ac 0%, #efc17b 52%, #dba052 100%) !important;
+  color: #442b19 !important;
+  font-weight: 650 !important;
+  text-shadow: 0 1px rgba(255,255,255,.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 0 0 1px rgba(203,154,100,.20),
+    0 5px 13px rgba(95,62,34,.13) !important;
+  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book:hover {
+  border-color: rgba(255,255,255,.98) !important;
+  background: linear-gradient(110deg, #ffe8bd 0%, #f3cc8f 52%, #e0aa5d 100%) !important;
+  color: #382313 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(203,154,100,.26),
+    0 7px 17px rgba(95,62,34,.17) !important;
+  transform: translateY(-1px);
+}
+
+/* Join the dashboard header and module area into one continuous glass panel. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  width: min(1100px, 92vw) !important;
+  margin: 0 auto !important;
+  padding: 10px !important;
+  box-sizing: border-box !important;
+  border: 1px solid rgba(255,255,255,.88) !important;
+  border-radius: 30px !important;
+  background:
+    radial-gradient(ellipse 76% 52% at 18% 8%, rgba(255,255,255,.42), transparent 74%),
+    linear-gradient(145deg, rgba(255,253,249,.38), rgba(236,211,182,.24)),
+    rgba(255,250,244,.20) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(214,171,122,.20),
+    0 22px 52px rgba(96,62,34,.14) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(148%) !important;
+  backdrop-filter: blur(24px) saturate(148%) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board-header {
+  min-height: 68px;
+  margin: 0 !important;
+  padding: 0 12px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255,255,255,.74) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board {
+  margin: 0 !important;
+  padding: 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+@media (max-width: 700px) {
+  .app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+    width: 100% !important;
+    padding: 8px !important;
+    border-radius: 24px !important;
+  }
+
+  .app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board-header {
+    padding: 0 8px !important;
+  }
+
+  .app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board {
+    padding: 8px !important;
+  }
+}
+
+/* Use the same pale glass finish for both dashboard header controls. */
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book,
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book:hover {
+  border: 1px solid rgba(255,255,255,.94) !important;
+  border-radius: 11px !important;
+  background: linear-gradient(145deg, rgba(255,255,255,.78), rgba(235,203,166,.54)) !important;
+  color: #58391f !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(203,154,100,.20),
+    0 5px 13px rgba(95,62,34,.12) !important;
+  transform: none;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book:hover {
+  background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(239,211,177,.70)) !important;
+  color: #472b16 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    inset 0 0 0 1px rgba(203,154,100,.28),
+    0 7px 16px rgba(95,62,34,.16) !important;
+  transform: translateY(-1px);
+}
+
+/* Make module buttons feel seated in one continuous optical-glass surface. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tiles {
+  gap: 10px !important;
+  padding: 10px !important;
+  border: 0 !important;
+  border-radius: 20px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border: 1px solid rgba(255,255,255,.48) !important;
+  border-radius: 17px !important;
+  background: rgba(255,252,247,.10) !important;
+  color: #442b19 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.74),
+    inset 0 0 0 1px rgba(213,170,122,.10) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  transform: none;
+  transition: border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.82) !important;
+  background: rgba(255,248,237,.30) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 0 0 1px rgba(213,170,122,.22),
+    0 5px 14px rgba(93,60,34,.08) !important;
+}
+
+/* Match the login card's richer optical glass, warm refraction, and double rim. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  position: relative !important;
+  isolation: isolate;
+  border: 1.5px solid rgba(255,255,255,.96) !important;
+  border-radius: 34px !important;
+  background:
+    radial-gradient(ellipse 56% 46% at 88% 72%, rgba(199,147,91,.28), transparent 78%),
+    radial-gradient(ellipse 70% 62% at 16% 8%, rgba(255,255,255,.80), transparent 76%),
+    linear-gradient(155deg, rgba(255,253,250,.42) 0%, rgba(242,223,203,.36) 44%, rgba(190,142,101,.25) 84%, rgba(246,234,222,.38) 100%),
+    rgba(255,250,244,.44) !important;
+  box-shadow:
+    0 28px 54px -10px rgba(98,68,44,.24),
+    0 44px 88px -12px rgba(112,80,54,.16),
+    0 0 22px rgba(255,247,233,.44),
+    inset 0 1px 2px rgba(255,255,255,.98),
+    inset 0 -3px 6px rgba(255,252,245,.88),
+    inset 0 0 0 1px rgba(255,255,255,.58),
+    inset 0 0 0 4px rgba(255,252,244,.15),
+    inset 0 0 0 7px rgba(199,147,91,.12),
+    inset 0 -1px 0 rgba(217,161,80,.25),
+    inset 2px 0 7px rgba(255,255,255,.90),
+    inset -2px 0 7px rgba(245,224,198,.75) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(148%) !important;
+  backdrop-filter: blur(20px) saturate(148%) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  z-index: 0;
+  border: 1.5px solid rgba(255,255,252,.88);
+  border-radius: 26px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.25), rgba(255,255,255,0) 28%),
+    linear-gradient(90deg, rgba(255,255,255,.22), transparent 9%, transparent 92%, rgba(248,211,154,.13));
+  box-shadow:
+    inset 0 1.5px 5px rgba(255,255,255,.72),
+    inset 0 -1.5px 5px rgba(255,248,236,.60),
+    inset -14px 0 18px -12px rgba(255,228,186,.34);
+  pointer-events: none;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > * {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.72) !important;
+  background:
+    radial-gradient(ellipse 76% 54% at 18% 8%, rgba(255,255,255,.36), transparent 76%),
+    linear-gradient(145deg, rgba(255,253,249,.24), rgba(226,185,136,.20)),
+    rgba(255,249,239,.18) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 0 0 1px rgba(213,170,122,.16),
+    0 5px 14px rgba(93,60,34,.055) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.94) !important;
+  background:
+    radial-gradient(ellipse 76% 54% at 18% 8%, rgba(255,255,255,.48), transparent 76%),
+    linear-gradient(145deg, rgba(255,253,249,.34), rgba(226,185,136,.28)),
+    rgba(255,249,239,.24) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    inset 0 0 0 1px rgba(213,170,122,.22),
+    0 8px 18px rgba(93,60,34,.10) !important;
+}
+
+@media (max-width: 700px) {
+  .app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace::before {
+    inset: 6px;
+    border-radius: 18px;
+  }
+}
+
+/* Keep the glass depth, but soften the thick double outlines. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.82) !important;
+  box-shadow:
+    0 24px 48px -10px rgba(98,68,44,.20),
+    0 38px 74px -12px rgba(112,80,54,.13),
+    0 0 18px rgba(255,247,233,.38),
+    inset 0 1px 2px rgba(255,255,255,.96),
+    inset 0 -2px 5px rgba(255,252,245,.72),
+    inset 0 0 0 1px rgba(255,255,255,.24),
+    inset 2px 0 5px rgba(255,255,255,.72),
+    inset -2px 0 5px rgba(245,224,198,.56) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace::before {
+  border-width: 1px;
+  border-color: rgba(255,255,252,.62);
+  box-shadow:
+    inset 0 1px 3px rgba(255,255,255,.56),
+    inset 0 -1px 3px rgba(255,248,236,.42),
+    inset -10px 0 14px -12px rgba(255,228,186,.22);
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.76) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.86),
+    inset 0 -1px 3px rgba(178,124,70,.12),
+    0 8px 18px rgba(94,60,34,.09) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.90) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 -1px 3px rgba(178,124,70,.16),
+    0 10px 20px rgba(94,60,34,.13) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner:hover {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.84) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.94),
+    inset 0 -2px 4px rgba(255,250,240,.60),
+    inset 0 0 0 1px rgba(255,255,255,.22),
+    inset -2px 0 6px rgba(255,230,196,.42),
+    0 10px 24px rgba(94,60,34,.11),
+    0 0 14px rgba(255,247,233,.38) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-brand {
+  border-width: 1px !important;
+  box-shadow:
+    0 8px 18px rgba(96,62,34,.12),
+    0 2px 5px rgba(255,255,255,.48),
+    inset 0 1px 2px rgba(255,255,255,.94),
+    inset 0 -1px 3px rgba(184,139,74,.10),
+    inset 0 0 0 1px rgba(255,255,255,.42) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book,
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-menu-button {
+  border-width: 1px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 -1px 2px rgba(184,139,74,.10),
+    0 4px 10px rgba(95,62,34,.10) !important;
+}
+
+/* Lift the logo capsule with bevel and depth while preserving its current colors. */
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-brand {
+  border-width: 1px !important;
+  border-style: solid !important;
+  box-shadow:
+    0 12px 24px rgba(96,62,34,.15),
+    0 3px 7px rgba(255,255,255,.58),
+    inset 0 2px 2px rgba(255,255,255,.98),
+    inset 0 -2px 5px rgba(184,139,74,.14),
+    inset 0 0 0 1px rgba(255,255,255,.70),
+    inset 0 0 0 3px rgba(255,252,244,.10) !important;
+  transform: perspective(700px) rotateX(.8deg);
+}
+
+/* Let the dashboard page end with its content instead of a full-viewport blank tail. */
+.app-shell.dashboard-tiles-only,
+.app-shell.dashboard-tiles-only .crm-workspace,
+.app-shell.dashboard-tiles-only .crm-page-content {
+  min-height: auto !important;
+}
+
+.app-shell.dashboard-tiles-only .crm-page-content > .app-container {
+  padding-bottom: 10px !important;
+}
+
+/* Give Today's Overview a distinct warm-glass face above the lighter page. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner:hover {
+  border: 1.5px solid rgba(255,255,255,.94) !important;
+  border-radius: 21px !important;
+  background:
+    radial-gradient(ellipse 42% 58% at 12% 4%, rgba(255,255,255,.70), transparent 78%),
+    radial-gradient(ellipse 42% 82% at 92% 100%, rgba(194,132,72,.30), transparent 78%),
+    linear-gradient(120deg, rgba(255,252,246,.66) 0%, rgba(244,218,185,.68) 52%, rgba(219,171,116,.56) 100%),
+    rgba(255,247,236,.48) !important;
+  color: #482b16 !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.98),
+    inset 0 -2px 5px rgba(255,250,240,.76),
+    inset 0 0 0 1px rgba(255,255,255,.54),
+    inset 0 0 0 4px rgba(255,251,243,.13),
+    inset 0 0 0 6px rgba(194,140,86,.12),
+    inset -2px 0 8px rgba(255,230,196,.60),
+    0 12px 28px rgba(94,60,34,.13),
+    0 0 18px rgba(255,247,233,.48) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(160%) !important;
+  backdrop-filter: blur(24px) saturate(160%) !important;
+  transform: none;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner:hover {
+  border-color: rgba(255,255,255,.99) !important;
+  background:
+    radial-gradient(ellipse 42% 58% at 12% 4%, rgba(255,255,255,.78), transparent 78%),
+    radial-gradient(ellipse 42% 82% at 92% 100%, rgba(194,132,72,.35), transparent 78%),
+    linear-gradient(120deg, rgba(255,252,246,.76) 0%, rgba(244,218,185,.75) 52%, rgba(219,171,116,.64) 100%),
+    rgba(255,247,236,.56) !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.99),
+    inset 0 -2px 5px rgba(255,250,240,.82),
+    inset 0 0 0 1px rgba(255,255,255,.60),
+    inset 0 0 0 4px rgba(255,251,243,.16),
+    inset 0 0 0 6px rgba(194,140,86,.15),
+    inset -2px 0 8px rgba(255,230,196,.68),
+    0 15px 32px rgba(94,60,34,.16),
+    0 0 20px rgba(255,247,233,.54) !important;
+  transform: translateY(-1px);
+}
+
+/* Apply the Overview tile's raised 3D champagne-glass finish to every module card. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border: 1.5px solid rgba(255,255,255,.96) !important;
+  border-radius: 19px !important;
+  background:
+    radial-gradient(ellipse 42% 58% at 12% 4%, rgba(255,255,255,.66), transparent 78%),
+    radial-gradient(ellipse 42% 82% at 92% 100%, rgba(194,132,72,.28), transparent 78%),
+    linear-gradient(120deg, rgba(255,252,246,.62) 0%, rgba(244,218,185,.62) 52%, rgba(219,171,116,.50) 100%),
+    rgba(255,247,236,.46) !important;
+  color: #482b16 !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.98),
+    inset 0 -2px 5px rgba(255,250,240,.76),
+    inset 0 0 0 1px rgba(255,255,255,.56),
+    inset 0 0 0 4px rgba(255,251,243,.13),
+    inset 0 0 0 6px rgba(194,140,86,.12),
+    inset -2px 0 8px rgba(255,230,196,.58),
+    0 12px 26px rgba(94,60,34,.12),
+    0 0 16px rgba(255,247,233,.42) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(158%) !important;
+  backdrop-filter: blur(22px) saturate(158%) !important;
+  text-shadow: 0 1px rgba(255,255,255,.40);
+  transform: none;
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.99) !important;
+  background:
+    radial-gradient(ellipse 42% 58% at 12% 4%, rgba(255,255,255,.75), transparent 78%),
+    radial-gradient(ellipse 42% 82% at 92% 100%, rgba(194,132,72,.34), transparent 78%),
+    linear-gradient(120deg, rgba(255,252,246,.72) 0%, rgba(244,218,185,.70) 52%, rgba(219,171,116,.60) 100%),
+    rgba(255,247,236,.54) !important;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.99),
+    inset 0 -2px 5px rgba(255,250,240,.82),
+    inset 0 0 0 1px rgba(255,255,255,.62),
+    inset 0 0 0 4px rgba(255,251,243,.16),
+    inset 0 0 0 6px rgba(194,140,86,.15),
+    inset -2px 0 8px rgba(255,230,196,.66),
+    0 16px 32px rgba(94,60,34,.18),
+    0 0 20px rgba(255,247,233,.52) !important;
+  transform: translateY(-2px);
+}
+
+/* Final edge tuning: reduce the white rings without losing the glass bevel. */
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.78) !important;
+  box-shadow:
+    0 24px 48px -10px rgba(98,68,44,.20),
+    0 38px 74px -12px rgba(112,80,54,.13),
+    0 0 18px rgba(255,247,233,.34),
+    inset 0 1px 2px rgba(255,255,255,.94),
+    inset 0 -2px 5px rgba(255,252,245,.66),
+    inset 0 0 0 1px rgba(255,255,255,.20),
+    inset 2px 0 5px rgba(255,255,255,.68),
+    inset -2px 0 5px rgba(245,224,198,.50) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace::before {
+  border-width: 1px;
+  border-color: rgba(255,255,252,.54);
+  box-shadow:
+    inset 0 1px 3px rgba(255,255,255,.50),
+    inset 0 -1px 3px rgba(255,248,236,.36),
+    inset -10px 0 14px -12px rgba(255,228,186,.18);
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.74) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.84),
+    inset 0 -1px 3px rgba(178,124,70,.10),
+    0 8px 18px rgba(94,60,34,.085) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-tile:hover {
+  border-color: rgba(255,255,255,.90) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    inset 0 -1px 3px rgba(178,124,70,.14),
+    0 10px 20px rgba(94,60,34,.12) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner,
+.app-shell.dashboard-tiles-only .admin-dashboard-workspace.is-admin-workspace > .admin-module-board .admin-module-banner:hover {
+  border-width: 1px !important;
+  border-color: rgba(255,255,255,.82) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    inset 0 -2px 4px rgba(255,250,240,.56),
+    inset 0 0 0 1px rgba(255,255,255,.20),
+    inset -2px 0 6px rgba(255,230,196,.38),
+    0 10px 24px rgba(94,60,34,.10),
+    0 0 14px rgba(255,247,233,.34) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-brand {
+  border-width: 1px !important;
+  box-shadow:
+    0 8px 18px rgba(96,62,34,.11),
+    0 2px 5px rgba(255,255,255,.44),
+    inset 0 1px 2px rgba(255,255,255,.90),
+    inset 0 -1px 3px rgba(184,139,74,.09),
+    inset 0 0 0 1px rgba(255,255,255,.36) !important;
+}
+
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-book,
+.app-shell.dashboard-tiles-only .admin-module-board-header .admin-module-header-actions > .admin-module-menu-button {
+  border-width: 1px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    inset 0 -1px 2px rgba(184,139,74,.09),
+    0 4px 10px rgba(95,62,34,.09) !important;
+}

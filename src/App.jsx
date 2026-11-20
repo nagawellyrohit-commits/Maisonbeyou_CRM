@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
+import CrmSidebar from './components/CrmSidebar';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import NewVisitWizard from './components/NewVisitWizard';
@@ -57,6 +58,7 @@ export default function App() {
   const [pendingVisitorVisit, setPendingVisitorVisit] = useState(null);
   const [visitorIdentityVersion, setVisitorIdentityVersion] = useState(0);
   const [requestedDashboardSection, setRequestedDashboardSection] = useState(null);
+  const [dashboardNavSection, setDashboardNavSection] = useState('visits');
   
   // Navigation contextual state
   const [selectedClientId, setSelectedClientId] = useState(null);
@@ -264,6 +266,13 @@ export default function App() {
   }, [currentUser?.user_id, currentUser?.role, selectedLocation?.location_id, visitorIdentityVersion]);
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'master_admin';
+  const showCrmSidebar = Boolean(currentUser) && currentUser.role !== 'visitor' && activeTab !== 'new-visit' && !(activeTab === 'appointments' && showAppointmentBooking);
+  const navigateDashboardSection = (section) => {
+    setDashboardNavSection(section);
+    setRequestedDashboardSection(section);
+    setShowAppointmentBooking(false);
+    setActiveTab('dashboard');
+  };
 
   const userHasAnyDashboardModule = currentUser && ['dashboard', 'visits', 'visitor_intake', 'clients', 'services', 'team', 'membership', 'reports'].some(module => canAccessModule(currentUser, module));
   const tabPermission = {
@@ -381,14 +390,13 @@ export default function App() {
   }
 
   return (
-    <div className={`app-shell app-branded${activeTab === 'dashboard' ? ' dashboard-branding-active' : ''}`} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', ...brandingCssVariables(activeBranding) }}>
+    <div className={`app-shell app-branded${activeTab === 'dashboard' ? ' dashboard-branding-active' : ''}${activeTab === 'dashboard' && ['admin', 'master_admin'].includes(currentUser?.role) ? ' dashboard-module-shell' : ''}${activeTab === 'dashboard' && ['admin', 'master_admin'].includes(currentUser?.role) && dashboardNavSection === 'visits' ? ' dashboard-tiles-only' : ''}`} style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', ...brandingCssVariables(activeBranding) }}>
       <Navbar
+        isCrmShell={showCrmSidebar}
         activeTab={activeTab}
         activeLocation={selectedLocation}
         onNavigateDashboardSection={(section) => {
-          setRequestedDashboardSection(section);
-          setShowAppointmentBooking(false);
-          setActiveTab('dashboard');
+          navigateDashboardSection(section);
         }}
         branding={activeBranding}
         onSwitchLocation={handleSwitchLocation}
@@ -435,6 +443,18 @@ export default function App() {
         }}
       />
 
+      <div className={`crm-workspace${showCrmSidebar ? ' has-sidebar' : ''}`}>
+      {showCrmSidebar && (
+        <CrmSidebar
+          currentUser={currentUser}
+          activeLocation={selectedLocation}
+          activeTab={activeTab}
+          dashboardSection={dashboardNavSection}
+          setActiveTab={setActiveTab}
+          onNavigateDashboardSection={navigateDashboardSection}
+        />
+      )}
+      <div className="crm-page-content">
       <ErrorBoundary>
         <main
           key={selectedLocation?.location_id || 'unscoped-session'}
@@ -472,6 +492,7 @@ export default function App() {
             onNavigateTab={(tab) => { if (tab === 'appointments') setShowAppointmentBooking(false); setActiveTab(tab); }}
             requestedSection={requestedDashboardSection}
             onRequestedSectionHandled={() => setRequestedDashboardSection(null)}
+            onActiveSectionChange={setDashboardNavSection}
           />
         )}
 
@@ -582,6 +603,8 @@ export default function App() {
         )}
       </main>
       </ErrorBoundary>
+      </div>
+      </div>
 
       {activeTab === 'appointments' && !showAppointmentBooking && isAdmin && selectedLocation?.location_id && (
         <BrandingCustomizer

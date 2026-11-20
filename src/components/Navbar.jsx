@@ -5,7 +5,7 @@ import { canAccessModule } from '../utils/permissions';
 import logoImg from '../assets/logo.png';
 import brandLogoImg from '../assets/brand-logo.png';
 
-export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onEditClientDetails, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, onNavigateDashboardSection, branding }) {
+export default function Navbar({ activeTab, setActiveTab, currentUser, setCurrentUser, activeVisitClient, onEditClientDetails, onResetVisit, cartCount = 0, cartVisible = false, onOpenCart, activeLocation, onSwitchLocation, onNavigateDashboardSection, branding, isCrmShell = false }) {
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [showDashboardConfirm, setShowDashboardConfirm] = useState(false);
   const [isClientMenuOpen, setIsClientMenuOpen] = useState(false);
@@ -820,7 +820,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
   };
 
   return (
-    <header style={{
+    <header className={isCrmShell ? 'crm-topbar' : undefined} style={{
       background: '#FFFFFF',
       borderBottom: '1px solid var(--border-color)',
       position: 'sticky',
@@ -830,7 +830,7 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
     }}>
       <div className="header-container">
         {/* Brand identity */}
-        <div style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: '14px' }}>
+        <div className={isCrmShell ? 'crm-topbar-brand' : undefined} style={{ display: 'flex', alignItems: 'center', minWidth: 0, gap: '14px' }}>
           <div 
             onClick={() => {
               if (currentUser?.role === 'visitor') {
@@ -860,6 +860,15 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, setCurren
 
         {/* Right side info & user controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+          {isCrmShell && activeTab !== 'appointments' && activeTab !== 'new-visit' && currentUser?.role !== 'visitor' && (
+            <button
+              type="button"
+              className="crm-header-booking"
+              onClick={() => setActiveTab('appointments')}
+            >
+              Book Appointment
+            </button>
+          )}
           {/* Master Admin: Switch Studio button */}
           {false && isMasterAdmin && onSwitchLocation && (
             <button

@@ -2277,7 +2277,7 @@ textarea {
 }
 
 .login-phone-input::placeholder {
-  color: #B8B2AA;
+  color: rgba(92, 68, 50, 0.58);
   opacity: 1;
 }
 
@@ -2458,7 +2458,7 @@ textarea {
 
 .brand-login-shell p,
 .brand-login-shell label {
-  color: var(--tenant-login-subtext, var(--tenant-subtext, #796B5D)) !important;
+  color: #382519 !important;
 }
 
 /* Master-only Studio Management and All Branches appearance. */
